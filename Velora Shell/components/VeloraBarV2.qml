@@ -14,17 +14,18 @@ Item {
     property var theme: null
     property alias panelMaskItem: panelSurface
     readonly property bool rightSoft: theme && theme.barPosition === "right"
+    readonly property bool rightDark: rightSoft && theme && theme.themeMode === "dark"
     readonly property int cornerRadius: rightSoft ? 24 : 20
     readonly property bool pywalStyle: theme && theme.themeId === "pywal16"
     readonly property bool neon: pywalStyle && theme.themeMode === "dark"
-    readonly property color ink: rightSoft && pywalStyle && theme ? theme.textPrimary : (rightSoft ? Qt.rgba(244 / 255, 234 / 255, 247 / 255, 0.96) : (theme ? theme.textPrimary : Qt.rgba(0.46, 0.37, 0.54, 0.82)))
-    readonly property color inkSoft: rightSoft && pywalStyle && theme ? theme.textSecondary : (rightSoft ? Qt.rgba(201 / 255, 182 / 255, 210 / 255, 0.82) : (theme ? theme.textSecondary : Qt.rgba(0.58, 0.48, 0.64, 0.62)))
-    readonly property color pink: rightSoft && pywalStyle && theme ? theme.accentPrimary : (rightSoft ? Qt.rgba(240 / 255, 143 / 255, 194 / 255, 0.96) : (theme ? (pywalStyle ? theme.accentSecondary : theme.accentPrimary) : Qt.rgba(0.88, 0.45, 0.66, 0.86)))
-    readonly property color lilac: rightSoft && pywalStyle && theme ? theme.accentSecondary : (rightSoft ? Qt.rgba(218 / 255, 189 / 255, 244 / 255, 0.84) : (theme ? (pywalStyle ? theme.accentPrimary : theme.accentSecondary) : Qt.rgba(0.58, 0.47, 0.76, 0.78)))
+    readonly property color ink: theme ? theme.textPrimary : Qt.rgba(0.46, 0.37, 0.54, 0.82)
+    readonly property color inkSoft: theme ? theme.textSecondary : Qt.rgba(0.58, 0.48, 0.64, 0.62)
+    readonly property color pink: theme ? (pywalStyle ? theme.accentSecondary : theme.accentPrimary) : Qt.rgba(0.88, 0.45, 0.66, 0.86)
+    readonly property color lilac: theme ? (pywalStyle ? theme.accentPrimary : theme.accentSecondary) : Qt.rgba(0.58, 0.47, 0.76, 0.78)
     readonly property bool popupAttached: activePopupType.length > 0
-    readonly property color glass: rightSoft && pywalStyle && theme ? theme.mix(theme.surfaceSidebar, Qt.rgba(28 / 255, 24 / 255, 38 / 255, 1), 0.32, Math.max(0.72, theme.sidebarOpacity)) : (rightSoft ? Qt.rgba(28 / 255, 24 / 255, 38 / 255, 0.82) : (theme ? theme.surfaceSidebar : Qt.rgba(1, 0.988, 0.997, 0.66)))
-    readonly property color card: rightSoft && pywalStyle && theme ? theme.mix(theme.surfaceCard, Qt.rgba(62 / 255, 52 / 255, 76 / 255, 1), 0.30, Math.max(0.46, theme.cardOpacity)) : (rightSoft ? Qt.rgba(62 / 255, 52 / 255, 76 / 255, 0.50) : (theme ? theme.surfaceCard : Qt.rgba(1, 1, 1, 0.70)))
-    readonly property color borderSoft: rightSoft && pywalStyle && theme ? theme.withAlpha(theme.sidebarBorderGlow, Math.min(0.30, Math.max(0.16, theme.sidebarBorderGlow.a))) : (rightSoft ? Qt.rgba(255 / 255, 210 / 255, 235 / 255, 0.22) : (theme ? theme.borderSoft : Qt.rgba(1, 1, 1, 0.82)))
+    readonly property color glass: theme ? theme.surfaceSidebar : Qt.rgba(1, 0.988, 0.997, 0.66)
+    readonly property color card: theme ? theme.surfaceCard : Qt.rgba(1, 1, 1, 0.70)
+    readonly property color borderSoft: theme ? (pywalStyle ? theme.withAlpha(theme.sidebarBorderGlow, Math.min(0.30, Math.max(0.16, theme.sidebarBorderGlow.a))) : theme.borderSoft) : Qt.rgba(1, 1, 1, 0.82)
     readonly property string uiFont: "Noto Sans CJK JP"
     readonly property string monoFont: "JetBrainsMono Nerd Font"
     readonly property int notificationCount: Number(NotificationServer.trackedCount || 0)
@@ -503,7 +504,7 @@ Item {
         height: panelSurface.height - 8
         radius: root.cornerRadius + 2
         color: root.rightSoft
-            ? Qt.rgba(0, 0, 0, root.popupAttached ? 0 : 0.16)
+            ? root.alpha(root.theme ? root.theme.shadowColor : Qt.rgba(0, 0, 0, 1), root.popupAttached ? 0 : (root.rightDark ? 0.16 : 0.08))
             : root.alpha(root.theme ? root.theme.shadowColor : Qt.rgba(0.56, 0.36, 0.52, 1), root.popupAttached ? 0 : (root.pywalStyle && root.theme ? 0.035 + root.theme.generalGlow * 0.02 : 0.07))
     }
 
@@ -527,9 +528,9 @@ Item {
             radius: root.pywalStyle ? 34 : 34
             samples: root.pywalStyle ? 69 : 65
             horizontalOffset: 0
-            verticalOffset: root.rightSoft ? 8 : (root.pywalStyle ? 0 : 11)
+            verticalOffset: root.rightSoft ? 7 : (root.pywalStyle ? 0 : 11)
             color: root.rightSoft
-                ? Qt.rgba(0, 0, 0, root.popupAttached ? 0.04 : 0.22)
+                ? root.alpha(root.theme ? root.theme.shadowColor : Qt.rgba(0, 0, 0, 1), root.popupAttached ? 0.03 : (root.rightDark ? 0.20 : 0.11))
                 : root.pywalStyle && root.theme
                 ? root.alpha(root.theme.popupBorderGlow, root.theme.popupBorderGlow.a * (root.popupAttached ? 0.08 : 0.50))
                 : root.alpha(root.theme ? root.theme.shadowColor : Qt.rgba(0.38, 0.25, 0.42, 1), root.popupAttached ? 0.035 : 0.15)
@@ -553,7 +554,7 @@ Item {
             visible: !root.popupAttached
             border.width: 1
             border.color: root.rightSoft
-                ? Qt.rgba(1, 1, 1, 0.055)
+                ? (root.rightDark ? Qt.rgba(1, 1, 1, 0.055) : root.alpha(root.borderSoft, 0.30))
                 : root.pywalStyle && root.theme
                 ? root.alpha(root.theme.popupBorderGlow, root.theme.popupBorderGlow.a * (root.popupAttached ? 0.16 : 0.58))
                 : root.alpha(root.borderSoft, root.popupAttached ? 0.12 : 0.28)
@@ -908,7 +909,7 @@ Item {
     component Divider: Rectangle {
         height: 1
         radius: 1
-        color: root.rightSoft ? Qt.rgba(1, 1, 1, 0.08) : root.alpha(root.lilac, 0.22)
+        color: root.rightDark ? Qt.rgba(1, 1, 1, 0.08) : root.alpha(root.lilac, 0.22)
     }
 
     component WorkspaceButton: Rectangle {
@@ -1067,7 +1068,7 @@ Item {
         radius: Math.round(8 * root.uiScale)
         color: hovered ? root.alpha(root.card, 0.84) : root.alpha(root.card, 0.58)
         border.width: 1
-        border.color: root.rightSoft ? Qt.rgba(1, 1, 1, 0.14) : root.alpha(root.borderSoft, 0.76)
+        border.color: root.rightDark ? Qt.rgba(1, 1, 1, 0.14) : root.alpha(root.borderSoft, 0.76)
         layer.enabled: true
         layer.effect: DropShadow {
             transparentBorder: true
@@ -1229,7 +1230,9 @@ Item {
             samples: 33
             horizontalOffset: 0
             verticalOffset: 5
-            color: root.rightSoft ? Qt.rgba(0, 0, 0, 0.20) : root.alpha(root.theme ? root.theme.shadowColor : Qt.rgba(0.38, 0.25, 0.42, 1), 0.13)
+            color: root.rightSoft
+                ? root.alpha(root.theme ? root.theme.shadowColor : Qt.rgba(0, 0, 0, 1), root.rightDark ? 0.20 : 0.12)
+                : root.alpha(root.theme ? root.theme.shadowColor : Qt.rgba(0.38, 0.25, 0.42, 1), 0.13)
         }
 
         Image {

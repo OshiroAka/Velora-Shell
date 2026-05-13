@@ -357,6 +357,8 @@ install_runtime() {
       "$SOURCE_DIR/" "$INSTALL_DIR/"
   fi
 
+  log "runtime installed to: $INSTALL_DIR"
+
   if [ -d "$INSTALL_DIR/scripts" ]; then
     chmod +x "$INSTALL_DIR"/scripts/velora-* 2>/dev/null || true
   fi
@@ -511,12 +513,7 @@ start_shell() {
   fi
 
   stop_existing_shell
-
-  if [ "$INSTALL_DIR" = "$XDG_CONFIG_HOME/quickshell/$APP_NAME" ]; then
-    qs -d -c "$APP_NAME"
-  else
-    qs -p "$INSTALL_DIR" >/dev/null 2>&1 &
-  fi
+  qs -d -p "$INSTALL_DIR"
 }
 
 install_missing_dependencies

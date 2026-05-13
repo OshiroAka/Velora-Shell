@@ -24,9 +24,9 @@ QtObject {
     readonly property int paletteTransitionDuration: paletteAnimatedApply ? 560 : 260
     property string barPosition: "left"
     property bool desktopFrameEnabled: true
-    property real sidebarOpacity: 0.78
-    property real popupOpacity: 0.84
-    property real cardOpacity: 0.68
+    property real sidebarOpacity: 0.88
+    property real popupOpacity: 0.90
+    property real cardOpacity: 0.76
     property real generalGlow: 0.50
     property real sidebarBorderGlowLevel: 0.50
     property real popupBorderGlowLevel: 0.50
@@ -34,23 +34,23 @@ QtObject {
     property real textGlowLevel: 0.78
     property real borderHue: 0.55
 
-    property color surfaceBase: Qt.rgba(250 / 255, 246 / 255, 253 / 255, 0.72)
-    property color surfaceSidebar: Qt.rgba(248 / 255, 242 / 255, 252 / 255, 0.78)
-    property color surfacePopup: Qt.rgba(250 / 255, 246 / 255, 253 / 255, 0.84)
-    property color surfaceCard: Qt.rgba(1, 1, 1, 0.68)
-    property color surfaceInput: Qt.rgba(1, 1, 1, 0.54)
-    property color surfaceButton: Qt.rgba(1, 1, 1, 0.58)
+    property color surfaceBase: Qt.rgba(255 / 255, 250 / 255, 254 / 255, 0.86)
+    property color surfaceSidebar: Qt.rgba(255 / 255, 247 / 255, 253 / 255, 0.88)
+    property color surfacePopup: Qt.rgba(255 / 255, 250 / 255, 254 / 255, 0.90)
+    property color surfaceCard: Qt.rgba(1, 1, 1, 0.76)
+    property color surfaceInput: Qt.rgba(1, 1, 1, 0.64)
+    property color surfaceButton: Qt.rgba(1, 1, 1, 0.66)
     property color textPrimary: "#4d3f63"
     property color textSecondary: "#8d7ca3"
     property color textMuted: "#b7a9c7"
     property color accentPrimary: "#e8a6c8"
     property color accentSecondary: "#c894f2"
     property color accentTertiary: "#a8d8ff"
-    property color borderSoft: Qt.rgba(1, 1, 1, 0.65)
+    property color borderSoft: Qt.rgba(1, 1, 1, 0.78)
     property color borderActive: Qt.rgba(232 / 255, 166 / 255, 200 / 255, 0.78)
-    property color borderGlow: Qt.rgba(232 / 255, 166 / 255, 200 / 255, 0.26)
-    property color sidebarBorderGlow: Qt.rgba(232 / 255, 166 / 255, 200 / 255, 0.26)
-    property color popupBorderGlow: Qt.rgba(232 / 255, 166 / 255, 200 / 255, 0.26)
+    property color borderGlow: Qt.rgba(232 / 255, 166 / 255, 200 / 255, 0.18)
+    property color sidebarBorderGlow: Qt.rgba(232 / 255, 166 / 255, 200 / 255, 0.18)
+    property color popupBorderGlow: Qt.rgba(232 / 255, 166 / 255, 200 / 255, 0.18)
     property color buttonPrimaryBg: "#e8a6c8"
     property color buttonPrimaryText: "#ffffff"
     property color buttonPrimaryGlow: Qt.rgba(232 / 255, 166 / 255, 200 / 255, 0.22)
@@ -59,9 +59,9 @@ QtObject {
     property color activeBg: Qt.rgba(232 / 255, 166 / 255, 200 / 255, 0.35)
     property color activeText: "#ffffff"
     property color hoverBg: Qt.rgba(232 / 255, 166 / 255, 200 / 255, 0.16)
-    property color shadowColor: Qt.rgba(95 / 255, 70 / 255, 130 / 255, 0.13)
-    property color sidebarGlow: Qt.rgba(232 / 255, 166 / 255, 200 / 255, 0.16)
-    property color popupGlow: Qt.rgba(232 / 255, 166 / 255, 200 / 255, 0.14)
+    property color shadowColor: Qt.rgba(95 / 255, 70 / 255, 130 / 255, 0.10)
+    property color sidebarGlow: Qt.rgba(232 / 255, 166 / 255, 200 / 255, 0.10)
+    property color popupGlow: Qt.rgba(232 / 255, 166 / 255, 200 / 255, 0.10)
     property color textGlow: Qt.rgba(232 / 255, 166 / 255, 200 / 255, 0.12)
     property color iconGlow: Qt.rgba(232 / 255, 166 / 255, 200 / 255, 0.18)
     property int glassBlur: 18
@@ -471,23 +471,23 @@ QtObject {
         themeName = "Velora Default"
         themeMode = "light"
         themeNotice = ""
-        surfaceBase = Qt.rgba(250 / 255, 246 / 255, 253 / 255, 0.72)
-        surfaceSidebar = Qt.rgba(248 / 255, 242 / 255, 252 / 255, 0.78)
-        surfacePopup = Qt.rgba(250 / 255, 246 / 255, 253 / 255, 0.84)
-        surfaceCard = Qt.rgba(1, 1, 1, 0.68)
-        surfaceInput = Qt.rgba(1, 1, 1, 0.54)
-        surfaceButton = Qt.rgba(1, 1, 1, 0.58)
+        surfaceBase = Qt.rgba(255 / 255, 250 / 255, 254 / 255, 0.86)
+        surfaceSidebar = Qt.rgba(255 / 255, 247 / 255, 253 / 255, 0.88)
+        surfacePopup = Qt.rgba(255 / 255, 250 / 255, 254 / 255, 0.90)
+        surfaceCard = Qt.rgba(1, 1, 1, 0.76)
+        surfaceInput = Qt.rgba(1, 1, 1, 0.64)
+        surfaceButton = Qt.rgba(1, 1, 1, 0.66)
         textPrimary = "#4d3f63"
         textSecondary = "#8d7ca3"
         textMuted = "#b7a9c7"
         accentPrimary = "#e8a6c8"
         accentSecondary = "#c894f2"
         accentTertiary = "#a8d8ff"
-        borderSoft = Qt.rgba(1, 1, 1, 0.65)
+        borderSoft = Qt.rgba(1, 1, 1, 0.78)
         borderActive = Qt.rgba(232 / 255, 166 / 255, 200 / 255, 0.78)
-        borderGlow = Qt.rgba(232 / 255, 166 / 255, 200 / 255, 0.26)
-        sidebarBorderGlow = Qt.rgba(232 / 255, 166 / 255, 200 / 255, 0.26)
-        popupBorderGlow = Qt.rgba(232 / 255, 166 / 255, 200 / 255, 0.26)
+        borderGlow = Qt.rgba(232 / 255, 166 / 255, 200 / 255, 0.18)
+        sidebarBorderGlow = Qt.rgba(232 / 255, 166 / 255, 200 / 255, 0.18)
+        popupBorderGlow = Qt.rgba(232 / 255, 166 / 255, 200 / 255, 0.18)
         buttonPrimaryBg = "#e8a6c8"
         buttonPrimaryText = "#ffffff"
         buttonPrimaryGlow = Qt.rgba(232 / 255, 166 / 255, 200 / 255, 0.22)
@@ -496,9 +496,9 @@ QtObject {
         activeBg = Qt.rgba(232 / 255, 166 / 255, 200 / 255, 0.35)
         activeText = "#ffffff"
         hoverBg = Qt.rgba(232 / 255, 166 / 255, 200 / 255, 0.16)
-        shadowColor = Qt.rgba(95 / 255, 70 / 255, 130 / 255, 0.13)
-        sidebarGlow = Qt.rgba(232 / 255, 166 / 255, 200 / 255, 0.16)
-        popupGlow = Qt.rgba(232 / 255, 166 / 255, 200 / 255, 0.14)
+        shadowColor = Qt.rgba(95 / 255, 70 / 255, 130 / 255, 0.10)
+        sidebarGlow = Qt.rgba(232 / 255, 166 / 255, 200 / 255, 0.10)
+        popupGlow = Qt.rgba(232 / 255, 166 / 255, 200 / 255, 0.10)
         textGlow = Qt.rgba(232 / 255, 166 / 255, 200 / 255, 0.12)
         iconGlow = Qt.rgba(232 / 255, 166 / 255, 200 / 255, 0.18)
         glassBlur = 18
@@ -804,7 +804,7 @@ QtObject {
         property string pending: ""
 
         running: false
-        command: [root.stateScript, "opacity", "set", "0.78", "0.84", "0.68"]
+        command: [root.stateScript, "opacity", "set", "0.88", "0.90", "0.76"]
         onExited: {
             running = false
             if (pending.length > 0) {

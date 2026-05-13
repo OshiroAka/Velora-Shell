@@ -33,9 +33,11 @@ ShellRoot {
     readonly property int sidebarVerticalMargin: rightSoftLayout ? 20 : desktopFrameMargin
     readonly property int barPanelWidth: sidebarVisualWidth + sidebarOuterMargin
     readonly property int barReserveWidth: barPanelWidth
-    readonly property int desktopFrameMargin: rightSoftLayout ? 16 : 20
-    readonly property int desktopFrameRadius: rightSoftLayout ? 12 : 10
-    readonly property real desktopFrameMatteOpacity: rightSoftLayout ? 0.035 : Math.max(0, Math.min(0.2, veloraTheme.sidebarOpacity))
+    readonly property int desktopFrameMargin: rightSoftLayout ? 14 : 20
+    readonly property int desktopFrameRadius: 10
+    readonly property real desktopFrameMatteOpacity: rightSoftLayout
+        ? (veloraTheme.themeMode === "dark" ? 0.055 : Math.max(0.10, Math.min(0.18, veloraTheme.sidebarOpacity * 0.16)))
+        : Math.max(0, Math.min(0.18, veloraTheme.sidebarOpacity * 0.20))
     readonly property int popupFrameGap: rightSoftLayout ? 14 : 0
     readonly property string popupAttachSide: barOnRight ? "right" : "left"
     property real quickPopupCenterY: 300
@@ -80,14 +82,14 @@ ShellRoot {
 
     function desktopFrameBorderColor() {
         return rightSoftLayout
-            ? veloraTheme.alpha(veloraTheme.borderSoft, 0.18)
-            : veloraTheme.alpha(veloraTheme.popupBorderGlow, veloraTheme.themeMode === "dark" ? 0.46 : 0.34)
+            ? veloraTheme.alpha(veloraTheme.borderSoft, veloraTheme.themeMode === "dark" ? 0.16 : 0.24)
+            : veloraTheme.alpha(veloraTheme.popupBorderGlow, veloraTheme.themeMode === "dark" ? 0.42 : 0.26)
     }
 
     function desktopFrameHighlightColor() {
         return rightSoftLayout
-            ? veloraTheme.alpha(veloraTheme.borderSoft, 0.07)
-            : veloraTheme.alpha(veloraTheme.borderSoft, veloraTheme.themeMode === "dark" ? 0.30 : 0.46)
+            ? "transparent"
+            : veloraTheme.alpha(veloraTheme.borderSoft, veloraTheme.themeMode === "dark" ? 0.24 : 0.34)
     }
 
     function enterFocus() {
@@ -661,6 +663,7 @@ ShellRoot {
                 height: Math.max(0, desktopFrame.height - 2)
                 radius: Math.max(0, desktopFrame.radius - 1)
                 color: "transparent"
+                visible: !root.rightSoftLayout
                 border.width: 1
                 border.color: framePanel.frameHighlightColor
                 antialiasing: true
@@ -748,7 +751,7 @@ ShellRoot {
                 width: root.rightSoftLayout ? Math.max(0, parent.width - x) : root.barPanelWidth
                 height: parent.height
                 visible: veloraTheme.desktopFrameEnabled
-                color: root.rightSoftLayout ? veloraTheme.alpha(veloraTheme.surfaceSidebar, 0.14) : root.desktopFrameMatteColor()
+                color: root.desktopFrameMatteColor()
                 antialiasing: false
             }
 
@@ -761,7 +764,7 @@ ShellRoot {
                 y: root.desktopFrameMargin
                 width: Math.max(0, parent.width - railX)
                 height: Math.max(0, parent.height - root.desktopFrameMargin * 2)
-                visible: veloraTheme.desktopFrameEnabled && root.rightSoftLayout
+                visible: false
                 color: "transparent"
                 border.width: 1
                 border.color: veloraTheme.alpha(veloraTheme.sidebarBorderGlow, 0.20)
