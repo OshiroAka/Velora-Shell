@@ -1,0 +1,22 @@
+# Local runtime state
+themes/pywal16.json
+Velora Shell/themes/pywal16.json
+*.log
+*.tmp
+
+# Backups and generated files
+*.bak
+*.bak-*
+*.backup
+__pycache__/
+*.py[cod]
+
+# Local agent/editor folders
+.agents/
+.codex/
+.vscode/
+.idea/
+
+# Repository noise
+.DS_Store
+Thumbs.db

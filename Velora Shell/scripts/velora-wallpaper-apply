@@ -1,0 +1,141 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+kind="${1:-}"
+path="${2:-}"
+preview="${3:-}"
+transition="${4:-fade}"
+
+if [ $# -eq 1 ]; then
+  kind="static"
+  path="$1"
+  preview="$1"
+fi
+
+[ -n "$kind" ] || exit 2
+[ -n "$path" ] || exit 2
+
+theme_path="$path"
+[ -n "$preview" ] && [ -f "$preview" ] && theme_path="$preview"
+
+base_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+theme_state_script="${base_dir}/scripts/velora-theme-state"
+pywal_theme_script="${base_dir}/scripts/velora-pywal-theme.py"
+
+mkdir -p "$HOME/.cache/velora-shell"
+printf '%s|%s|%s\n' "$kind" "$path" "$preview" > "$HOME/.cache/velora-shell/current_wallpaper"
+
+kill_matching_processes() {
+  local pattern="$1"
+  local i
+
+  pkill -TERM -f "$pattern" >/dev/null 2>&1 || true
+  for i in 1 2 3 4 5; do
+    if ! pgrep -f "$pattern" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 0.08
+  done
+  pkill -KILL -f "$pattern" >/dev/null 2>&1 || true
+}
+
+stop_engine_wallpapers() {
+  kill_matching_processes '(^|/)linux-wallpaperengine([[:space:]]|$)'
+}
+
+stop_mpv_wallpapers() {
+  kill_matching_processes '(^|/)mpvpaper([[:space:]]|$)'
+}
+
+stop_static_wallpapers() {
+  awww kill >/dev/null 2>&1 || true
+  swww kill >/dev/null 2>&1 || true
+}
+
+apply_theme() {
+  local img="$1"
+
+  [ -f "$img" ] || return 0
+  if command -v wal >/dev/null 2>&1; then
+    wal -i "$img" -n -q >/dev/null 2>&1 || true
+  fi
+
+  if [ -x "$pywal_theme_script" ]; then
+    "$pywal_theme_script" >/dev/null 2>&1 || true
+  fi
+}
+
+static_wallpaper() {
+  local img="$1"
+
+  [ -f "$img" ] || exit 2
+
+  stop_engine_wallpapers
+  stop_mpv_wallpapers
+
+  if command -v awww >/dev/null 2>&1; then
+    if ! pgrep -x awww-daemon >/dev/null 2>&1; then
+      nohup awww-daemon -q >/dev/null 2>&1 &
+      sleep 0.15
+    fi
+    awww img "$img" --transition-type "$transition" --transition-duration 1 --transition-fps 60
+    swww kill >/dev/null 2>&1 || true
+  elif command -v swww >/dev/null 2>&1; then
+    if ! pgrep -x swww-daemon >/dev/null 2>&1; then
+      nohup swww-daemon >/dev/null 2>&1 &
+      sleep 0.20
+    fi
+    swww img "$img" --transition-type "$transition" --transition-duration 1
+    awww kill >/dev/null 2>&1 || true
+  else
+    exit 127
+  fi
+
+  apply_theme "$img"
+}
+
+live_wallpaper() {
+  local file="$1"
+  local monitors
+
+  [ -f "$file" ] || exit 2
+  apply_theme "$theme_path"
+
+  monitors="$(hyprctl monitors -j 2>/dev/null | python3 -c 'import json,sys; data=json.load(sys.stdin); print(" ".join(m.get("name","") for m in data if m.get("name")))' 2>/dev/null || true)"
+  [ -n "$monitors" ] || monitors="eDP-1"
+
+  stop_engine_wallpapers
+  stop_static_wallpapers
+  stop_mpv_wallpapers
+  sleep 0.10
+  : > /tmp/velora-mpvpaper.log
+  for mon in $monitors; do
+    nohup mpvpaper -o 'no-audio loop-file=inf panscan=1.0 video-unscaled=no hwdec=auto-safe scale=bilinear cscale=bilinear dscale=bilinear interpolation=no deband=no' "$mon" "$file" >>/tmp/velora-mpvpaper.log 2>&1 &
+  done
+}
+
+engine_wallpaper() {
+  local id="$1"
+
+  apply_theme "$theme_path"
+  stop_mpv_wallpapers
+  stop_static_wallpapers
+  stop_engine_wallpapers
+  sleep 0.18
+  nohup linux-wallpaperengine --screen-root eDP-1 --bg "$id" --scaling fill --clamp border --disable-mouse --disable-parallax >/tmp/velora-wallpaperengine.log 2>&1 &
+}
+
+case "$kind" in
+  static|bg)
+    static_wallpaper "$path"
+    ;;
+  live|mpv)
+    live_wallpaper "$path"
+    ;;
+  engine)
+    engine_wallpaper "$path"
+    ;;
+  *)
+    exit 2
+    ;;
+esac

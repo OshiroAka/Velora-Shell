@@ -1,0 +1,149 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/velora-shell"
+state_file="${state_dir}/theme"
+opacity_file="${state_dir}/opacity"
+glow_file="${state_dir}/glow"
+border_file="${state_dir}/border"
+layout_file="${state_dir}/layout"
+command="${1:-get}"
+
+case "$command" in
+  get)
+    if [[ -s "$state_file" ]]; then
+      cat "$state_file"
+    else
+      printf 'default\n'
+    fi
+    ;;
+  set)
+    theme="${2:-default}"
+    case "$theme" in
+      default|dark|pink|lavender|pywal16) ;;
+      *) theme="default" ;;
+    esac
+    mkdir -p "$state_dir"
+    printf '%s\n' "$theme" > "$state_file"
+    ;;
+  opacity)
+    subcommand="${2:-get}"
+    case "$subcommand" in
+      get)
+        if [[ -s "$opacity_file" ]]; then
+          cat "$opacity_file"
+        else
+          printf 'auto\n'
+        fi
+        ;;
+      set)
+        sidebar="${3:-auto}"
+        popup="${4:-auto}"
+        card="${5:-auto}"
+        mkdir -p "$state_dir"
+        printf '%s|%s|%s\n' "$sidebar" "$popup" "$card" > "$opacity_file"
+        ;;
+      reset)
+        rm -f "$opacity_file"
+        ;;
+      *)
+        printf 'usage: %s opacity get|set|reset [sidebar popup card]\n' "$0" >&2
+        exit 2
+        ;;
+    esac
+    ;;
+  glow)
+    subcommand="${2:-get}"
+    case "$subcommand" in
+      get)
+        if [[ -s "$glow_file" ]]; then
+          cat "$glow_file"
+        else
+          printf 'auto\n'
+        fi
+        ;;
+      set)
+        general="${3:-auto}"
+        sidebar_border="${4:-auto}"
+        popup_border="${5:-auto}"
+        icon="${6:-$general}"
+        text="${7:-auto}"
+        mkdir -p "$state_dir"
+        printf '%s|%s|%s|%s|%s\n' "$general" "$sidebar_border" "$popup_border" "$icon" "$text" > "$glow_file"
+        ;;
+      reset)
+        rm -f "$glow_file"
+        ;;
+      *)
+        printf 'usage: %s glow get|set|reset [general sidebar_border popup_border icon text]\n' "$0" >&2
+        exit 2
+        ;;
+    esac
+    ;;
+  border)
+    subcommand="${2:-get}"
+    case "$subcommand" in
+      get)
+        if [[ -s "$border_file" ]]; then
+          cat "$border_file"
+        else
+          printf 'auto\n'
+        fi
+        ;;
+      set)
+        mode="${3:-adapt}"
+        hue="${4:-0.55}"
+        case "$mode" in
+          adapt|manual) ;;
+          *) mode="adapt" ;;
+        esac
+        mkdir -p "$state_dir"
+        printf '%s|%s\n' "$mode" "$hue" > "$border_file"
+        ;;
+      reset)
+        rm -f "$border_file"
+        ;;
+      *)
+        printf 'usage: %s border get|set|reset [adapt|manual hue]\n' "$0" >&2
+        exit 2
+        ;;
+    esac
+    ;;
+  layout)
+    subcommand="${2:-get}"
+    case "$subcommand" in
+      get)
+        if [[ -s "$layout_file" ]]; then
+          cat "$layout_file"
+        else
+          printf 'left|1\n'
+        fi
+        ;;
+      set)
+        position="${3:-left}"
+        frame="${4:-1}"
+        case "$position" in
+          left|right) ;;
+          *) position="left" ;;
+        esac
+        case "$frame" in
+          1|true|yes|on) frame="1" ;;
+          *) frame="0" ;;
+        esac
+        mkdir -p "$state_dir"
+        printf '%s|%s\n' "$position" "$frame" > "$layout_file"
+        ;;
+      reset)
+        rm -f "$layout_file"
+        ;;
+      *)
+        printf 'usage: %s layout get|set|reset [left|right] [0|1]\n' "$0" >&2
+        exit 2
+        ;;
+    esac
+    ;;
+  *)
+    printf 'usage: %s get|set [theme] | opacity get|set|reset [sidebar popup card] | glow get|set|reset [general sidebar_border popup_border icon text] | border get|set|reset [adapt|manual hue] | layout get|set|reset [left|right] [0|1]\n' "$0" >&2
+    exit 2
+    ;;
+esac

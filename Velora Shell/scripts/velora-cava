@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+set -u
+
+bars="${1:-38}"
+case "$bars" in
+    ''|*[!0-9]*)
+        bars=38
+        ;;
+esac
+
+if [ "$bars" -lt 1 ]; then
+    bars=1
+elif [ "$bars" -gt 64 ]; then
+    bars=64
+fi
+
+runtime_dir="${XDG_RUNTIME_DIR:-/tmp}"
+config_dir="${runtime_dir}/velora-cava-${UID:-0}"
+
+if ! mkdir -p "$config_dir" 2>/dev/null || ! { : > "${config_dir}/.write-test-$$"; } 2>/dev/null; then
+    config_dir="${TMPDIR:-/tmp}/velora-cava-${UID:-0}"
+    mkdir -p "$config_dir" 2>/dev/null || config_dir="/tmp"
+else
+    rm -f "${config_dir}/.write-test-$$"
+fi
+
+config_path="${config_dir}/cava-${bars}-$$.conf"
+cava_pid=""
+
+cleanup() {
+    rm -f "$config_path"
+}
+
+terminate() {
+    if [ -n "$cava_pid" ]; then
+        kill "$cava_pid" 2>/dev/null || true
+        wait "$cava_pid" 2>/dev/null || true
+    fi
+
+    cleanup
+    exit 0
+}
+
+write_config() {
+    local method="$1"
+
+    cat > "$config_path" <<EOF
+[general]
+bars = ${bars}
+framerate = 26
+autosens = 1
+sensitivity = 140
+
+[input]
+method = ${method}
+source = auto
+
+[output]
+method = raw
+raw_target = /dev/stdout
+data_format = ascii
+ascii_max_range = 1000
+bar_delimiter = 59
+EOF
+}
+
+run_cava() {
+    cava -p "$config_path" 2>/dev/null &
+    cava_pid="$!"
+    wait "$cava_pid"
+    local status="$?"
+    cava_pid=""
+    return "$status"
+}
+
+trap cleanup EXIT
+trap terminate INT TERM
+
+if command -v cava >/dev/null 2>&1; then
+    for method in pipewire pulse; do
+        write_config "$method"
+        run_cava
+        sleep 0.2
+    done
+fi
+
+while true; do
+    line=""
+    for ((i = 0; i < bars; i += 1)); do
+        line="${line}0;"
+    done
+    printf '%s\n' "$line"
+    sleep 0.25
+done

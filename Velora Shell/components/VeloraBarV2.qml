@@ -1,0 +1,1550 @@
+import QtQuick
+import QtQuick.Layouts
+import QtQuick.Effects
+import Qt5Compat.GraphicalEffects
+import Quickshell
+import Quickshell.Hyprland
+import Quickshell.Io
+import Quickshell.Services.Notifications
+import Quickshell.Services.UPower
+
+Item {
+    id: root
+
+    property var theme: null
+    property alias panelMaskItem: panelSurface
+    readonly property int cornerRadius: 20
+    readonly property bool pywalStyle: theme && theme.themeId === "pywal16"
+    readonly property bool neon: pywalStyle && theme.themeMode === "dark"
+    readonly property color ink: theme ? theme.textPrimary : Qt.rgba(0.46, 0.37, 0.54, 0.82)
+    readonly property color inkSoft: theme ? theme.textSecondary : Qt.rgba(0.58, 0.48, 0.64, 0.62)
+    readonly property color pink: theme ? (pywalStyle ? theme.accentSecondary : theme.accentPrimary) : Qt.rgba(0.88, 0.45, 0.66, 0.86)
+    readonly property color lilac: theme ? (pywalStyle ? theme.accentPrimary : theme.accentSecondary) : Qt.rgba(0.58, 0.47, 0.76, 0.78)
+    readonly property bool popupAttached: activePopupType.length > 0
+    readonly property color glass: theme ? theme.surfaceSidebar : Qt.rgba(1, 0.988, 0.997, 0.66)
+    readonly property color card: theme ? theme.surfaceCard : Qt.rgba(1, 1, 1, 0.70)
+    readonly property color borderSoft: theme ? theme.borderSoft : Qt.rgba(1, 1, 1, 0.82)
+    readonly property string uiFont: "Noto Sans CJK JP"
+    readonly property string monoFont: "JetBrainsMono Nerd Font"
+    readonly property int notificationCount: Number(NotificationServer.trackedCount || 0)
+    readonly property real uiScale: Math.min(1.12, Math.max(1.0, height / 1032))
+    readonly property int stretchGap: Math.round(Math.min(14, Math.max(0, (height - 1032) / 7)))
+    property string clockText: Qt.formatDateTime(new Date(), "HH:mm")
+    property string dateText: formatJapaneseDate(new Date())
+    property var batteryDevice: null
+    property int volume: 70
+    property bool muted: false
+    property bool focusMode: false
+    property int focusIndex: 0
+    property string focusTarget: "clock"
+    property string activePopupType: ""
+    property real focusX: 0
+    property real focusY: 0
+    property real focusW: 42
+    property real focusH: 34
+    property var trailSegments: []
+    property string focusActionCommand: ""
+    property string hoverProbeType: ""
+    readonly property real focusPad: 4
+    readonly property real trailSpeed: 0.05
+    readonly property real trailTailDelay: 0.30
+    readonly property real trailFade: 0.12
+    readonly property real trailOpacity: 0.22
+    signal themeRequested(real centerY)
+    signal settingsRequested(real centerY)
+    signal quickPopupRequested(string popupType, real centerY)
+    signal quickPopupHovered(string popupType, real centerY)
+    signal quickPopupHoverEnded(string popupType)
+    signal moveFocusRequested(int dir)
+    signal exitFocusRequested()
+
+    function alpha(colorValue, opacity) {
+        return root.theme ? root.theme.alpha(colorValue, opacity) : Qt.rgba(colorValue.r, colorValue.g, colorValue.b, opacity)
+    }
+
+    function fontGlowEnabled() {
+        return root.theme && root.theme.textGlow.a > 0.001
+    }
+
+    component FontGlowEffect: MultiEffect {
+        shadowEnabled: true
+        shadowHorizontalOffset: 0
+        shadowVerticalOffset: 0
+        shadowColor: root.theme ? root.theme.textGlow : Qt.rgba(0, 0, 0, 0)
+        shadowOpacity: root.theme ? Math.min(1, 0.34 + root.theme.textGlowLevel * 0.66) : 0
+        shadowBlur: root.theme ? Math.min(1, 0.24 + root.theme.textGlowLevel * 0.72) : 0
+        blurMax: root.theme ? Math.round(12 + root.theme.textGlowLevel * 22) : 12
+        autoPaddingEnabled: true
+    }
+
+    function itemCenterY(item) {
+        if (!item)
+            return height / 2
+
+        const point = item.mapToItem(root, item.width / 2, item.height / 2)
+        return Math.round(point.y)
+    }
+
+    function itemContainsY(item, y, pad) {
+        if (!item)
+            return false
+
+        const point = item.mapToItem(root, 0, 0)
+        return y >= point.y - pad && y <= point.y + item.height + pad
+    }
+
+    function popupProbeAt(y) {
+        const pad = Math.round(4 * root.uiScale)
+        const probes = [
+            { item: slotTheme, type: "theme" },
+            { item: slotSearch, type: "search" },
+            { item: slotVolume, type: "volume" },
+            { item: slotWifi, type: "wifi" },
+            { item: slotBrightness, type: "brightness" },
+            { item: slotNotifications, type: "notifications" }
+        ]
+
+        for (let i = 0; i < probes.length; i += 1) {
+            const probe = probes[i]
+
+            if (itemContainsY(probe.item, y, pad))
+                return probe
+        }
+
+        return null
+    }
+
+    function updateHoverProbe(y) {
+        const probe = popupProbeAt(y)
+
+        if (probe) {
+            hoverProbeType = probe.type
+            root.quickPopupHovered(probe.type, root.itemCenterY(probe.item))
+            return
+        }
+
+        clearHoverProbe()
+    }
+
+    function clearHoverProbe() {
+        if (hoverProbeType.length > 0) {
+            const previous = hoverProbeType
+            hoverProbeType = ""
+            root.quickPopupHoverEnded(previous)
+        }
+    }
+
+    readonly property string themeCommand: "if command -v nwg-look >/dev/null 2>&1; then nwg-look >/dev/null 2>&1 & elif command -v qt6ct >/dev/null 2>&1; then qt6ct >/dev/null 2>&1 & fi"
+    readonly property string searchCommand: "if command -v wofi >/dev/null 2>&1; then pkill wofi 2>/dev/null; wofi --show drun --prompt 検索 >/dev/null 2>&1 & elif command -v rofi >/dev/null 2>&1; then rofi -show drun >/dev/null 2>&1 & fi"
+    readonly property string filesCommand: "if command -v dolphin >/dev/null 2>&1; then dolphin \"$HOME\" >/dev/null 2>&1 & elif command -v thunar >/dev/null 2>&1; then thunar \"$HOME\" >/dev/null 2>&1 & else xdg-open \"$HOME\" >/dev/null 2>&1 & fi"
+    readonly property string terminalCommand: "if command -v kitty >/dev/null 2>&1; then kitty >/dev/null 2>&1 & elif command -v foot >/dev/null 2>&1; then foot >/dev/null 2>&1 & elif command -v alacritty >/dev/null 2>&1; then alacritty >/dev/null 2>&1 & fi"
+    readonly property string browserCommand: "if command -v zen-browser >/dev/null 2>&1; then zen-browser >/dev/null 2>&1 & elif command -v firefox >/dev/null 2>&1; then firefox >/dev/null 2>&1 & fi"
+    readonly property string discordCommand: "if command -v discord >/dev/null 2>&1; then discord >/dev/null 2>&1 & elif command -v vesktop >/dev/null 2>&1; then vesktop >/dev/null 2>&1 & elif command -v webcord >/dev/null 2>&1; then webcord >/dev/null 2>&1 & fi"
+    readonly property string brightnessCommand: "if command -v brightnessctl >/dev/null 2>&1; then brightnessctl set +10% >/dev/null 2>&1; elif command -v light >/dev/null 2>&1; then light -A 10 >/dev/null 2>&1; fi"
+    readonly property string settingsCommand: "if command -v systemsettings >/dev/null 2>&1; then systemsettings >/dev/null 2>&1 & elif command -v gnome-control-center >/dev/null 2>&1; then gnome-control-center >/dev/null 2>&1 & elif command -v nwg-look >/dev/null 2>&1; then nwg-look >/dev/null 2>&1 & fi"
+
+    focus: root.focusMode
+
+    function clamp01(v) {
+        return Math.max(0, Math.min(1, v))
+    }
+
+    function lerp(a, b, t) {
+        return a + (b - a) * t
+    }
+
+    function emphasizedDecel(t) {
+        t = clamp01(t)
+        return 1 - Math.pow(1 - t, 3.0)
+    }
+
+    function focusSlot() {
+        if (focusTarget === "theme") return slotTheme
+        if (focusTarget === "search") return slotSearch
+        if (focusTarget === "workspace1") return slotWorkspace1
+        if (focusTarget === "workspace2") return slotWorkspace2
+        if (focusTarget === "workspace3") return slotWorkspace3
+        if (focusTarget === "workspace4") return slotWorkspace4
+        if (focusTarget === "files") return slotFiles
+        if (focusTarget === "browser") return slotBrowser
+        if (focusTarget === "discord") return slotDiscord
+        if (focusTarget === "volume") return slotVolume
+        if (focusTarget === "wifi") return slotWifi
+        if (focusTarget === "brightness") return slotBrightness
+        if (focusTarget === "notifications") return slotNotifications
+        if (focusTarget === "settings") return slotSettings
+        if (focusTarget === "avatar") return slotAvatar
+        return slotClock
+    }
+
+    function measureSlot(slot) {
+        if (!slot)
+            return { x: 0, y: 0, w: 42, h: 34 }
+
+        const p = slot.mapToItem(root, 0, 0)
+        const w = Math.max(18, slot.width)
+        const h = Math.max(18, slot.height)
+
+        return {
+            x: Math.round(p.x - focusPad),
+            y: Math.round(p.y - focusPad),
+            w: Math.round(w + focusPad * 2),
+            h: Math.round(h + focusPad * 2)
+        }
+    }
+
+    function rectAt(oldR, newR, t) {
+        return {
+            x: lerp(oldR.x, newR.x, t),
+            y: lerp(oldR.y, newR.y, t),
+            w: lerp(oldR.w, newR.w, t),
+            h: lerp(oldR.h, newR.h, t)
+        }
+    }
+
+    function capsuleBetween(a, b) {
+        const left = Math.min(a.x, b.x)
+        const right = Math.max(a.x + a.w, b.x + b.w)
+        const top = Math.min(a.y, b.y)
+        const bottom = Math.max(a.y + a.h, b.y + b.h)
+
+        return {
+            x: Math.round(left),
+            y: Math.round(top),
+            w: Math.round(right - left),
+            h: Math.round(bottom - top)
+        }
+    }
+
+    function setFocusRectFromCurrent() {
+        const r = measureSlot(focusSlot())
+        focusX = r.x
+        focusY = r.y
+        focusW = r.w
+        focusH = r.h
+    }
+
+    function pushElasticTrail(oldR, newR) {
+        const arr = trailSegments.slice()
+
+        arr.unshift({
+            oldX: oldR.x,
+            oldY: oldR.y,
+            oldW: oldR.w,
+            oldH: oldR.h,
+            newX: newR.x,
+            newY: newR.y,
+            newW: newR.w,
+            newH: newR.h,
+            raw: 0.0,
+            life: 1.0,
+            x: oldR.x,
+            y: oldR.y,
+            w: oldR.w,
+            h: oldR.h
+        })
+
+        while (arr.length > 2)
+            arr.pop()
+
+        trailSegments = arr
+    }
+
+    function requestMoveFocus(dir) {
+        const oldR = {
+            x: focusX,
+            y: focusY,
+            w: focusW,
+            h: focusH
+        }
+
+        root.moveFocusRequested(dir)
+
+        Qt.callLater(function() {
+            const newR = measureSlot(focusSlot())
+            pushElasticTrail(oldR, newR)
+            focusX = newR.x
+            focusY = newR.y
+            focusW = newR.w
+            focusH = newR.h
+        })
+    }
+
+    function runFocusCommand(command) {
+        if (command.length === 0)
+            return
+
+        focusActionCommand = command
+        if (!focusActionProcess.running)
+            focusActionProcess.running = true
+
+        root.exitFocusRequested()
+    }
+
+    function activateFocused() {
+        if (focusTarget === "theme") {
+            root.themeRequested(root.itemCenterY(slotTheme))
+            return
+        }
+
+        if (focusTarget === "search") {
+            root.quickPopupRequested("search", root.itemCenterY(slotSearch))
+            return
+        }
+
+        if (focusTarget.indexOf("workspace") === 0) {
+            Hyprland.dispatch("workspace " + focusTarget.replace("workspace", ""))
+            root.exitFocusRequested()
+            return
+        }
+
+        if (focusTarget === "files") {
+            runFocusCommand(filesCommand)
+            return
+        }
+
+        if (focusTarget === "browser") {
+            runFocusCommand(browserCommand)
+            return
+        }
+
+        if (focusTarget === "discord") {
+            runFocusCommand(discordCommand)
+            return
+        }
+
+        if (focusTarget === "volume") {
+            root.quickPopupRequested("volume", root.itemCenterY(slotVolume))
+            return
+        }
+
+        if (focusTarget === "wifi") {
+            root.quickPopupRequested("wifi", root.itemCenterY(slotWifi))
+            return
+        }
+
+        if (focusTarget === "brightness") {
+            root.quickPopupRequested("brightness", root.itemCenterY(slotBrightness))
+            return
+        }
+
+        if (focusTarget === "notifications") {
+            root.quickPopupRequested("notifications", root.itemCenterY(slotNotifications))
+            return
+        }
+
+        if (focusTarget === "settings") {
+            root.settingsRequested(root.itemCenterY(slotSettings))
+            return
+        }
+    }
+
+    function formatJapaneseDate(date) {
+        const weekdays = ["日", "月", "火", "水", "木", "金", "土"]
+        return (date.getMonth() + 1) + "月" + date.getDate() + "日 (" + weekdays[date.getDay()] + ")"
+    }
+
+    function pickBattery() {
+        batteryDevice = null
+        for (let i = 0; i < UPower.devices.count; i += 1) {
+            const dev = UPower.devices.get(i)
+            if (dev && dev.isLaptopBattery) {
+                batteryDevice = dev
+                return
+            }
+        }
+    }
+
+    Timer {
+        interval: 1000
+        running: true
+        repeat: true
+        onTriggered: {
+            const now = new Date()
+            root.clockText = Qt.formatDateTime(now, "HH:mm")
+            root.dateText = root.formatJapaneseDate(now)
+        }
+    }
+
+    Timer {
+        interval: 5000
+        running: true
+        repeat: true
+        triggeredOnStart: true
+        onTriggered: {
+            root.pickBattery()
+            if (!volumeQuery.running)
+                volumeQuery.running = true
+        }
+    }
+
+    Process {
+        id: volumeQuery
+
+        running: false
+        command: ["bash", "-lc", "wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null || echo 'Volume: 0.70'"]
+
+        stdout: SplitParser {
+            onRead: function(data) {
+                const text = data.trim()
+                const match = text.match(/[0-9]+\\.?[0-9]*/)
+
+                root.muted = text.indexOf("MUTED") >= 0
+                if (match)
+                    root.volume = Math.max(0, Math.min(100, Math.round(parseFloat(match[0]) * 100)))
+            }
+        }
+
+        onExited: running = false
+    }
+
+    Process {
+        id: focusActionProcess
+
+        running: false
+        command: ["bash", "-lc", root.focusActionCommand]
+        onExited: running = false
+    }
+
+    Timer {
+        id: trailTimer
+
+        interval: 16
+        repeat: true
+        running: root.focusMode || root.trailSegments.length > 0
+
+        onTriggered: {
+            const arr = root.trailSegments.slice()
+
+            for (let i = 0; i < arr.length; i += 1) {
+                const s = arr[i]
+
+                if (s.raw < 1.0)
+                    s.raw = Math.min(1.0, s.raw + root.trailSpeed)
+                else
+                    s.life = Math.max(0.0, s.life - root.trailFade)
+
+                const oldR = { x: s.oldX, y: s.oldY, w: s.oldW, h: s.oldH }
+                const newR = { x: s.newX, y: s.newY, w: s.newW, h: s.newH }
+                const headT = root.emphasizedDecel(s.raw)
+                const tailRaw = Math.max(0.0, (s.raw - root.trailTailDelay) / (1.0 - root.trailTailDelay))
+                const tailT = root.emphasizedDecel(tailRaw)
+                const head = root.rectAt(oldR, newR, headT)
+                const tail = root.rectAt(oldR, newR, tailT)
+                const cap = root.capsuleBetween(tail, head)
+
+                s.x = cap.x
+                s.y = cap.y
+                s.w = cap.w
+                s.h = cap.h
+            }
+
+            root.trailSegments = arr.filter(function(s) {
+                return s.life > 0.02
+            })
+        }
+    }
+
+    onFocusModeChanged: {
+        if (focusMode) {
+            Qt.callLater(function() {
+                root.forceActiveFocus()
+                root.trailSegments = []
+                root.setFocusRectFromCurrent()
+            })
+        } else {
+            root.trailSegments = []
+        }
+    }
+
+    onFocusIndexChanged: {
+        if (focusMode)
+            Qt.callLater(function() {
+                root.setFocusRectFromCurrent()
+            })
+    }
+
+    onFocusTargetChanged: {
+        if (focusMode)
+            Qt.callLater(function() {
+                root.setFocusRectFromCurrent()
+            })
+    }
+
+    onWidthChanged: Qt.callLater(function() {
+        root.setFocusRectFromCurrent()
+    })
+    onHeightChanged: Qt.callLater(function() {
+        root.setFocusRectFromCurrent()
+    })
+    Component.onCompleted: Qt.callLater(function() {
+        root.setFocusRectFromCurrent()
+    })
+
+    Keys.onEscapePressed: root.exitFocusRequested()
+    Keys.onPressed: function(event) {
+        if (event.key === Qt.Key_Up || event.key === Qt.Key_W) {
+            root.requestMoveFocus(-1)
+            event.accepted = true
+        } else if (event.key === Qt.Key_Down || event.key === Qt.Key_S) {
+            root.requestMoveFocus(1)
+            event.accepted = true
+        } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+            root.activateFocused()
+            event.accepted = true
+        }
+    }
+
+    Rectangle {
+        x: panelSurface.x + 4
+        y: panelSurface.y + 12
+        width: panelSurface.width
+        height: panelSurface.height - 8
+        radius: root.cornerRadius + 2
+        color: root.alpha(root.theme ? root.theme.shadowColor : Qt.rgba(0.56, 0.36, 0.52, 1), root.popupAttached ? 0 : (root.pywalStyle && root.theme ? 0.035 + root.theme.generalGlow * 0.02 : 0.07))
+    }
+
+    Rectangle {
+        id: panelSurface
+
+        anchors.fill: parent
+        radius: root.cornerRadius
+        color: root.glass
+        border.width: root.popupAttached ? 0 : 1
+        border.color: root.pywalStyle && root.theme
+            ? root.alpha(root.theme.popupBorderGlow, root.popupAttached ? root.theme.popupBorderGlow.a * 0.26 : root.theme.sidebarBorderGlow.a)
+            : root.alpha(root.borderSoft, root.popupAttached ? 0.34 : root.borderSoft.a)
+        clip: true
+        antialiasing: true
+        layer.enabled: !root.popupAttached && (!root.pywalStyle || (root.theme && root.theme.sidebarBorderGlow.a > 0.001))
+        layer.effect: DropShadow {
+            transparentBorder: true
+            radius: root.pywalStyle ? 34 : 34
+            samples: root.pywalStyle ? 69 : 65
+            horizontalOffset: 0
+            verticalOffset: root.pywalStyle ? 0 : 11
+            color: root.pywalStyle && root.theme
+                ? root.alpha(root.theme.popupBorderGlow, root.theme.popupBorderGlow.a * (root.popupAttached ? 0.08 : 0.50))
+                : root.alpha(root.theme ? root.theme.shadowColor : Qt.rgba(0.38, 0.25, 0.42, 1), root.popupAttached ? 0.035 : 0.15)
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            radius: parent.radius
+            visible: !root.popupAttached
+            color: root.alpha(root.card, 0.18)
+        }
+
+        Rectangle {
+            anchors {
+                fill: parent
+                margins: 1
+            }
+
+            radius: parent.radius - 1
+            color: "transparent"
+            visible: !root.popupAttached
+            border.width: 1
+            border.color: root.pywalStyle && root.theme
+                ? root.alpha(root.theme.popupBorderGlow, root.theme.popupBorderGlow.a * (root.popupAttached ? 0.16 : 0.58))
+                : root.alpha(root.borderSoft, root.popupAttached ? 0.12 : 0.28)
+        }
+
+    }
+
+    ColumnLayout {
+        id: contentLayer
+        z: 10
+
+        anchors {
+            fill: panelSurface
+            leftMargin: 16
+            rightMargin: 16
+            topMargin: Math.round(18 * root.uiScale)
+            bottomMargin: Math.round(14 * root.uiScale)
+        }
+
+        spacing: 0
+
+        ClockBlock {
+            id: slotClock
+
+            Layout.alignment: Qt.AlignHCenter
+            Layout.preferredWidth: 72
+            Layout.preferredHeight: Math.round(110 * root.uiScale)
+        }
+
+        Divider {
+            Layout.fillWidth: true
+            Layout.topMargin: Math.round(13 * root.uiScale) + Math.round(root.stretchGap * 0.35)
+            Layout.bottomMargin: Math.round(13 * root.uiScale) + Math.round(root.stretchGap * 0.35)
+        }
+
+        SectionLabel {
+            Layout.fillWidth: true
+            text: "ツール"
+        }
+
+        ToolRow {
+            id: slotTheme
+
+            Layout.fillWidth: true
+            Layout.topMargin: Math.round(8 * root.uiScale)
+            label: "テーマ"
+            iconName: "palette"
+            command: ""
+            hoverPopupType: "theme"
+            selected: root.activePopupType === "theme"
+            onTriggered: root.themeRequested(root.itemCenterY(slotTheme))
+        }
+
+        ToolRow {
+            id: slotSearch
+
+            Layout.fillWidth: true
+            Layout.topMargin: Math.round(8 * root.uiScale)
+            label: "検索"
+            iconName: "search"
+            selected: root.activePopupType === "search"
+            command: ""
+            hoverPopupType: "search"
+            onTriggered: root.quickPopupRequested("search", root.itemCenterY(slotSearch))
+        }
+
+        Divider {
+            Layout.fillWidth: true
+            Layout.topMargin: Math.round(15 * root.uiScale) + root.stretchGap
+            Layout.bottomMargin: Math.round(13 * root.uiScale)
+        }
+
+        SectionLabel {
+            Layout.fillWidth: true
+            text: "ワークスペース"
+        }
+
+        ColumnLayout {
+            Layout.alignment: Qt.AlignHCenter
+            Layout.topMargin: Math.round(8 * root.uiScale)
+            spacing: Math.round(6 * root.uiScale)
+
+            WorkspaceButton {
+                id: slotWorkspace1
+
+                Layout.preferredWidth: 66
+                Layout.preferredHeight: Math.round(32 * root.uiScale)
+                number: 1
+            }
+
+            WorkspaceButton {
+                id: slotWorkspace2
+
+                Layout.preferredWidth: 66
+                Layout.preferredHeight: Math.round(32 * root.uiScale)
+                number: 2
+            }
+
+            WorkspaceButton {
+                id: slotWorkspace3
+
+                Layout.preferredWidth: 66
+                Layout.preferredHeight: Math.round(32 * root.uiScale)
+                number: 3
+            }
+
+            WorkspaceButton {
+                id: slotWorkspace4
+
+                Layout.preferredWidth: 66
+                Layout.preferredHeight: Math.round(32 * root.uiScale)
+                number: 4
+            }
+        }
+
+        Divider {
+            Layout.fillWidth: true
+            Layout.topMargin: Math.round(15 * root.uiScale) + root.stretchGap
+            Layout.bottomMargin: Math.round(12 * root.uiScale)
+        }
+
+        SectionLabel {
+            Layout.fillWidth: true
+            text: "アプリ"
+        }
+
+        ColumnLayout {
+            Layout.alignment: Qt.AlignHCenter
+            Layout.topMargin: Math.round(9 * root.uiScale)
+            spacing: Math.round(8 * root.uiScale)
+
+            AppButton {
+                id: slotFiles
+
+                iconName: "folder"
+                tint: root.theme ? root.theme.accentTertiary : Qt.rgba(0.46, 0.64, 0.90, 0.94)
+                command: root.filesCommand
+            }
+
+            AppButton {
+                id: slotBrowser
+
+                iconName: "browser"
+                tint: root.theme ? root.theme.accentPrimary : Qt.rgba(0.91, 0.46, 0.36, 0.90)
+                command: root.browserCommand
+            }
+
+            AppButton {
+                id: slotDiscord
+
+                iconName: "discord"
+                tint: root.theme ? root.theme.accentSecondary : Qt.rgba(0.53, 0.47, 0.84, 0.90)
+                command: root.discordCommand
+            }
+        }
+
+        Divider {
+            Layout.fillWidth: true
+            Layout.topMargin: Math.round(15 * root.uiScale) + root.stretchGap
+            Layout.bottomMargin: Math.round(12 * root.uiScale)
+        }
+
+        SectionLabel {
+            Layout.fillWidth: true
+            text: "ユーティリティ"
+        }
+
+        ColumnLayout {
+            Layout.alignment: Qt.AlignHCenter
+            Layout.topMargin: Math.round(9 * root.uiScale)
+            spacing: Math.round(9 * root.uiScale)
+
+            UtilityButton {
+                id: slotVolume
+
+                iconName: root.muted ? "volume-muted" : "volume"
+                hoverPopupType: "volume"
+                selected: root.activePopupType === "volume"
+                onTriggered: root.quickPopupRequested("volume", root.itemCenterY(slotVolume))
+            }
+
+            UtilityButton {
+                id: slotWifi
+
+                iconName: "wifi"
+                hoverPopupType: "wifi"
+                selected: root.activePopupType === "wifi"
+                onTriggered: root.quickPopupRequested("wifi", root.itemCenterY(slotWifi))
+            }
+
+            UtilityButton {
+                id: slotBrightness
+
+                iconName: "sun"
+                hoverPopupType: "brightness"
+                selected: root.activePopupType === "brightness"
+                onTriggered: root.quickPopupRequested("brightness", root.itemCenterY(slotBrightness))
+            }
+
+            UtilityButton {
+                id: slotNotifications
+
+                iconName: "bell"
+                badge: root.notificationCount > 0 ? String(root.notificationCount) : ""
+                hoverPopupType: "notifications"
+                selected: root.activePopupType === "notifications"
+                onTriggered: root.quickPopupRequested("notifications", root.itemCenterY(slotNotifications))
+            }
+
+            UtilityButton {
+                id: slotSettings
+
+                iconName: "settings"
+                hoverPopupType: "settings"
+                selected: root.activePopupType === "settings"
+                onTriggered: root.settingsRequested(root.itemCenterY(slotSettings))
+            }
+        }
+
+        Item {
+            Layout.fillHeight: true
+            Layout.minimumHeight: 18
+        }
+
+        Divider {
+            Layout.fillWidth: true
+            Layout.bottomMargin: Math.round(8 * root.uiScale)
+        }
+
+        UserAvatar {
+            id: slotAvatar
+
+            Layout.alignment: Qt.AlignHCenter
+            Layout.preferredWidth: Math.round(48 * root.uiScale)
+            Layout.preferredHeight: Math.round(48 * root.uiScale)
+        }
+    }
+
+    MouseArea {
+        id: popoutHoverProbe
+        z: 25
+
+        anchors.fill: panelSurface
+        hoverEnabled: true
+        acceptedButtons: Qt.NoButton
+        onPositionChanged: event => root.updateHoverProbe(event.y)
+        onContainsMouseChanged: {
+            if (!containsMouse)
+                root.clearHoverProbe()
+            else
+                root.updateHoverProbe(mouseY)
+        }
+    }
+
+    Repeater {
+        model: root.trailSegments
+
+        Rectangle {
+            z: 8
+
+            x: modelData.x
+            y: modelData.y
+            width: modelData.w
+            height: modelData.h
+            radius: Math.min(root.cornerRadius, height / 2)
+            antialiasing: true
+            color: root.alpha(root.pink, root.trailOpacity * modelData.life)
+            border.width: 1
+            border.color: root.alpha(root.pink, 0.34 * modelData.life)
+        }
+    }
+
+    Rectangle {
+        visible: root.focusMode
+        z: 30
+
+        x: root.focusX
+        y: root.focusY
+        width: root.focusW
+        height: root.focusH
+        radius: Math.min(root.cornerRadius, height / 2)
+        color: "transparent"
+        border.width: 2
+        border.color: root.alpha(root.pink, 0.95)
+        antialiasing: true
+
+        Behavior on x { NumberAnimation { duration: 165; easing.type: Easing.OutCubic } }
+        Behavior on y { NumberAnimation { duration: 165; easing.type: Easing.OutCubic } }
+        Behavior on width { NumberAnimation { duration: 165; easing.type: Easing.OutCubic } }
+        Behavior on height { NumberAnimation { duration: 165; easing.type: Easing.OutCubic } }
+    }
+
+    Timer {
+        id: volumeRefresh
+
+        interval: 220
+        repeat: false
+        onTriggered: {
+            if (!volumeQuery.running)
+                volumeQuery.running = true
+        }
+    }
+
+    component ClockBlock: Item {
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 0
+            spacing: 4
+
+            MiniClock {
+                Layout.alignment: Qt.AlignHCenter
+                Layout.preferredWidth: Math.round(40 * root.uiScale)
+                Layout.preferredHeight: Math.round(40 * root.uiScale)
+            }
+
+            Text {
+                Layout.fillWidth: true
+                text: root.clockText
+                color: root.ink
+                horizontalAlignment: Text.AlignHCenter
+                font.family: root.monoFont
+                font.pixelSize: Math.round(21 * root.uiScale)
+                font.weight: Font.Medium
+                layer.enabled: root.fontGlowEnabled()
+                layer.effect: FontGlowEffect {}
+            }
+
+            Text {
+                Layout.fillWidth: true
+                text: root.dateText
+                color: root.inkSoft
+                horizontalAlignment: Text.AlignHCenter
+                font.family: root.uiFont
+                font.pixelSize: Math.round(10 * root.uiScale)
+                font.weight: Font.DemiBold
+                layer.enabled: root.fontGlowEnabled()
+                layer.effect: FontGlowEffect {}
+            }
+        }
+    }
+
+    component SectionLabel: Text {
+        color: root.pink
+        horizontalAlignment: Text.AlignHCenter
+        font.family: root.uiFont
+        font.pixelSize: Math.round(11 * root.uiScale)
+        font.weight: Font.Bold
+        layer.enabled: root.fontGlowEnabled()
+        layer.effect: FontGlowEffect {}
+    }
+
+    component Divider: Rectangle {
+        height: 1
+        radius: 1
+        color: root.alpha(root.lilac, 0.22)
+    }
+
+    component WorkspaceButton: Rectangle {
+        id: button
+
+        property int number: 1
+        property bool active: Hyprland.focusedWorkspace && Hyprland.focusedWorkspace.id === number
+        property bool hovered: false
+
+        radius: 6
+        color: active ? root.alpha(root.pink, 0.48) : (hovered ? root.alpha(root.card, 0.70) : root.alpha(root.card, 0.34))
+        border.width: 1
+        border.color: active ? root.alpha(root.pink, 0.38) : root.alpha(root.lilac, 0.18)
+        layer.enabled: active || hovered
+        layer.effect: DropShadow {
+            transparentBorder: true
+            radius: button.active ? 12 : 9
+            samples: button.active ? 25 : 19
+            horizontalOffset: 0
+            verticalOffset: button.active ? 4 : 3
+            color: root.alpha(root.theme ? root.theme.shadowColor : Qt.rgba(0.45, 0.28, 0.42, 1), button.active ? 0.12 : 0.07)
+        }
+
+        Behavior on color { ColorAnimation { duration: 130; easing.type: Easing.OutCubic } }
+
+        Text {
+            anchors.centerIn: parent
+            text: String(button.number)
+            color: button.active ? root.pink : root.ink
+            font.family: root.monoFont
+            font.pixelSize: Math.round(15 * root.uiScale)
+            font.weight: Font.Medium
+            layer.enabled: root.fontGlowEnabled()
+            layer.effect: FontGlowEffect {}
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onEntered: button.hovered = true
+            onExited: button.hovered = false
+            onClicked: Hyprland.dispatch("workspace " + button.number)
+        }
+    }
+
+    component ToolRow: Item {
+        id: row
+
+        property string label: ""
+        property string iconName: "search"
+        property string command: ""
+        property bool hovered: false
+        property bool clickable: true
+        property bool selected: false
+        property string hoverPopupType: ""
+        signal triggered()
+
+        implicitHeight: Math.round(30 * root.uiScale)
+
+        Process {
+            id: rowProcess
+            running: false
+            command: ["bash", "-lc", row.command]
+            onExited: running = false
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            radius: Math.round(13 * root.uiScale)
+            visible: row.selected || row.hovered
+            color: row.selected ? root.alpha(root.pink, root.pywalStyle ? 0.24 : 0.18) : root.alpha(root.card, 0.28)
+            border.width: row.selected ? 1 : 0
+            border.color: row.selected && root.pywalStyle ? root.alpha(root.lilac, 0.46) : root.alpha(root.pink, 0.35)
+        }
+
+        VeloraIcon {
+            id: toolIcon
+
+            anchors {
+                left: parent.left
+                verticalCenter: parent.verticalCenter
+                leftMargin: 4
+            }
+
+            width: Math.round(24 * root.uiScale)
+            height: Math.round(24 * root.uiScale)
+            iconName: row.iconName
+            lineColor: row.selected ? root.lilac : (row.hovered ? root.pink : root.inkSoft)
+            layer.enabled: root.pywalStyle && (row.selected || row.hovered)
+            layer.effect: DropShadow {
+                transparentBorder: true
+                radius: 8
+                samples: 17
+                horizontalOffset: 0
+                verticalOffset: 0
+                color: root.theme ? root.theme.iconGlow : Qt.rgba(0, 0, 0, 0)
+            }
+        }
+
+        Text {
+            anchors {
+                left: parent.left
+                right: parent.right
+                verticalCenter: parent.verticalCenter
+                leftMargin: Math.round(29 * root.uiScale)
+            }
+
+            text: row.label
+            color: row.selected ? root.pink : (row.hovered ? root.pink : root.ink)
+            font.family: root.uiFont
+            font.pixelSize: Math.round(11 * root.uiScale)
+            font.weight: Font.DemiBold
+            elide: Text.ElideRight
+            layer.enabled: root.fontGlowEnabled()
+            layer.effect: FontGlowEffect {}
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            hoverEnabled: true
+            acceptedButtons: Qt.LeftButton
+            preventStealing: true
+            cursorShape: row.clickable ? Qt.PointingHandCursor : Qt.ArrowCursor
+            onEntered: {
+                row.hovered = true
+                if (row.hoverPopupType.length > 0)
+                    root.quickPopupHovered(row.hoverPopupType, root.itemCenterY(row))
+            }
+            onExited: {
+                row.hovered = false
+                if (row.hoverPopupType.length > 0)
+                    root.quickPopupHoverEnded(row.hoverPopupType)
+            }
+            onClicked: function(mouse) {
+                mouse.accepted = true
+                if (row.command.length > 0 && !rowProcess.running)
+                    rowProcess.running = true
+
+                row.triggered()
+            }
+        }
+    }
+
+    component AppButton: Rectangle {
+        id: button
+
+        property string iconName: "folder"
+        property string command: ""
+        property color tint: root.lilac
+        property bool hovered: false
+        property string hoverPopupType: ""
+
+        Layout.preferredWidth: Math.round(34 * root.uiScale)
+        Layout.preferredHeight: Math.round(34 * root.uiScale)
+        radius: Math.round(8 * root.uiScale)
+        color: hovered ? root.alpha(root.card, 0.84) : root.alpha(root.card, 0.58)
+        border.width: 1
+        border.color: root.alpha(root.borderSoft, 0.76)
+        layer.enabled: true
+        layer.effect: DropShadow {
+            transparentBorder: true
+            radius: button.hovered ? 13 : 10
+            samples: button.hovered ? 27 : 21
+            horizontalOffset: 0
+            verticalOffset: button.hovered ? 5 : 3
+            color: root.alpha(root.theme ? root.theme.shadowColor : Qt.rgba(0.38, 0.25, 0.42, 1), button.hovered ? 0.13 : 0.08)
+        }
+
+        Process {
+            id: appProcess
+            running: false
+            command: ["bash", "-lc", button.command]
+            onExited: running = false
+        }
+
+        Rectangle {
+            anchors.centerIn: parent
+            width: Math.round(26 * root.uiScale)
+            height: Math.round(26 * root.uiScale)
+            radius: Math.round(6 * root.uiScale)
+            color: button.iconName === "terminal" ? root.alpha(root.ink, 0.88) : (button.iconName === "discord" ? root.alpha(root.lilac, 0.20) : root.alpha(root.card, 0.18))
+        }
+
+        VeloraIcon {
+            anchors.centerIn: parent
+            width: Math.round(26 * root.uiScale)
+            height: Math.round(26 * root.uiScale)
+            iconName: button.iconName
+            lineColor: button.tint
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onEntered: button.hovered = true
+            onExited: {
+                button.hovered = false
+                if (button.hoverPopupType.length > 0)
+                    root.quickPopupHoverEnded(button.hoverPopupType)
+            }
+            onClicked: {
+                if (button.command.length > 0 && !appProcess.running)
+                    appProcess.running = true
+            }
+        }
+    }
+
+    component UtilityButton: Item {
+        id: button
+
+        property string iconName: "volume"
+        property string command: ""
+        property string badge: ""
+        property bool hovered: false
+        property bool selected: false
+        property string hoverPopupType: ""
+        signal triggered()
+
+        Layout.preferredWidth: Math.round(32 * root.uiScale)
+        Layout.preferredHeight: Math.round(32 * root.uiScale)
+
+        Rectangle {
+            anchors.fill: parent
+            radius: Math.round(7 * root.uiScale)
+            visible: button.selected || button.hovered
+            color: button.selected ? root.alpha(root.pink, 0.26) : root.alpha(root.card, 0.30)
+            border.width: button.selected ? 1 : 0
+            border.color: root.alpha(root.pink, 0.30)
+        }
+
+        Process {
+            id: utilityProcess
+            running: false
+            command: ["bash", "-lc", button.command]
+            onExited: running = false
+        }
+
+        VeloraIcon {
+            anchors.centerIn: parent
+            width: Math.round(26 * root.uiScale)
+            height: Math.round(26 * root.uiScale)
+            iconName: button.iconName
+            lineColor: button.selected ? root.lilac : (button.hovered ? root.pink : root.inkSoft)
+            value: button.iconName === "battery" && root.batteryDevice && root.batteryDevice.ready ? root.batteryDevice.percentage : Math.max(0.08, Math.min(1, root.volume / 100))
+            layer.enabled: root.pywalStyle && (button.selected || button.hovered)
+            layer.effect: DropShadow {
+                transparentBorder: true
+                radius: 9
+                samples: 19
+                horizontalOffset: 0
+                verticalOffset: 0
+                color: root.theme ? root.theme.iconGlow : Qt.rgba(0, 0, 0, 0)
+            }
+        }
+
+        Rectangle {
+            visible: button.badge.length > 0
+            anchors {
+                right: parent.right
+                top: parent.top
+                rightMargin: -5
+                topMargin: -5
+            }
+
+            width: Math.round(15 * root.uiScale)
+            height: Math.round(15 * root.uiScale)
+            radius: width / 2
+            color: root.pink
+
+            Text {
+                anchors.centerIn: parent
+                text: button.badge
+                color: root.theme ? root.theme.activeText : "white"
+                font.family: root.monoFont
+                font.pixelSize: Math.round(8 * root.uiScale)
+                font.weight: Font.Bold
+            }
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            hoverEnabled: true
+            acceptedButtons: Qt.LeftButton
+            preventStealing: true
+            cursorShape: Qt.PointingHandCursor
+            onEntered: {
+                button.hovered = true
+                if (button.hoverPopupType.length > 0)
+                    root.quickPopupHovered(button.hoverPopupType, root.itemCenterY(button))
+            }
+            onExited: {
+                button.hovered = false
+                if (button.hoverPopupType.length > 0)
+                    root.quickPopupHoverEnded(button.hoverPopupType)
+            }
+            onClicked: function(mouse) {
+                mouse.accepted = true
+                if (button.command.length > 0 && !utilityProcess.running)
+                    utilityProcess.running = true
+
+                button.triggered()
+            }
+        }
+    }
+
+    component UserAvatar: Rectangle {
+        radius: width / 2
+        color: root.alpha(root.card, 0.62)
+        border.width: 1
+        border.color: root.alpha(root.borderSoft, 0.84)
+        clip: true
+        layer.enabled: true
+        layer.effect: DropShadow {
+            transparentBorder: true
+            radius: 16
+            samples: 33
+            horizontalOffset: 0
+            verticalOffset: 5
+            color: root.alpha(root.theme ? root.theme.shadowColor : Qt.rgba(0.38, 0.25, 0.42, 1), 0.13)
+        }
+
+        Image {
+            id: avatarImage
+
+            anchors.fill: parent
+            anchors.margins: 3
+            source: Qt.resolvedUrl("../assets/profile-avatar.png")
+            sourceSize.width: 256
+            sourceSize.height: 256
+            fillMode: Image.PreserveAspectCrop
+            visible: false
+            smooth: true
+            mipmap: true
+        }
+
+        Rectangle {
+            id: avatarMask
+
+            anchors.fill: avatarImage
+            radius: width / 2
+            visible: false
+        }
+
+        OpacityMask {
+            anchors.fill: avatarImage
+            source: avatarImage
+            maskSource: avatarMask
+        }
+    }
+
+    component MiniClock: Canvas {
+        id: clock
+
+        onWidthChanged: requestPaint()
+        onHeightChanged: requestPaint()
+
+        Timer {
+            interval: 1000
+            running: true
+            repeat: true
+            onTriggered: clock.requestPaint()
+        }
+
+        onPaint: {
+            const ctx = getContext("2d")
+            const s = Math.min(width, height)
+            const cx = width / 2
+            const cy = height / 2
+            const now = new Date()
+            const second = now.getSeconds()
+            const minute = now.getMinutes() + second / 60
+            const hour = now.getHours() % 12
+
+            ctx.reset()
+            ctx.clearRect(0, 0, width, height)
+            ctx.strokeStyle = root.pink
+            ctx.fillStyle = root.pink
+            ctx.lineCap = "round"
+            ctx.lineJoin = "round"
+
+            ctx.globalAlpha = 0.70
+            ctx.lineWidth = 1.5
+            ctx.beginPath()
+            ctx.arc(cx, cy, s * 0.42, 0, Math.PI * 2, false)
+            ctx.stroke()
+
+            for (let i = 0; i < 12; i += 1) {
+                const a = (i / 12) * Math.PI * 2 - Math.PI / 2
+                ctx.globalAlpha = i % 3 === 0 ? 0.55 : 0.30
+                ctx.lineWidth = i % 3 === 0 ? 1.2 : 0.9
+                ctx.beginPath()
+                ctx.moveTo(cx + Math.cos(a) * s * 0.32, cy + Math.sin(a) * s * 0.32)
+                ctx.lineTo(cx + Math.cos(a) * s * 0.37, cy + Math.sin(a) * s * 0.37)
+                ctx.stroke()
+            }
+
+            ctx.globalAlpha = 0.85
+            ctx.lineWidth = 1.7
+            const minuteAngle = (minute / 60) * Math.PI * 2 - Math.PI / 2
+            ctx.beginPath()
+            ctx.moveTo(cx, cy)
+            ctx.lineTo(cx + Math.cos(minuteAngle) * s * 0.28, cy + Math.sin(minuteAngle) * s * 0.28)
+            ctx.stroke()
+
+            ctx.lineWidth = 2.0
+            const hourAngle = ((hour + minute / 60) / 12) * Math.PI * 2 - Math.PI / 2
+            ctx.beginPath()
+            ctx.moveTo(cx, cy)
+            ctx.lineTo(cx + Math.cos(hourAngle) * s * 0.20, cy + Math.sin(hourAngle) * s * 0.20)
+            ctx.stroke()
+
+            ctx.globalAlpha = 1
+            ctx.beginPath()
+            ctx.arc(cx, cy, s * 0.035, 0, Math.PI * 2, false)
+            ctx.fill()
+        }
+    }
+
+    component VeloraIcon: Canvas {
+        id: icon
+
+        property string iconName: "search"
+        property color lineColor: root.lilac
+        property real value: 1.0
+
+        onIconNameChanged: requestPaint()
+        onLineColorChanged: requestPaint()
+        onValueChanged: requestPaint()
+        onWidthChanged: requestPaint()
+        onHeightChanged: requestPaint()
+
+        function roundedRect(ctx, x, y, w, h, r) {
+            ctx.beginPath()
+            ctx.moveTo(x + r, y)
+            ctx.lineTo(x + w - r, y)
+            ctx.quadraticCurveTo(x + w, y, x + w, y + r)
+            ctx.lineTo(x + w, y + h - r)
+            ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h)
+            ctx.lineTo(x + r, y + h)
+            ctx.quadraticCurveTo(x, y + h, x, y + h - r)
+            ctx.lineTo(x, y + r)
+            ctx.quadraticCurveTo(x, y, x + r, y)
+            ctx.closePath()
+        }
+
+        function setup(ctx) {
+            ctx.reset()
+            ctx.clearRect(0, 0, width, height)
+            ctx.strokeStyle = lineColor
+            ctx.fillStyle = lineColor
+            ctx.lineWidth = Math.max(1.5, Math.min(width, height) * 0.085)
+            ctx.lineCap = "round"
+            ctx.lineJoin = "round"
+        }
+
+        onPaint: {
+            const ctx = getContext("2d")
+            const s = Math.min(width, height)
+            const cx = width / 2
+            const cy = height / 2
+
+            setup(ctx)
+
+            if (iconName === "palette") {
+                ctx.beginPath()
+                ctx.arc(cx, cy, s * 0.34, Math.PI * 0.20, Math.PI * 1.95, false)
+                ctx.quadraticCurveTo(s * 0.20, s * 0.86, s * 0.48, s * 0.72)
+                ctx.stroke()
+                for (let i = 0; i < 4; i += 1) {
+                    const a = -1.9 + i * 0.78
+                    ctx.beginPath()
+                    ctx.arc(cx + Math.cos(a) * s * 0.16, cy + Math.sin(a) * s * 0.15, s * 0.026, 0, Math.PI * 2, false)
+                    ctx.fill()
+                }
+            } else if (iconName === "search") {
+                ctx.beginPath()
+                ctx.arc(cx - s * 0.07, cy - s * 0.07, s * 0.25, 0, Math.PI * 2, false)
+                ctx.stroke()
+                ctx.beginPath()
+                ctx.moveTo(cx + s * 0.13, cy + s * 0.13)
+                ctx.lineTo(cx + s * 0.32, cy + s * 0.32)
+                ctx.stroke()
+            } else if (iconName === "folder") {
+                ctx.save()
+                ctx.fillStyle = "rgba(122, 177, 232, 0.88)"
+                roundedRect(ctx, s * 0.16, s * 0.34, s * 0.68, s * 0.44, s * 0.08)
+                ctx.fill()
+                ctx.fillStyle = "rgba(153, 199, 239, 0.94)"
+                roundedRect(ctx, s * 0.18, s * 0.25, s * 0.31, s * 0.20, s * 0.06)
+                ctx.fill()
+                ctx.fillStyle = "rgba(230, 243, 255, 0.42)"
+                roundedRect(ctx, s * 0.23, s * 0.43, s * 0.50, s * 0.09, s * 0.04)
+                ctx.fill()
+                ctx.strokeStyle = "rgba(91, 139, 202, 0.62)"
+                ctx.lineWidth = Math.max(1, s * 0.045)
+                roundedRect(ctx, s * 0.16, s * 0.34, s * 0.68, s * 0.44, s * 0.08)
+                ctx.stroke()
+                ctx.restore()
+            } else if (iconName === "terminal") {
+                ctx.save()
+                ctx.strokeStyle = "rgba(247, 244, 250, 0.92)"
+                ctx.lineWidth = Math.max(1.6, s * 0.075)
+                ctx.beginPath()
+                ctx.moveTo(s * 0.28, s * 0.40)
+                ctx.lineTo(s * 0.40, s * 0.50)
+                ctx.lineTo(s * 0.28, s * 0.60)
+                ctx.moveTo(s * 0.49, s * 0.63)
+                ctx.lineTo(s * 0.70, s * 0.63)
+                ctx.stroke()
+                ctx.restore()
+            } else if (iconName === "browser") {
+                ctx.save()
+                const grad = ctx.createLinearGradient(s * 0.22, s * 0.18, s * 0.82, s * 0.78)
+                grad.addColorStop(0, "rgba(255, 159, 83, 0.95)")
+                grad.addColorStop(0.48, "rgba(255, 104, 104, 0.92)")
+                grad.addColorStop(1, "rgba(139, 134, 236, 0.88)")
+                ctx.fillStyle = grad
+                ctx.beginPath()
+                ctx.arc(cx, cy, s * 0.34, 0, Math.PI * 2, false)
+                ctx.fill()
+                ctx.fillStyle = "rgba(255, 226, 137, 0.82)"
+                ctx.beginPath()
+                ctx.arc(cx - s * 0.11, cy - s * 0.06, s * 0.20, Math.PI * 0.12, Math.PI * 1.62, false)
+                ctx.lineTo(cx + s * 0.16, cy - s * 0.16)
+                ctx.closePath()
+                ctx.fill()
+                ctx.fillStyle = "rgba(105, 166, 241, 0.86)"
+                ctx.beginPath()
+                ctx.arc(cx + s * 0.04, cy + s * 0.05, s * 0.16, 0, Math.PI * 2, false)
+                ctx.fill()
+                ctx.restore()
+            } else if (iconName === "discord") {
+                ctx.save()
+                ctx.fillStyle = "rgba(180, 168, 224, 0.58)"
+                ctx.strokeStyle = "rgba(137, 116, 190, 0.86)"
+                ctx.lineWidth = Math.max(1.4, s * 0.070)
+                ctx.beginPath()
+                ctx.moveTo(s * 0.21, s * 0.45)
+                ctx.quadraticCurveTo(s * 0.29, s * 0.27, s * 0.44, s * 0.31)
+                ctx.quadraticCurveTo(s * 0.50, s * 0.35, s * 0.56, s * 0.31)
+                ctx.quadraticCurveTo(s * 0.71, s * 0.27, s * 0.79, s * 0.45)
+                ctx.quadraticCurveTo(s * 0.88, s * 0.62, s * 0.75, s * 0.75)
+                ctx.quadraticCurveTo(s * 0.67, s * 0.82, s * 0.57, s * 0.72)
+                ctx.quadraticCurveTo(s * 0.50, s * 0.76, s * 0.43, s * 0.72)
+                ctx.quadraticCurveTo(s * 0.33, s * 0.82, s * 0.25, s * 0.75)
+                ctx.quadraticCurveTo(s * 0.12, s * 0.62, s * 0.21, s * 0.45)
+                ctx.closePath()
+                ctx.fill()
+                ctx.stroke()
+                ctx.fillStyle = "rgba(130, 108, 184, 0.92)"
+                ctx.beginPath()
+                ctx.arc(s * 0.39, s * 0.53, s * 0.038, 0, Math.PI * 2, false)
+                ctx.arc(s * 0.61, s * 0.53, s * 0.038, 0, Math.PI * 2, false)
+                ctx.fill()
+                ctx.strokeStyle = "rgba(130, 108, 184, 0.78)"
+                ctx.lineWidth = Math.max(1, s * 0.040)
+                ctx.beginPath()
+                ctx.moveTo(s * 0.35, s * 0.64)
+                ctx.quadraticCurveTo(s * 0.50, s * 0.70, s * 0.65, s * 0.64)
+                ctx.stroke()
+                ctx.restore()
+            } else if (iconName === "volume" || iconName === "volume-muted") {
+                ctx.beginPath()
+                ctx.moveTo(s * 0.16, s * 0.43)
+                ctx.lineTo(s * 0.32, s * 0.43)
+                ctx.lineTo(s * 0.52, s * 0.27)
+                ctx.lineTo(s * 0.52, s * 0.73)
+                ctx.lineTo(s * 0.32, s * 0.57)
+                ctx.lineTo(s * 0.16, s * 0.57)
+                ctx.closePath()
+                ctx.stroke()
+                if (iconName === "volume-muted") {
+                    ctx.beginPath()
+                    ctx.moveTo(s * 0.66, s * 0.40)
+                    ctx.lineTo(s * 0.84, s * 0.58)
+                    ctx.moveTo(s * 0.84, s * 0.40)
+                    ctx.lineTo(s * 0.66, s * 0.58)
+                    ctx.stroke()
+                } else {
+                    ctx.beginPath()
+                    ctx.arc(s * 0.55, s * 0.50, s * (0.14 + Math.max(0, Math.min(1, value)) * 0.10), Math.PI * 1.68, Math.PI * 0.32, false)
+                    ctx.stroke()
+                }
+            } else if (iconName === "wifi") {
+                for (let i = 0; i < 3; i += 1) {
+                    ctx.globalAlpha = 0.52 + i * 0.14
+                    ctx.beginPath()
+                    ctx.arc(cx, cy + s * 0.16, s * (0.16 + i * 0.14), Math.PI * 1.18, Math.PI * 1.82, false)
+                    ctx.stroke()
+                }
+                ctx.globalAlpha = 1
+                ctx.beginPath()
+                ctx.arc(cx, cy + s * 0.20, s * 0.035, 0, Math.PI * 2, false)
+                ctx.fill()
+            } else if (iconName === "sun") {
+                ctx.beginPath()
+                ctx.arc(cx, cy, s * 0.16, 0, Math.PI * 2, false)
+                ctx.stroke()
+                for (let i = 0; i < 8; i += 1) {
+                    const a = (i / 8) * Math.PI * 2
+                    ctx.beginPath()
+                    ctx.moveTo(cx + Math.cos(a) * s * 0.29, cy + Math.sin(a) * s * 0.29)
+                    ctx.lineTo(cx + Math.cos(a) * s * 0.40, cy + Math.sin(a) * s * 0.40)
+                    ctx.stroke()
+                }
+            } else if (iconName === "bell") {
+                ctx.beginPath()
+                ctx.moveTo(s * 0.29, s * 0.64)
+                ctx.lineTo(s * 0.71, s * 0.64)
+                ctx.quadraticCurveTo(s * 0.65, s * 0.53, s * 0.65, s * 0.42)
+                ctx.quadraticCurveTo(s * 0.65, s * 0.24, s * 0.50, s * 0.24)
+                ctx.quadraticCurveTo(s * 0.35, s * 0.24, s * 0.35, s * 0.42)
+                ctx.quadraticCurveTo(s * 0.35, s * 0.53, s * 0.29, s * 0.64)
+                ctx.stroke()
+                ctx.beginPath()
+                ctx.moveTo(s * 0.44, s * 0.74)
+                ctx.quadraticCurveTo(s * 0.50, s * 0.81, s * 0.56, s * 0.74)
+                ctx.stroke()
+            } else if (iconName === "settings") {
+                ctx.lineWidth = Math.max(1.5, s * 0.070)
+                ctx.beginPath()
+                for (let i = 0; i < 16; i += 1) {
+                    const a = -Math.PI / 2 + (i / 16) * Math.PI * 2
+                    const r = i % 2 === 0 ? s * 0.38 : s * 0.30
+                    const x = cx + Math.cos(a) * r
+                    const y = cy + Math.sin(a) * r
+
+                    if (i === 0)
+                        ctx.moveTo(x, y)
+                    else
+                        ctx.lineTo(x, y)
+                }
+                ctx.closePath()
+                ctx.stroke()
+
+                ctx.beginPath()
+                ctx.arc(cx, cy, s * 0.13, 0, Math.PI * 2, false)
+                ctx.stroke()
+            } else {
+                ctx.beginPath()
+                ctx.arc(cx, cy, s * 0.28, 0, Math.PI * 2, false)
+                ctx.stroke()
+            }
+        }
+    }
+}
