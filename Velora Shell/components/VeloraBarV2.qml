@@ -13,22 +13,23 @@ Item {
 
     property var theme: null
     property alias panelMaskItem: panelSurface
-    readonly property int cornerRadius: 20
+    readonly property bool rightSoft: theme && theme.barPosition === "right"
+    readonly property int cornerRadius: rightSoft ? 24 : 20
     readonly property bool pywalStyle: theme && theme.themeId === "pywal16"
     readonly property bool neon: pywalStyle && theme.themeMode === "dark"
-    readonly property color ink: theme ? theme.textPrimary : Qt.rgba(0.46, 0.37, 0.54, 0.82)
-    readonly property color inkSoft: theme ? theme.textSecondary : Qt.rgba(0.58, 0.48, 0.64, 0.62)
-    readonly property color pink: theme ? (pywalStyle ? theme.accentSecondary : theme.accentPrimary) : Qt.rgba(0.88, 0.45, 0.66, 0.86)
-    readonly property color lilac: theme ? (pywalStyle ? theme.accentPrimary : theme.accentSecondary) : Qt.rgba(0.58, 0.47, 0.76, 0.78)
+    readonly property color ink: rightSoft && pywalStyle && theme ? theme.textPrimary : (rightSoft ? Qt.rgba(244 / 255, 234 / 255, 247 / 255, 0.96) : (theme ? theme.textPrimary : Qt.rgba(0.46, 0.37, 0.54, 0.82)))
+    readonly property color inkSoft: rightSoft && pywalStyle && theme ? theme.textSecondary : (rightSoft ? Qt.rgba(201 / 255, 182 / 255, 210 / 255, 0.82) : (theme ? theme.textSecondary : Qt.rgba(0.58, 0.48, 0.64, 0.62)))
+    readonly property color pink: rightSoft && pywalStyle && theme ? theme.accentPrimary : (rightSoft ? Qt.rgba(240 / 255, 143 / 255, 194 / 255, 0.96) : (theme ? (pywalStyle ? theme.accentSecondary : theme.accentPrimary) : Qt.rgba(0.88, 0.45, 0.66, 0.86)))
+    readonly property color lilac: rightSoft && pywalStyle && theme ? theme.accentSecondary : (rightSoft ? Qt.rgba(218 / 255, 189 / 255, 244 / 255, 0.84) : (theme ? (pywalStyle ? theme.accentPrimary : theme.accentSecondary) : Qt.rgba(0.58, 0.47, 0.76, 0.78)))
     readonly property bool popupAttached: activePopupType.length > 0
-    readonly property color glass: theme ? theme.surfaceSidebar : Qt.rgba(1, 0.988, 0.997, 0.66)
-    readonly property color card: theme ? theme.surfaceCard : Qt.rgba(1, 1, 1, 0.70)
-    readonly property color borderSoft: theme ? theme.borderSoft : Qt.rgba(1, 1, 1, 0.82)
+    readonly property color glass: rightSoft && pywalStyle && theme ? theme.mix(theme.surfaceSidebar, Qt.rgba(28 / 255, 24 / 255, 38 / 255, 1), 0.32, Math.max(0.72, theme.sidebarOpacity)) : (rightSoft ? Qt.rgba(28 / 255, 24 / 255, 38 / 255, 0.82) : (theme ? theme.surfaceSidebar : Qt.rgba(1, 0.988, 0.997, 0.66)))
+    readonly property color card: rightSoft && pywalStyle && theme ? theme.mix(theme.surfaceCard, Qt.rgba(62 / 255, 52 / 255, 76 / 255, 1), 0.30, Math.max(0.46, theme.cardOpacity)) : (rightSoft ? Qt.rgba(62 / 255, 52 / 255, 76 / 255, 0.50) : (theme ? theme.surfaceCard : Qt.rgba(1, 1, 1, 0.70)))
+    readonly property color borderSoft: rightSoft && pywalStyle && theme ? theme.withAlpha(theme.sidebarBorderGlow, Math.min(0.30, Math.max(0.16, theme.sidebarBorderGlow.a))) : (rightSoft ? Qt.rgba(255 / 255, 210 / 255, 235 / 255, 0.22) : (theme ? theme.borderSoft : Qt.rgba(1, 1, 1, 0.82)))
     readonly property string uiFont: "Noto Sans CJK JP"
     readonly property string monoFont: "JetBrainsMono Nerd Font"
     readonly property int notificationCount: Number(NotificationServer.trackedCount || 0)
-    readonly property real uiScale: Math.min(1.12, Math.max(1.0, height / 1032))
-    readonly property int stretchGap: Math.round(Math.min(14, Math.max(0, (height - 1032) / 7)))
+    readonly property real uiScale: rightSoft ? Math.min(1.08, Math.max(1.0, height / 1080)) : Math.min(1.12, Math.max(1.0, height / 1032))
+    readonly property int stretchGap: Math.round(Math.min(rightSoft ? 10 : 14, Math.max(0, (height - (rightSoft ? 1080 : 1032)) / 7)))
     property string clockText: Qt.formatDateTime(new Date(), "HH:mm")
     property string dateText: formatJapaneseDate(new Date())
     property var batteryDevice: null
@@ -501,7 +502,9 @@ Item {
         width: panelSurface.width
         height: panelSurface.height - 8
         radius: root.cornerRadius + 2
-        color: root.alpha(root.theme ? root.theme.shadowColor : Qt.rgba(0.56, 0.36, 0.52, 1), root.popupAttached ? 0 : (root.pywalStyle && root.theme ? 0.035 + root.theme.generalGlow * 0.02 : 0.07))
+        color: root.rightSoft
+            ? Qt.rgba(0, 0, 0, root.popupAttached ? 0 : 0.16)
+            : root.alpha(root.theme ? root.theme.shadowColor : Qt.rgba(0.56, 0.36, 0.52, 1), root.popupAttached ? 0 : (root.pywalStyle && root.theme ? 0.035 + root.theme.generalGlow * 0.02 : 0.07))
     }
 
     Rectangle {
@@ -511,7 +514,9 @@ Item {
         radius: root.cornerRadius
         color: root.glass
         border.width: root.popupAttached ? 0 : 1
-        border.color: root.pywalStyle && root.theme
+        border.color: root.rightSoft
+            ? root.borderSoft
+            : root.pywalStyle && root.theme
             ? root.alpha(root.theme.popupBorderGlow, root.popupAttached ? root.theme.popupBorderGlow.a * 0.26 : root.theme.sidebarBorderGlow.a)
             : root.alpha(root.borderSoft, root.popupAttached ? 0.34 : root.borderSoft.a)
         clip: true
@@ -522,8 +527,10 @@ Item {
             radius: root.pywalStyle ? 34 : 34
             samples: root.pywalStyle ? 69 : 65
             horizontalOffset: 0
-            verticalOffset: root.pywalStyle ? 0 : 11
-            color: root.pywalStyle && root.theme
+            verticalOffset: root.rightSoft ? 8 : (root.pywalStyle ? 0 : 11)
+            color: root.rightSoft
+                ? Qt.rgba(0, 0, 0, root.popupAttached ? 0.04 : 0.22)
+                : root.pywalStyle && root.theme
                 ? root.alpha(root.theme.popupBorderGlow, root.theme.popupBorderGlow.a * (root.popupAttached ? 0.08 : 0.50))
                 : root.alpha(root.theme ? root.theme.shadowColor : Qt.rgba(0.38, 0.25, 0.42, 1), root.popupAttached ? 0.035 : 0.15)
         }
@@ -545,7 +552,9 @@ Item {
             color: "transparent"
             visible: !root.popupAttached
             border.width: 1
-            border.color: root.pywalStyle && root.theme
+            border.color: root.rightSoft
+                ? Qt.rgba(1, 1, 1, 0.055)
+                : root.pywalStyle && root.theme
                 ? root.alpha(root.theme.popupBorderGlow, root.theme.popupBorderGlow.a * (root.popupAttached ? 0.16 : 0.58))
                 : root.alpha(root.borderSoft, root.popupAttached ? 0.12 : 0.28)
         }
@@ -558,10 +567,10 @@ Item {
 
         anchors {
             fill: panelSurface
-            leftMargin: 16
-            rightMargin: 16
-            topMargin: Math.round(18 * root.uiScale)
-            bottomMargin: Math.round(14 * root.uiScale)
+            leftMargin: root.rightSoft ? 17 : 16
+            rightMargin: root.rightSoft ? 17 : 16
+            topMargin: root.rightSoft ? Math.round(20 * root.uiScale) : Math.round(18 * root.uiScale)
+            bottomMargin: root.rightSoft ? Math.round(18 * root.uiScale) : Math.round(14 * root.uiScale)
         }
 
         spacing: 0
@@ -899,7 +908,7 @@ Item {
     component Divider: Rectangle {
         height: 1
         radius: 1
-        color: root.alpha(root.lilac, 0.22)
+        color: root.rightSoft ? Qt.rgba(1, 1, 1, 0.08) : root.alpha(root.lilac, 0.22)
     }
 
     component WorkspaceButton: Rectangle {
@@ -988,7 +997,7 @@ Item {
             width: Math.round(24 * root.uiScale)
             height: Math.round(24 * root.uiScale)
             iconName: row.iconName
-            lineColor: row.selected ? root.lilac : (row.hovered ? root.pink : root.inkSoft)
+            lineColor: row.selected ? (root.rightSoft ? root.pink : root.lilac) : (row.hovered ? root.pink : root.inkSoft)
             layer.enabled: root.pywalStyle && (row.selected || row.hovered)
             layer.effect: DropShadow {
                 transparentBorder: true
@@ -1058,7 +1067,7 @@ Item {
         radius: Math.round(8 * root.uiScale)
         color: hovered ? root.alpha(root.card, 0.84) : root.alpha(root.card, 0.58)
         border.width: 1
-        border.color: root.alpha(root.borderSoft, 0.76)
+        border.color: root.rightSoft ? Qt.rgba(1, 1, 1, 0.14) : root.alpha(root.borderSoft, 0.76)
         layer.enabled: true
         layer.effect: DropShadow {
             transparentBorder: true
@@ -1144,7 +1153,7 @@ Item {
             width: Math.round(26 * root.uiScale)
             height: Math.round(26 * root.uiScale)
             iconName: button.iconName
-            lineColor: button.selected ? root.lilac : (button.hovered ? root.pink : root.inkSoft)
+            lineColor: button.selected ? (root.rightSoft ? root.pink : root.lilac) : (button.hovered ? root.pink : root.inkSoft)
             value: button.iconName === "battery" && root.batteryDevice && root.batteryDevice.ready ? root.batteryDevice.percentage : Math.max(0.08, Math.min(1, root.volume / 100))
             layer.enabled: root.pywalStyle && (button.selected || button.hovered)
             layer.effect: DropShadow {
@@ -1211,7 +1220,7 @@ Item {
         radius: width / 2
         color: root.alpha(root.card, 0.62)
         border.width: 1
-        border.color: root.alpha(root.borderSoft, 0.84)
+        border.color: root.rightSoft ? root.alpha(root.pink, 0.42) : root.alpha(root.borderSoft, 0.84)
         clip: true
         layer.enabled: true
         layer.effect: DropShadow {
@@ -1220,7 +1229,7 @@ Item {
             samples: 33
             horizontalOffset: 0
             verticalOffset: 5
-            color: root.alpha(root.theme ? root.theme.shadowColor : Qt.rgba(0.38, 0.25, 0.42, 1), 0.13)
+            color: root.rightSoft ? Qt.rgba(0, 0, 0, 0.20) : root.alpha(root.theme ? root.theme.shadowColor : Qt.rgba(0.38, 0.25, 0.42, 1), 0.13)
         }
 
         Image {
@@ -1347,6 +1356,28 @@ Item {
             ctx.closePath()
         }
 
+        function colorString(colorValue, opacity) {
+            const a = opacity === undefined ? colorValue.a : opacity
+            return "rgba("
+                + Math.round(colorValue.r * 255) + ", "
+                + Math.round(colorValue.g * 255) + ", "
+                + Math.round(colorValue.b * 255) + ", "
+                + Math.max(0, Math.min(1, a)) + ")"
+        }
+
+        function mixedColorString(colorValue, r, g, b, amount, opacity) {
+            const t = Math.max(0, Math.min(1, amount))
+            const rr = colorValue.r + (r - colorValue.r) * t
+            const gg = colorValue.g + (g - colorValue.g) * t
+            const bb = colorValue.b + (b - colorValue.b) * t
+            const a = opacity === undefined ? colorValue.a : opacity
+            return "rgba("
+                + Math.round(rr * 255) + ", "
+                + Math.round(gg * 255) + ", "
+                + Math.round(bb * 255) + ", "
+                + Math.max(0, Math.min(1, a)) + ")"
+        }
+
         function setup(ctx) {
             ctx.reset()
             ctx.clearRect(0, 0, width, height)
@@ -1386,16 +1417,16 @@ Item {
                 ctx.stroke()
             } else if (iconName === "folder") {
                 ctx.save()
-                ctx.fillStyle = "rgba(122, 177, 232, 0.88)"
+                ctx.fillStyle = colorString(lineColor, 0.78)
                 roundedRect(ctx, s * 0.16, s * 0.34, s * 0.68, s * 0.44, s * 0.08)
                 ctx.fill()
-                ctx.fillStyle = "rgba(153, 199, 239, 0.94)"
+                ctx.fillStyle = mixedColorString(lineColor, 1, 1, 1, 0.26, 0.86)
                 roundedRect(ctx, s * 0.18, s * 0.25, s * 0.31, s * 0.20, s * 0.06)
                 ctx.fill()
-                ctx.fillStyle = "rgba(230, 243, 255, 0.42)"
+                ctx.fillStyle = mixedColorString(lineColor, 1, 1, 1, 0.74, 0.34)
                 roundedRect(ctx, s * 0.23, s * 0.43, s * 0.50, s * 0.09, s * 0.04)
                 ctx.fill()
-                ctx.strokeStyle = "rgba(91, 139, 202, 0.62)"
+                ctx.strokeStyle = mixedColorString(lineColor, 0, 0, 0, 0.28, 0.58)
                 ctx.lineWidth = Math.max(1, s * 0.045)
                 roundedRect(ctx, s * 0.16, s * 0.34, s * 0.68, s * 0.44, s * 0.08)
                 ctx.stroke()
@@ -1415,28 +1446,28 @@ Item {
             } else if (iconName === "browser") {
                 ctx.save()
                 const grad = ctx.createLinearGradient(s * 0.22, s * 0.18, s * 0.82, s * 0.78)
-                grad.addColorStop(0, "rgba(255, 159, 83, 0.95)")
-                grad.addColorStop(0.48, "rgba(255, 104, 104, 0.92)")
-                grad.addColorStop(1, "rgba(139, 134, 236, 0.88)")
+                grad.addColorStop(0, mixedColorString(lineColor, 1, 1, 1, 0.34, 0.94))
+                grad.addColorStop(0.48, colorString(lineColor, 0.90))
+                grad.addColorStop(1, colorString(root.lilac, 0.82))
                 ctx.fillStyle = grad
                 ctx.beginPath()
                 ctx.arc(cx, cy, s * 0.34, 0, Math.PI * 2, false)
                 ctx.fill()
-                ctx.fillStyle = "rgba(255, 226, 137, 0.82)"
+                ctx.fillStyle = mixedColorString(lineColor, 1, 1, 1, 0.58, 0.66)
                 ctx.beginPath()
                 ctx.arc(cx - s * 0.11, cy - s * 0.06, s * 0.20, Math.PI * 0.12, Math.PI * 1.62, false)
                 ctx.lineTo(cx + s * 0.16, cy - s * 0.16)
                 ctx.closePath()
                 ctx.fill()
-                ctx.fillStyle = "rgba(105, 166, 241, 0.86)"
+                ctx.fillStyle = colorString(root.lilac, 0.78)
                 ctx.beginPath()
                 ctx.arc(cx + s * 0.04, cy + s * 0.05, s * 0.16, 0, Math.PI * 2, false)
                 ctx.fill()
                 ctx.restore()
             } else if (iconName === "discord") {
                 ctx.save()
-                ctx.fillStyle = "rgba(180, 168, 224, 0.58)"
-                ctx.strokeStyle = "rgba(137, 116, 190, 0.86)"
+                ctx.fillStyle = mixedColorString(lineColor, 1, 1, 1, 0.26, 0.46)
+                ctx.strokeStyle = colorString(lineColor, 0.84)
                 ctx.lineWidth = Math.max(1.4, s * 0.070)
                 ctx.beginPath()
                 ctx.moveTo(s * 0.21, s * 0.45)
@@ -1451,12 +1482,12 @@ Item {
                 ctx.closePath()
                 ctx.fill()
                 ctx.stroke()
-                ctx.fillStyle = "rgba(130, 108, 184, 0.92)"
+                ctx.fillStyle = mixedColorString(lineColor, 1, 1, 1, 0.72, 0.94)
                 ctx.beginPath()
                 ctx.arc(s * 0.39, s * 0.53, s * 0.038, 0, Math.PI * 2, false)
                 ctx.arc(s * 0.61, s * 0.53, s * 0.038, 0, Math.PI * 2, false)
                 ctx.fill()
-                ctx.strokeStyle = "rgba(130, 108, 184, 0.78)"
+                ctx.strokeStyle = mixedColorString(lineColor, 1, 1, 1, 0.68, 0.86)
                 ctx.lineWidth = Math.max(1, s * 0.040)
                 ctx.beginPath()
                 ctx.moveTo(s * 0.35, s * 0.64)

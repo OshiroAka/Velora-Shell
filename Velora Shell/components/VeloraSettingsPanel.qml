@@ -466,7 +466,7 @@ Item {
 
                     LayoutToggleButton {
                         width: 116
-                        label: "バー左"
+                        label: "左Classic"
                         active: root.theme ? root.theme.barPosition === "left" : true
                         onClicked: {
                             if (root.theme)
@@ -476,7 +476,7 @@ Item {
 
                     LayoutToggleButton {
                         width: 116
-                        label: "バー右"
+                        label: "右Soft"
                         active: root.theme ? root.theme.barPosition === "right" : false
                         onClicked: {
                             if (root.theme)

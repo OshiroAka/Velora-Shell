@@ -26,12 +26,17 @@ ShellRoot {
     property string rightDashboardSection: "weather"
     property bool focusMode: false
     property int focusIndex: 0
-    readonly property int barPanelWidth: 108
-    readonly property int barReserveWidth: barPanelWidth
-    readonly property int desktopFrameMargin: 20
-    readonly property int desktopFrameRadius: 10
-    readonly property real desktopFrameMatteOpacity: Math.max(0, Math.min(0.96, veloraTheme.sidebarOpacity))
     readonly property bool barOnRight: veloraTheme.barPosition === "right"
+    readonly property bool rightSoftLayout: barOnRight
+    readonly property int sidebarVisualWidth: rightSoftLayout ? 112 : 108
+    readonly property int sidebarOuterMargin: rightSoftLayout ? 18 : 0
+    readonly property int sidebarVerticalMargin: rightSoftLayout ? 20 : desktopFrameMargin
+    readonly property int barPanelWidth: sidebarVisualWidth + sidebarOuterMargin
+    readonly property int barReserveWidth: barPanelWidth
+    readonly property int desktopFrameMargin: rightSoftLayout ? 16 : 20
+    readonly property int desktopFrameRadius: rightSoftLayout ? 12 : 10
+    readonly property real desktopFrameMatteOpacity: rightSoftLayout ? 0.035 : Math.max(0, Math.min(0.2, veloraTheme.sidebarOpacity))
+    readonly property int popupFrameGap: rightSoftLayout ? 14 : 0
     readonly property string popupAttachSide: barOnRight ? "right" : "left"
     property real quickPopupCenterY: 300
     property bool quickPopupWindowOpen: false
@@ -71,6 +76,18 @@ ShellRoot {
 
     function desktopFrameMatteColor() {
         return veloraTheme.alpha(veloraTheme.surfaceBase, desktopFrameMatteOpacity)
+    }
+
+    function desktopFrameBorderColor() {
+        return rightSoftLayout
+            ? veloraTheme.alpha(veloraTheme.borderSoft, 0.18)
+            : veloraTheme.alpha(veloraTheme.popupBorderGlow, veloraTheme.themeMode === "dark" ? 0.46 : 0.34)
+    }
+
+    function desktopFrameHighlightColor() {
+        return rightSoftLayout
+            ? veloraTheme.alpha(veloraTheme.borderSoft, 0.07)
+            : veloraTheme.alpha(veloraTheme.borderSoft, veloraTheme.themeMode === "dark" ? 0.30 : 0.46)
     }
 
     function enterFocus() {
@@ -275,6 +292,11 @@ ShellRoot {
     }
 
     function openRightDashboard(section) {
+        if (rightSoftLayout) {
+            rightDashboardOpen = false
+            return
+        }
+
         const value = section && section.length > 0 ? section : "weather"
         rightDashboardSection = value
         rightDashboardOpen = true
@@ -285,7 +307,7 @@ ShellRoot {
     }
 
     function barX(screenWidth) {
-        return barOnRight ? Math.max(0, screenWidth - barPanelWidth) : 0
+        return barOnRight ? Math.max(0, screenWidth - sidebarOuterMargin - sidebarVisualWidth) : 0
     }
 
     function mainAreaX(screenWidth) {
@@ -293,7 +315,7 @@ ShellRoot {
     }
 
     function mainAreaRightInset(screenWidth) {
-        return barOnRight ? barPanelWidth : desktopFrameMargin
+        return barOnRight ? barPanelWidth + desktopFrameMargin : desktopFrameMargin
     }
 
     function mainAreaWidth(screenWidth) {
@@ -301,14 +323,20 @@ ShellRoot {
     }
 
     function quickPopupX(screenWidth, popupWidth) {
-        if (barOnRight)
+        if (barOnRight) {
+            if (rightSoftLayout)
+                return Math.round(Math.max(desktopFrameMargin, screenWidth - barPanelWidth - desktopFrameMargin - popupFrameGap - popupWidth))
             return Math.round(Math.max(desktopFrameMargin, screenWidth - barPanelWidth - popupWidth))
+        }
         return barPanelWidth
     }
 
     function attachedPopupX(screenWidth, popupWidth) {
-        if (barOnRight)
+        if (barOnRight) {
+            if (rightSoftLayout)
+                return Math.round(Math.max(desktopFrameMargin, screenWidth - barPanelWidth - desktopFrameMargin - popupFrameGap - popupWidth))
             return Math.round(Math.max(desktopFrameMargin, screenWidth - barPanelWidth - popupWidth))
+        }
         return barPanelWidth
     }
 
@@ -345,8 +373,9 @@ ShellRoot {
     }
 
     function quickPopupY(type, panelHeight, screenHeight) {
+        const edgeMargin = rightSoftLayout ? desktopFrameMargin + popupFrameGap : 22
         const wanted = quickPopupCenterY - panelHeight / 2
-        return Math.round(Math.max(22, Math.min(screenHeight - panelHeight - 22, wanted)))
+        return Math.round(Math.max(edgeMargin, Math.min(screenHeight - panelHeight - edgeMargin, wanted)))
     }
 
     Timer {
@@ -501,8 +530,8 @@ ShellRoot {
             required property var modelData
             readonly property bool compositorReservedBarSpace: modelData.width > 0 && width <= modelData.width - root.barPanelWidth + 2
             readonly property color frameMatteColor: root.desktopFrameMatteColor()
-            readonly property color frameBorderColor: veloraTheme.alpha(veloraTheme.popupBorderGlow, veloraTheme.themeMode === "dark" ? 0.46 : 0.34)
-            readonly property color frameHighlightColor: veloraTheme.alpha(veloraTheme.borderSoft, veloraTheme.themeMode === "dark" ? 0.30 : 0.46)
+            readonly property color frameBorderColor: root.desktopFrameBorderColor()
+            readonly property color frameHighlightColor: root.desktopFrameHighlightColor()
 
             visible: veloraTheme.desktopFrameEnabled
             screen: modelData
@@ -522,7 +551,7 @@ ShellRoot {
             function frameX() {
                 if (compositorReservedBarSpace)
                     return root.desktopFrameMargin
-                return root.mainAreaX(width) + root.desktopFrameMargin
+                return root.rightSoftLayout ? root.mainAreaX(width) : root.mainAreaX(width) + root.desktopFrameMargin
             }
 
             function frameY() {
@@ -532,7 +561,7 @@ ShellRoot {
             function frameWidth() {
                 if (compositorReservedBarSpace)
                     return Math.max(0, width - root.desktopFrameMargin * 2)
-                return Math.max(0, root.mainAreaWidth(width) - root.desktopFrameMargin * 2)
+                return root.rightSoftLayout ? Math.max(0, root.mainAreaWidth(width)) : Math.max(0, root.mainAreaWidth(width) - root.desktopFrameMargin * 2)
             }
 
             function frameHeight() {
@@ -714,12 +743,28 @@ ShellRoot {
             Rectangle {
                 id: barGutterFill
 
-                x: root.barX(parent.width)
+                x: root.rightSoftLayout ? root.mainAreaX(parent.width) + root.mainAreaWidth(parent.width) : root.barX(parent.width)
                 y: 0
-                width: root.barPanelWidth
+                width: root.rightSoftLayout ? Math.max(0, parent.width - x) : root.barPanelWidth
                 height: parent.height
                 visible: veloraTheme.desktopFrameEnabled
-                color: root.desktopFrameMatteColor()
+                color: root.rightSoftLayout ? veloraTheme.alpha(veloraTheme.surfaceSidebar, 0.14) : root.desktopFrameMatteColor()
+                antialiasing: false
+            }
+
+            Rectangle {
+                id: rightSoftBackRail
+
+                readonly property int railX: Math.round(root.barX(parent.width) + root.sidebarVisualWidth)
+
+                x: railX
+                y: root.desktopFrameMargin
+                width: Math.max(0, parent.width - railX)
+                height: Math.max(0, parent.height - root.desktopFrameMargin * 2)
+                visible: veloraTheme.desktopFrameEnabled && root.rightSoftLayout
+                color: "transparent"
+                border.width: 1
+                border.color: veloraTheme.alpha(veloraTheme.sidebarBorderGlow, 0.20)
                 antialiasing: false
             }
 
@@ -727,7 +772,7 @@ ShellRoot {
                 id: barRoot
 
                 theme: veloraTheme
-                width: root.barPanelWidth
+                width: root.sidebarVisualWidth
                 x: root.barX(parent.width)
                 focusMode: root.focusMode
                 focusIndex: root.focusIndex
@@ -759,8 +804,8 @@ ShellRoot {
                 anchors {
                     top: parent.top
                     bottom: parent.bottom
-                    topMargin: root.desktopFrameMargin
-                    bottomMargin: root.desktopFrameMargin
+                    topMargin: root.sidebarVerticalMargin
+                    bottomMargin: root.sidebarVerticalMargin
                 }
             }
 
@@ -793,14 +838,14 @@ ShellRoot {
                 height: inlineQuickPopup.height
                 radius: inlineQuickPopup.cornerRadius
                 revealProgress: inlineQuickPopup.revealProgress
-                visible: root.quickPopupPanelVisible
+                visible: root.quickPopupPanelVisible && !root.rightSoftLayout
             }
 
             VeloraSidePopup {
                 id: inlineQuickPopup
 
                 theme: veloraTheme
-                externalSurface: true
+                externalSurface: !root.rightSoftLayout
                 attachSide: root.popupAttachSide
                 popupType: root.visibleQuickPopupType
                 open: root.quickPopupVisible
@@ -928,7 +973,7 @@ ShellRoot {
                     height: inlineWallpaperSelector.height
                     radius: inlineWallpaperSelector.cornerRadius
                     revealProgress: inlineWallpaperSelector.revealProgress
-                    visible: root.wallpaperSelectorPanelVisible
+                    visible: root.wallpaperSelectorPanelVisible && !root.rightSoftLayout
                 }
 
                 VeloraWallpaperSelector {
@@ -936,7 +981,7 @@ ShellRoot {
 
                     z: 3
                     theme: veloraTheme
-                    externalSurface: true
+                    externalSurface: !root.rightSoftLayout
                     width: Math.round(Math.min(root.quickPopupWidth("theme"), parent.width * 0.47))
                     height: Math.round(Math.min(root.quickPopupHeight("theme"), width * 0.63))
                     x: root.attachedPopupX(parent.width, width)
@@ -1001,7 +1046,7 @@ ShellRoot {
                     height: inlineSettingsPanel.height
                     radius: inlineSettingsPanel.cornerRadius
                     revealProgress: inlineSettingsPanel.revealProgress
-                    visible: root.settingsPanelPanelVisible
+                    visible: root.settingsPanelPanelVisible && !root.rightSoftLayout
                 }
 
                 VeloraSettingsPanel {
@@ -1009,7 +1054,7 @@ ShellRoot {
 
                     z: 5
                     theme: veloraTheme
-                    externalSurface: true
+                    externalSurface: !root.rightSoftLayout
                     width: Math.round(Math.min(root.quickPopupWidth("settings"), parent.width * 0.49))
                     height: Math.round(Math.min(root.quickPopupHeight("settings"), width * 0.66))
                     x: root.attachedPopupX(parent.width, width)
@@ -1083,7 +1128,7 @@ ShellRoot {
             id: dashboardPanel
 
             required property var modelData
-            property real dashboardReveal: root.rightDashboardOpen ? 1 : 0
+            property real dashboardReveal: !root.rightSoftLayout && root.rightDashboardOpen ? 1 : 0
             readonly property bool dashboardOnLeft: root.barOnRight
             readonly property int triggerWidth: 34
             readonly property int cardWidth: 372
@@ -1099,6 +1144,7 @@ ShellRoot {
             readonly property int activeCardY: sectionY(root.rightDashboardSection)
             readonly property int activeCardHeight: sectionHeight(root.rightDashboardSection)
 
+            visible: !root.rightSoftLayout
             screen: modelData
             color: "transparent"
             implicitWidth: panelWidth

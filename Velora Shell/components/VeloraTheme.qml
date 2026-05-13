@@ -19,6 +19,9 @@ QtObject {
     property bool borderOverrideActive: false
     property bool borderAdaptEnabled: true
     property bool paletteApplying: false
+    property bool paletteAnimatedApply: false
+    readonly property bool paletteBehaviorEnabled: !paletteApplying || paletteAnimatedApply
+    readonly property int paletteTransitionDuration: paletteAnimatedApply ? 560 : 260
     property string barPosition: "left"
     property bool desktopFrameEnabled: true
     property real sidebarOpacity: 0.78
@@ -71,25 +74,36 @@ QtObject {
         { id: "pywal16", title: "pywal16", subtitle: "auto", mode: "dynamic", preview: "pywal16" }
     ]
 
-    Behavior on surfaceBase { enabled: !root.paletteApplying; ColorAnimation { duration: 260; easing.type: Easing.OutCubic } }
-    Behavior on surfaceSidebar { enabled: !root.paletteApplying; ColorAnimation { duration: 260; easing.type: Easing.OutCubic } }
-    Behavior on surfacePopup { enabled: !root.paletteApplying; ColorAnimation { duration: 260; easing.type: Easing.OutCubic } }
-    Behavior on surfaceCard { enabled: !root.paletteApplying; ColorAnimation { duration: 260; easing.type: Easing.OutCubic } }
-    Behavior on surfaceInput { enabled: !root.paletteApplying; ColorAnimation { duration: 260; easing.type: Easing.OutCubic } }
-    Behavior on surfaceButton { enabled: !root.paletteApplying; ColorAnimation { duration: 260; easing.type: Easing.OutCubic } }
-    Behavior on textPrimary { ColorAnimation { duration: 240; easing.type: Easing.OutCubic } }
-    Behavior on textSecondary { ColorAnimation { duration: 240; easing.type: Easing.OutCubic } }
-    Behavior on textMuted { ColorAnimation { duration: 240; easing.type: Easing.OutCubic } }
-    Behavior on accentPrimary { ColorAnimation { duration: 240; easing.type: Easing.OutCubic } }
-    Behavior on accentSecondary { ColorAnimation { duration: 240; easing.type: Easing.OutCubic } }
-    Behavior on accentTertiary { ColorAnimation { duration: 240; easing.type: Easing.OutCubic } }
-    Behavior on borderGlow { ColorAnimation { duration: 240; easing.type: Easing.OutCubic } }
-    Behavior on sidebarBorderGlow { ColorAnimation { duration: 240; easing.type: Easing.OutCubic } }
-    Behavior on popupBorderGlow { ColorAnimation { duration: 240; easing.type: Easing.OutCubic } }
-    Behavior on sidebarGlow { ColorAnimation { duration: 240; easing.type: Easing.OutCubic } }
-    Behavior on popupGlow { ColorAnimation { duration: 240; easing.type: Easing.OutCubic } }
-    Behavior on textGlow { ColorAnimation { duration: 240; easing.type: Easing.OutCubic } }
-    Behavior on iconGlow { ColorAnimation { duration: 240; easing.type: Easing.OutCubic } }
+    Behavior on surfaceBase { enabled: root.paletteBehaviorEnabled; ColorAnimation { duration: root.paletteTransitionDuration; easing.type: Easing.OutCubic } }
+    Behavior on surfaceSidebar { enabled: root.paletteBehaviorEnabled; ColorAnimation { duration: root.paletteTransitionDuration; easing.type: Easing.OutCubic } }
+    Behavior on surfacePopup { enabled: root.paletteBehaviorEnabled; ColorAnimation { duration: root.paletteTransitionDuration; easing.type: Easing.OutCubic } }
+    Behavior on surfaceCard { enabled: root.paletteBehaviorEnabled; ColorAnimation { duration: root.paletteTransitionDuration; easing.type: Easing.OutCubic } }
+    Behavior on surfaceInput { enabled: root.paletteBehaviorEnabled; ColorAnimation { duration: root.paletteTransitionDuration; easing.type: Easing.OutCubic } }
+    Behavior on surfaceButton { enabled: root.paletteBehaviorEnabled; ColorAnimation { duration: root.paletteTransitionDuration; easing.type: Easing.OutCubic } }
+    Behavior on textPrimary { enabled: root.paletteBehaviorEnabled; ColorAnimation { duration: root.paletteTransitionDuration; easing.type: Easing.OutCubic } }
+    Behavior on textSecondary { enabled: root.paletteBehaviorEnabled; ColorAnimation { duration: root.paletteTransitionDuration; easing.type: Easing.OutCubic } }
+    Behavior on textMuted { enabled: root.paletteBehaviorEnabled; ColorAnimation { duration: root.paletteTransitionDuration; easing.type: Easing.OutCubic } }
+    Behavior on accentPrimary { enabled: root.paletteBehaviorEnabled; ColorAnimation { duration: root.paletteTransitionDuration; easing.type: Easing.OutCubic } }
+    Behavior on accentSecondary { enabled: root.paletteBehaviorEnabled; ColorAnimation { duration: root.paletteTransitionDuration; easing.type: Easing.OutCubic } }
+    Behavior on accentTertiary { enabled: root.paletteBehaviorEnabled; ColorAnimation { duration: root.paletteTransitionDuration; easing.type: Easing.OutCubic } }
+    Behavior on borderSoft { enabled: root.paletteBehaviorEnabled; ColorAnimation { duration: root.paletteTransitionDuration; easing.type: Easing.OutCubic } }
+    Behavior on borderActive { enabled: root.paletteBehaviorEnabled; ColorAnimation { duration: root.paletteTransitionDuration; easing.type: Easing.OutCubic } }
+    Behavior on borderGlow { enabled: root.paletteBehaviorEnabled; ColorAnimation { duration: root.paletteTransitionDuration; easing.type: Easing.OutCubic } }
+    Behavior on sidebarBorderGlow { enabled: root.paletteBehaviorEnabled; ColorAnimation { duration: root.paletteTransitionDuration; easing.type: Easing.OutCubic } }
+    Behavior on popupBorderGlow { enabled: root.paletteBehaviorEnabled; ColorAnimation { duration: root.paletteTransitionDuration; easing.type: Easing.OutCubic } }
+    Behavior on buttonPrimaryBg { enabled: root.paletteBehaviorEnabled; ColorAnimation { duration: root.paletteTransitionDuration; easing.type: Easing.OutCubic } }
+    Behavior on buttonPrimaryText { enabled: root.paletteBehaviorEnabled; ColorAnimation { duration: root.paletteTransitionDuration; easing.type: Easing.OutCubic } }
+    Behavior on buttonPrimaryGlow { enabled: root.paletteBehaviorEnabled; ColorAnimation { duration: root.paletteTransitionDuration; easing.type: Easing.OutCubic } }
+    Behavior on buttonSecondaryBg { enabled: root.paletteBehaviorEnabled; ColorAnimation { duration: root.paletteTransitionDuration; easing.type: Easing.OutCubic } }
+    Behavior on buttonSecondaryText { enabled: root.paletteBehaviorEnabled; ColorAnimation { duration: root.paletteTransitionDuration; easing.type: Easing.OutCubic } }
+    Behavior on activeBg { enabled: root.paletteBehaviorEnabled; ColorAnimation { duration: root.paletteTransitionDuration; easing.type: Easing.OutCubic } }
+    Behavior on activeText { enabled: root.paletteBehaviorEnabled; ColorAnimation { duration: root.paletteTransitionDuration; easing.type: Easing.OutCubic } }
+    Behavior on hoverBg { enabled: root.paletteBehaviorEnabled; ColorAnimation { duration: root.paletteTransitionDuration; easing.type: Easing.OutCubic } }
+    Behavior on shadowColor { enabled: root.paletteBehaviorEnabled; ColorAnimation { duration: root.paletteTransitionDuration; easing.type: Easing.OutCubic } }
+    Behavior on sidebarGlow { enabled: root.paletteBehaviorEnabled; ColorAnimation { duration: root.paletteTransitionDuration; easing.type: Easing.OutCubic } }
+    Behavior on popupGlow { enabled: root.paletteBehaviorEnabled; ColorAnimation { duration: root.paletteTransitionDuration; easing.type: Easing.OutCubic } }
+    Behavior on textGlow { enabled: root.paletteBehaviorEnabled; ColorAnimation { duration: root.paletteTransitionDuration; easing.type: Easing.OutCubic } }
+    Behavior on iconGlow { enabled: root.paletteBehaviorEnabled; ColorAnimation { duration: root.paletteTransitionDuration; easing.type: Easing.OutCubic } }
 
     function alpha(colorValue, opacity) {
         return Qt.rgba(colorValue.r, colorValue.g, colorValue.b, opacity)
@@ -129,12 +143,23 @@ QtObject {
         return Math.max(minPanelOpacity(), Math.min(0.98, base))
     }
 
-    function loadPywal16() {
+    function beginPaletteApply(animate) {
+        paletteAnimatedApply = animate === true
+        paletteApplying = true
+    }
+
+    function endPaletteApply() {
+        paletteApplying = false
+    }
+
+    function loadPywal16(animate) {
         if (pywalLoadProc.running) {
             pywalLoadProc.pendingReload = true
+            pywalLoadProc.animateTheme = pywalLoadProc.animateTheme || animate === true
             return
         }
 
+        pywalLoadProc.animateTheme = animate === true
         pywalLoadProc.command = [root.pywalScript, "--emit-or-generate"]
         pywalLoadProc.running = true
     }
@@ -394,11 +419,11 @@ QtObject {
         return Qt.rgba(parts[0] / 255, parts[1] / 255, parts[2] / 255, parts.length > 3 && !isNaN(parts[3]) ? parts[3] : 1)
     }
 
-    function applyThemeData(data, idOverride, notice) {
+    function applyThemeData(data, idOverride, notice, animate) {
         if (!data)
             return false
 
-        paletteApplying = true
+        beginPaletteApply(animate === true)
         themeId = idOverride || data.id || "pywal16"
         themeName = data.themeName || themeId
         themeMode = data.themeMode || "balanced"
@@ -437,7 +462,7 @@ QtObject {
         applyLoadedBorderOverrides()
         applyLoadedGlowOverrides()
         applyLoadedOpacityOverrides()
-        paletteApplying = false
+        endPaletteApply()
         return true
     }
 
@@ -596,7 +621,7 @@ QtObject {
     function applyTheme(id, persist) {
         const next = String(id || "default")
 
-        paletteApplying = true
+        beginPaletteApply(persist !== false)
         if (next === "dark")
             setDarkPalette()
         else if (next === "pink")
@@ -608,7 +633,7 @@ QtObject {
             themeName = "pywal16"
             themeMode = "dynamic"
             themeNotice = "pywal16 selecionado; carregando tema gerado."
-            loadPywal16()
+            loadPywal16(persist !== false)
         } else {
             setDefaultPalette()
         }
@@ -616,7 +641,7 @@ QtObject {
         applyLoadedGlowOverrides()
         applyLoadedBorderOverrides()
         applyLoadedOpacityOverrides()
-        paletteApplying = false
+        endPaletteApply()
 
         if (persist !== false)
             saveTheme()
@@ -629,7 +654,7 @@ QtObject {
             themeName = "pywal16"
             themeMode = "dynamic"
             themeNotice = "Recarregando pywal16."
-            loadPywal16()
+            loadPywal16(true)
         } else if (!pywalProbe.running) {
             pywalProbe.running = true
         }
@@ -939,6 +964,7 @@ QtObject {
     property Process pywalLoadProc: Process {
         property bool gotTheme: false
         property bool pendingReload: false
+        property bool animateTheme: false
 
         running: false
         command: [root.pywalScript, "--emit-or-generate"]
@@ -958,7 +984,8 @@ QtObject {
                     root.pywalAvailable = !parsed.fallback
                     root.applyThemeData(parsed, "pywal16", parsed.fallback
                         ? "pywal16 falhou; usando Velora Default como fallback."
-                        : "pywal16 aplicado: " + (parsed.themeMode || "balanced"))
+                        : "pywal16 aplicado: " + (parsed.themeMode || "balanced"),
+                        pywalLoadProc.animateTheme)
                 } catch (e) {
                     if (root.themeId === "pywal16") {
                         root.setDefaultPalette()
@@ -972,7 +999,7 @@ QtObject {
             running = false
             if (pendingReload && root.themeId === "pywal16") {
                 pendingReload = false
-                root.loadPywal16()
+                root.loadPywal16(animateTheme)
                 return
             }
             pendingReload = false
