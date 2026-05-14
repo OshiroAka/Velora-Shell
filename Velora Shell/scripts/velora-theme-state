@@ -7,6 +7,7 @@ opacity_file="${state_dir}/opacity"
 glow_file="${state_dir}/glow"
 border_file="${state_dir}/border"
 layout_file="${state_dir}/layout"
+language_file="${state_dir}/language"
 command="${1:-get}"
 
 case "$command" in
@@ -142,8 +143,38 @@ case "$command" in
         ;;
     esac
     ;;
+  language)
+    subcommand="${2:-get}"
+    case "$subcommand" in
+      get)
+        if [[ -s "$language_file" ]]; then
+          cat "$language_file"
+        else
+          printf 'ja\n'
+        fi
+        ;;
+      set)
+        language="${3:-ja}"
+        case "$language" in
+          ja|jp|japanese) language="ja" ;;
+          en|english) language="en" ;;
+          pt|pt-BR|pt_BR|br|portuguese|portugues) language="pt-BR" ;;
+          *) language="ja" ;;
+        esac
+        mkdir -p "$state_dir"
+        printf '%s\n' "$language" > "$language_file"
+        ;;
+      reset)
+        rm -f "$language_file"
+        ;;
+      *)
+        printf 'usage: %s language get|set|reset [ja|en|pt-BR]\n' "$0" >&2
+        exit 2
+        ;;
+    esac
+    ;;
   *)
-    printf 'usage: %s get|set [theme] | opacity get|set|reset [sidebar popup card] | glow get|set|reset [general sidebar_border popup_border icon text] | border get|set|reset [adapt|manual hue] | layout get|set|reset [left|right] [0|1]\n' "$0" >&2
+    printf 'usage: %s get|set [theme] | opacity get|set|reset [sidebar popup card] | glow get|set|reset [general sidebar_border popup_border icon text] | border get|set|reset [adapt|manual hue] | layout get|set|reset [left|right] [0|1] | language get|set|reset [ja|en|pt-BR]\n' "$0" >&2
     exit 2
     ;;
 esac

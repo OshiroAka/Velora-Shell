@@ -23,23 +23,28 @@ ShellRoot {
     property bool wallpaperSelectorWindowOpen: false
     property bool settingsPanelWindowOpen: false
     property bool rightDashboardOpen: false
+    property bool leftMenuOpen: false
+    property bool leftMenuHovering: false
+    property bool leftMenuTriggerHovering: false
+    property bool leftMenuPanelHovering: false
     property string rightDashboardSection: "weather"
     property bool focusMode: false
     property int focusIndex: 0
     readonly property bool barOnRight: veloraTheme.barPosition === "right"
     readonly property bool rightSoftLayout: barOnRight
-    readonly property int sidebarVisualWidth: rightSoftLayout ? 112 : 108
-    readonly property int sidebarOuterMargin: rightSoftLayout ? 18 : 0
-    readonly property int sidebarVerticalMargin: rightSoftLayout ? 20 : desktopFrameMargin
+    readonly property int sidebarVisualWidth: 112
+    readonly property int sidebarOuterMargin: 18
+    readonly property int sidebarVerticalMargin: 20
     readonly property int barPanelWidth: sidebarVisualWidth + sidebarOuterMargin
     readonly property int barReserveWidth: barPanelWidth
-    readonly property int desktopFrameMargin: rightSoftLayout ? 14 : 20
+    readonly property int desktopFrameMargin: 14
     readonly property int desktopFrameRadius: 10
-    readonly property real desktopFrameMatteOpacity: rightSoftLayout
-        ? (veloraTheme.themeMode === "dark" ? 0.055 : Math.max(0.10, Math.min(0.18, veloraTheme.sidebarOpacity * 0.16)))
-        : Math.max(0, Math.min(0.18, veloraTheme.sidebarOpacity * 0.20))
-    readonly property int popupFrameGap: rightSoftLayout ? 14 : 0
+    readonly property real desktopFrameMatteOpacity: veloraTheme.themeMode === "dark" ? 0.15 : Math.max(0.10, Math.min(0.18, veloraTheme.sidebarOpacity * 0.16))
+    readonly property int popupFrameGap: 14
     readonly property string popupAttachSide: barOnRight ? "right" : "left"
+    readonly property int leftMenuWidth: 348
+    readonly property int leftMenuTriggerWidth: 18
+    readonly property int leftMenuFrameInset: veloraTheme.desktopFrameEnabled ? desktopFrameMargin + 1 : desktopFrameMargin
     property real quickPopupCenterY: 300
     property bool quickPopupWindowOpen: false
     property string renderedQuickPopupType: ""
@@ -81,15 +86,11 @@ ShellRoot {
     }
 
     function desktopFrameBorderColor() {
-        return rightSoftLayout
-            ? veloraTheme.alpha(veloraTheme.borderSoft, veloraTheme.themeMode === "dark" ? 0.16 : 0.24)
-            : veloraTheme.alpha(veloraTheme.popupBorderGlow, veloraTheme.themeMode === "dark" ? 0.42 : 0.26)
+        return veloraTheme.alpha(veloraTheme.borderSoft, veloraTheme.themeMode === "dark" ? 0.16 : 0.24)
     }
 
     function desktopFrameHighlightColor() {
-        return rightSoftLayout
-            ? "transparent"
-            : veloraTheme.alpha(veloraTheme.borderSoft, veloraTheme.themeMode === "dark" ? 0.24 : 0.34)
+        return "transparent"
     }
 
     function enterFocus() {
@@ -308,12 +309,27 @@ ShellRoot {
         rightDashboardOpen = false
     }
 
+    function openLeftMenu() {
+        leftMenuCloseTimer.stop()
+        leftMenuOpen = true
+    }
+
+    function updateLeftMenuHovering() {
+        leftMenuHovering = leftMenuTriggerHovering || leftMenuPanelHovering
+    }
+
+    function scheduleLeftMenuClose() {
+        updateLeftMenuHovering()
+        if (!leftMenuHovering)
+            leftMenuCloseTimer.restart()
+    }
+
     function barX(screenWidth) {
-        return barOnRight ? Math.max(0, screenWidth - sidebarOuterMargin - sidebarVisualWidth) : 0
+        return barOnRight ? Math.max(0, screenWidth - sidebarOuterMargin - sidebarVisualWidth) : sidebarOuterMargin
     }
 
     function mainAreaX(screenWidth) {
-        return barOnRight ? desktopFrameMargin : barPanelWidth
+        return barOnRight ? desktopFrameMargin : barPanelWidth + desktopFrameMargin
     }
 
     function mainAreaRightInset(screenWidth) {
@@ -326,20 +342,16 @@ ShellRoot {
 
     function quickPopupX(screenWidth, popupWidth) {
         if (barOnRight) {
-            if (rightSoftLayout)
-                return Math.round(Math.max(desktopFrameMargin, screenWidth - barPanelWidth - desktopFrameMargin - popupFrameGap - popupWidth))
-            return Math.round(Math.max(desktopFrameMargin, screenWidth - barPanelWidth - popupWidth))
+            return Math.round(Math.max(desktopFrameMargin, screenWidth - barPanelWidth - desktopFrameMargin - popupFrameGap - popupWidth))
         }
-        return barPanelWidth
+        return barPanelWidth + desktopFrameMargin + popupFrameGap
     }
 
     function attachedPopupX(screenWidth, popupWidth) {
         if (barOnRight) {
-            if (rightSoftLayout)
-                return Math.round(Math.max(desktopFrameMargin, screenWidth - barPanelWidth - desktopFrameMargin - popupFrameGap - popupWidth))
-            return Math.round(Math.max(desktopFrameMargin, screenWidth - barPanelWidth - popupWidth))
+            return Math.round(Math.max(desktopFrameMargin, screenWidth - barPanelWidth - desktopFrameMargin - popupFrameGap - popupWidth))
         }
-        return barPanelWidth
+        return barPanelWidth + desktopFrameMargin + popupFrameGap
     }
 
     function quickPopupWidth(type) {
@@ -375,7 +387,7 @@ ShellRoot {
     }
 
     function quickPopupY(type, panelHeight, screenHeight) {
-        const edgeMargin = rightSoftLayout ? desktopFrameMargin + popupFrameGap : 22
+        const edgeMargin = desktopFrameMargin + popupFrameGap
         const wanted = quickPopupCenterY - panelHeight / 2
         return Math.round(Math.max(edgeMargin, Math.min(screenHeight - panelHeight - edgeMargin, wanted)))
     }
@@ -386,6 +398,18 @@ ShellRoot {
         interval: 360
         repeat: false
         onTriggered: root.clearHoveredSidebarPopup()
+    }
+
+    Timer {
+        id: leftMenuCloseTimer
+
+        interval: 280
+        repeat: false
+        onTriggered: {
+            root.updateLeftMenuHovering()
+            if (!root.leftMenuHovering)
+                root.leftMenuOpen = false
+        }
     }
 
     Timer {
@@ -527,6 +551,133 @@ ShellRoot {
         model: Quickshell.screens
 
         PanelWindow {
+            id: leftMenuPanel
+
+            required property var modelData
+            property real reveal: root.leftMenuOpen ? 1 : 0
+
+            screen: modelData
+            color: "transparent"
+            implicitWidth: Math.max(root.leftMenuTriggerWidth, root.leftMenuFrameInset + root.leftMenuWidth + 1)
+            exclusiveZone: 0
+            exclusionMode: ExclusionMode.Ignore
+            focusable: false
+
+            WlrLayershell.layer: WlrLayer.Top
+            WlrLayershell.namespace: "velora-shell-left-menu"
+            WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+
+            anchors {
+                top: true
+                bottom: true
+                left: true
+            }
+
+            mask: Region {
+                Region {
+                    item: leftMenuTrigger
+                    radius: 0
+                }
+
+                Region {
+                    item: leftMenuInputMask
+                    radius: leftMenu.cornerRadius
+                }
+            }
+
+            Behavior on reveal {
+                NumberAnimation {
+                    duration: 520
+                    easing.type: Easing.BezierSpline
+                    easing.bezierCurve: [0.05, 0, 0.133, 0.06, 0.166, 0.4, 0.208, 0.82, 0.25, 1, 1, 1]
+                }
+            }
+
+            Item {
+                id: leftMenuTrigger
+
+                x: 0
+                y: 0
+                width: root.leftMenuTriggerWidth
+                height: parent.height
+
+                MouseArea {
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    acceptedButtons: Qt.NoButton
+                    onEntered: {
+                        root.leftMenuTriggerHovering = true
+                        root.updateLeftMenuHovering()
+                        root.openLeftMenu()
+                    }
+                    onPositionChanged: {
+                        root.leftMenuTriggerHovering = true
+                        root.updateLeftMenuHovering()
+                        root.openLeftMenu()
+                    }
+                    onExited: {
+                        root.leftMenuTriggerHovering = false
+                        root.scheduleLeftMenuClose()
+                    }
+                }
+            }
+
+            Item {
+                id: leftMenuInputMask
+
+                x: leftMenu.x
+                y: leftMenu.y
+                width: root.leftMenuOpen ? leftMenu.width : 0
+                height: root.leftMenuOpen ? leftMenu.height : 0
+            }
+
+            VeloraAttachedSurface {
+                theme: veloraTheme
+                sidebarMaterial: true
+                attachSide: "left"
+                x: leftMenu.x
+                y: leftMenu.y
+                width: leftMenu.width
+                height: leftMenu.height
+                radius: leftMenu.cornerRadius
+                revealProgress: leftMenu.revealProgress
+                visible: root.leftMenuOpen || leftMenuPanel.reveal > 0.01
+            }
+
+            VeloraLeftMenu {
+                id: leftMenu
+
+                theme: veloraTheme
+                externalSurface: true
+                attachSide: "left"
+                popupType: "search"
+                open: root.leftMenuOpen
+                interactiveFocus: false
+                width: root.leftMenuWidth
+                height: Math.max(0, parent.height - root.leftMenuFrameInset * 2)
+                x: root.leftMenuFrameInset
+                y: root.leftMenuFrameInset
+                visible: root.leftMenuOpen || leftMenuPanel.reveal > 0.01
+
+                HoverHandler {
+                    margin: 18
+                    onHoveredChanged: {
+                        root.leftMenuPanelHovering = hovered
+                        root.updateLeftMenuHovering()
+                        if (hovered)
+                            root.openLeftMenu()
+                        else
+                            root.scheduleLeftMenuClose()
+                    }
+                }
+            }
+        }
+    }
+
+    Variants {
+        model: Quickshell.screens
+
+        PanelWindow {
             id: framePanel
 
             required property var modelData
@@ -553,7 +704,7 @@ ShellRoot {
             function frameX() {
                 if (compositorReservedBarSpace)
                     return root.desktopFrameMargin
-                return root.rightSoftLayout ? root.mainAreaX(width) : root.mainAreaX(width) + root.desktopFrameMargin
+                return root.mainAreaX(width)
             }
 
             function frameY() {
@@ -563,7 +714,7 @@ ShellRoot {
             function frameWidth() {
                 if (compositorReservedBarSpace)
                     return Math.max(0, width - root.desktopFrameMargin * 2)
-                return root.rightSoftLayout ? Math.max(0, root.mainAreaWidth(width)) : Math.max(0, root.mainAreaWidth(width) - root.desktopFrameMargin * 2)
+                return Math.max(0, root.mainAreaWidth(width))
             }
 
             function frameHeight() {
@@ -663,7 +814,7 @@ ShellRoot {
                 height: Math.max(0, desktopFrame.height - 2)
                 radius: Math.max(0, desktopFrame.radius - 1)
                 color: "transparent"
-                visible: !root.rightSoftLayout
+                visible: false
                 border.width: 1
                 border.color: framePanel.frameHighlightColor
                 antialiasing: true
@@ -746,9 +897,9 @@ ShellRoot {
             Rectangle {
                 id: barGutterFill
 
-                x: root.rightSoftLayout ? root.mainAreaX(parent.width) + root.mainAreaWidth(parent.width) : root.barX(parent.width)
+                x: root.barOnRight ? root.mainAreaX(parent.width) + root.mainAreaWidth(parent.width) : 0
                 y: 0
-                width: root.rightSoftLayout ? Math.max(0, parent.width - x) : root.barPanelWidth
+                width: root.barOnRight ? Math.max(0, parent.width - x) : root.mainAreaX(parent.width)
                 height: parent.height
                 visible: veloraTheme.desktopFrameEnabled
                 color: root.desktopFrameMatteColor()
@@ -841,14 +992,14 @@ ShellRoot {
                 height: inlineQuickPopup.height
                 radius: inlineQuickPopup.cornerRadius
                 revealProgress: inlineQuickPopup.revealProgress
-                visible: root.quickPopupPanelVisible && !root.rightSoftLayout
+                visible: root.quickPopupPanelVisible
             }
 
             VeloraSidePopup {
                 id: inlineQuickPopup
 
                 theme: veloraTheme
-                externalSurface: !root.rightSoftLayout
+                externalSurface: true
                 attachSide: root.popupAttachSide
                 popupType: root.visibleQuickPopupType
                 open: root.quickPopupVisible
@@ -976,7 +1127,7 @@ ShellRoot {
                     height: inlineWallpaperSelector.height
                     radius: inlineWallpaperSelector.cornerRadius
                     revealProgress: inlineWallpaperSelector.revealProgress
-                    visible: root.wallpaperSelectorPanelVisible && !root.rightSoftLayout
+                    visible: root.wallpaperSelectorPanelVisible
                 }
 
                 VeloraWallpaperSelector {
@@ -984,7 +1135,8 @@ ShellRoot {
 
                     z: 3
                     theme: veloraTheme
-                    externalSurface: !root.rightSoftLayout
+                    externalSurface: true
+                    attachSide: root.popupAttachSide
                     width: Math.round(Math.min(root.quickPopupWidth("theme"), parent.width * 0.47))
                     height: Math.round(Math.min(root.quickPopupHeight("theme"), width * 0.63))
                     x: root.attachedPopupX(parent.width, width)
@@ -1049,7 +1201,7 @@ ShellRoot {
                     height: inlineSettingsPanel.height
                     radius: inlineSettingsPanel.cornerRadius
                     revealProgress: inlineSettingsPanel.revealProgress
-                    visible: root.settingsPanelPanelVisible && !root.rightSoftLayout
+                    visible: root.settingsPanelPanelVisible
                 }
 
                 VeloraSettingsPanel {
@@ -1057,7 +1209,8 @@ ShellRoot {
 
                     z: 5
                     theme: veloraTheme
-                    externalSurface: !root.rightSoftLayout
+                    externalSurface: true
+                    attachSide: root.popupAttachSide
                     width: Math.round(Math.min(root.quickPopupWidth("settings"), parent.width * 0.49))
                     height: Math.round(Math.min(root.quickPopupHeight("settings"), width * 0.66))
                     x: root.attachedPopupX(parent.width, width)

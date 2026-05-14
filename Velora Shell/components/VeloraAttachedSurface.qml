@@ -9,13 +9,13 @@ Item {
     property real radius: 22
     property real revealProgress: visible ? 1 : 0
     property string attachSide: "left"
+    property bool sidebarMaterial: false
     readonly property bool pywalStyle: theme && theme.themeId === "pywal16"
     readonly property bool neon: pywalStyle && theme.themeMode === "dark"
+    readonly property bool darkSoft: theme && theme.themeMode === "dark"
     readonly property bool attachedRight: attachSide === "right"
-    readonly property color glass: theme ? theme.surfaceSidebar : Qt.rgba(1.0, 0.986, 1.0, 0.84)
+    readonly property color glass: theme ? (sidebarMaterial && darkSoft ? theme.withAlpha(theme.surfaceSidebar, Math.min(theme.surfaceSidebar.a, 0.72)) : theme.surfaceSidebar) : Qt.rgba(1.0, 0.986, 1.0, 0.84)
     readonly property color borderSoft: theme ? (neon ? theme.popupBorderGlow : theme.borderSoft) : Qt.rgba(1, 1, 1, 0.74)
-    readonly property color borderLine: theme ? theme.alpha(borderSoft, neon ? 0.52 : 0.34) : Qt.rgba(1, 1, 1, 0.34)
-    readonly property color shadow: theme ? (neon ? theme.popupBorderGlow : theme.shadowColor) : Qt.rgba(0.48, 0.30, 0.50, 0.10)
     readonly property int slideOffset: 34
 
     opacity: revealProgress
@@ -29,12 +29,13 @@ Item {
 
     Rectangle {
         z: -1
+        visible: false
         x: root.attachedRight ? -10 : 10
         y: root.neon ? 8 : 12
         width: parent.width
         height: parent.height
         radius: root.radius + 2
-        color: root.theme ? root.theme.alpha(root.shadow, root.neon ? 0.18 : 0.22) : Qt.rgba(0.48, 0.30, 0.50, 0.06)
+        color: "transparent"
         antialiasing: true
     }
 
@@ -98,8 +99,8 @@ Item {
 
         ShapePath {
             fillColor: "transparent"
-            strokeColor: root.attachedRight ? "transparent" : root.borderLine
-            strokeWidth: 1
+            strokeColor: "transparent"
+            strokeWidth: 0
             startX: Math.min(root.radius, root.width / 2)
             startY: 0
 
@@ -131,8 +132,8 @@ Item {
 
         ShapePath {
             fillColor: "transparent"
-            strokeColor: root.attachedRight ? root.borderLine : "transparent"
-            strokeWidth: 1
+            strokeColor: "transparent"
+            strokeWidth: 0
             startX: Math.max(root.radius, root.width - root.radius)
             startY: 0
 

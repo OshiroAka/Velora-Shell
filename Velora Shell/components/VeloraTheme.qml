@@ -24,6 +24,7 @@ QtObject {
     readonly property int paletteTransitionDuration: paletteAnimatedApply ? 560 : 260
     property string barPosition: "left"
     property bool desktopFrameEnabled: true
+    property string language: "ja"
     property real sidebarOpacity: 0.88
     property real popupOpacity: 0.90
     property real cardOpacity: 0.76
@@ -40,6 +41,12 @@ QtObject {
     property color surfaceCard: Qt.rgba(1, 1, 1, 0.76)
     property color surfaceInput: Qt.rgba(1, 1, 1, 0.64)
     property color surfaceButton: Qt.rgba(1, 1, 1, 0.66)
+    property color paletteSurfaceBase: Qt.rgba(255 / 255, 250 / 255, 254 / 255, 0.86)
+    property color paletteSurfaceSidebar: Qt.rgba(255 / 255, 247 / 255, 253 / 255, 0.88)
+    property color paletteSurfacePopup: Qt.rgba(255 / 255, 250 / 255, 254 / 255, 0.90)
+    property color paletteSurfaceCard: Qt.rgba(1, 1, 1, 0.76)
+    property color paletteSurfaceInput: Qt.rgba(1, 1, 1, 0.64)
+    property color paletteSurfaceButton: Qt.rgba(1, 1, 1, 0.66)
     property color textPrimary: "#4d3f63"
     property color textSecondary: "#8d7ca3"
     property color textMuted: "#b7a9c7"
@@ -72,6 +79,11 @@ QtObject {
         { id: "pink", title: "Pink", subtitle: "Soft rose", mode: "light", preview: "pink" },
         { id: "lavender", title: "Lavender", subtitle: "Lilac glass", mode: "light", preview: "lavender" },
         { id: "pywal16", title: "pywal16", subtitle: "auto", mode: "dynamic", preview: "pywal16" }
+    ]
+    readonly property var languageOptions: [
+        { id: "ja", label: "日本語", shortLabel: "JP" },
+        { id: "en", label: "English", shortLabel: "EN" },
+        { id: "pt-BR", label: "Português Brasil", shortLabel: "BR" }
     ]
 
     Behavior on surfaceBase { enabled: root.paletteBehaviorEnabled; ColorAnimation { duration: root.paletteTransitionDuration; easing.type: Easing.OutCubic } }
@@ -107,6 +119,21 @@ QtObject {
 
     function alpha(colorValue, opacity) {
         return Qt.rgba(colorValue.r, colorValue.g, colorValue.b, opacity)
+    }
+
+    function setPaletteSurfaces(base, sidebar, popup, card, input, button) {
+        paletteSurfaceBase = base
+        paletteSurfaceSidebar = sidebar
+        paletteSurfacePopup = popup
+        paletteSurfaceCard = card
+        paletteSurfaceInput = input
+        paletteSurfaceButton = button
+        surfaceBase = base
+        surfaceSidebar = sidebar
+        surfacePopup = popup
+        surfaceCard = card
+        surfaceInput = input
+        surfaceButton = button
     }
 
     function minOpacityForRole(role) {
@@ -181,11 +208,8 @@ QtObject {
 
     function syncPanelMaterial(opacity) {
         const sharedOpacity = clampPanelOpacity(opacity, Math.max(surfaceSidebar.a, surfacePopup.a))
-        const r = surfaceSidebar.r
-        const g = surfaceSidebar.g
-        const b = surfaceSidebar.b
-        surfaceSidebar = Qt.rgba(r, g, b, sharedOpacity)
-        surfacePopup = Qt.rgba(r, g, b, sharedOpacity)
+        surfaceSidebar = withAlpha(paletteSurfaceSidebar, sharedOpacity)
+        surfacePopup = withAlpha(paletteSurfacePopup, sharedOpacity)
         sidebarOpacity = sharedOpacity
         popupOpacity = sharedOpacity
     }
@@ -290,9 +314,9 @@ QtObject {
         opacityOverrideActive = true
         syncPanelMaterial(panelOpacitySource(sidebar, popup))
         cardOpacity = clampOpacity(card, surfaceCard.a, "card")
-        surfaceCard = withOpacity(surfaceCard, cardOpacity, "card")
-        surfaceInput = withOpacity(surfaceInput, Math.max(minOpacityForRole("card"), cardOpacity - 0.08), "card")
-        surfaceButton = withOpacity(surfaceButton, Math.max(minOpacityForRole("card"), cardOpacity - 0.06), "card")
+        surfaceCard = withOpacity(paletteSurfaceCard, cardOpacity, "card")
+        surfaceInput = withOpacity(paletteSurfaceInput, Math.max(minOpacityForRole("card"), cardOpacity - 0.08), "card")
+        surfaceButton = withOpacity(paletteSurfaceButton, Math.max(minOpacityForRole("card"), cardOpacity - 0.06), "card")
         if (persist !== false)
             saveOpacity()
     }
@@ -428,12 +452,13 @@ QtObject {
         themeName = data.themeName || themeId
         themeMode = data.themeMode || "balanced"
         themeNotice = notice || data.notice || ""
-        surfaceBase = fromCss(data.surfaceBase, surfaceBase)
-        surfaceSidebar = fromCss(data.surfaceSidebar, surfaceSidebar)
-        surfacePopup = fromCss(data.surfacePopup, surfacePopup)
-        surfaceCard = fromCss(data.surfaceCard, surfaceCard)
-        surfaceInput = fromCss(data.surfaceInput, surfaceInput)
-        surfaceButton = fromCss(data.surfaceButton, surfaceButton)
+        const nextSurfaceBase = fromCss(data.surfaceBase, surfaceBase)
+        const nextSurfaceSidebar = fromCss(data.surfaceSidebar, surfaceSidebar)
+        const nextSurfacePopup = fromCss(data.surfacePopup, surfacePopup)
+        const nextSurfaceCard = fromCss(data.surfaceCard, surfaceCard)
+        const nextSurfaceInput = fromCss(data.surfaceInput, surfaceInput)
+        const nextSurfaceButton = fromCss(data.surfaceButton, surfaceButton)
+        setPaletteSurfaces(nextSurfaceBase, nextSurfaceSidebar, nextSurfacePopup, nextSurfaceCard, nextSurfaceInput, nextSurfaceButton)
         textPrimary = fromCss(data.textPrimary, textPrimary)
         textSecondary = fromCss(data.textSecondary, textSecondary)
         textMuted = fromCss(data.textMuted, textMuted)
@@ -471,12 +496,14 @@ QtObject {
         themeName = "Velora Default"
         themeMode = "light"
         themeNotice = ""
-        surfaceBase = Qt.rgba(255 / 255, 250 / 255, 254 / 255, 0.86)
-        surfaceSidebar = Qt.rgba(255 / 255, 247 / 255, 253 / 255, 0.88)
-        surfacePopup = Qt.rgba(255 / 255, 250 / 255, 254 / 255, 0.90)
-        surfaceCard = Qt.rgba(1, 1, 1, 0.76)
-        surfaceInput = Qt.rgba(1, 1, 1, 0.64)
-        surfaceButton = Qt.rgba(1, 1, 1, 0.66)
+        setPaletteSurfaces(
+            Qt.rgba(255 / 255, 250 / 255, 254 / 255, 0.86),
+            Qt.rgba(255 / 255, 247 / 255, 253 / 255, 0.88),
+            Qt.rgba(255 / 255, 250 / 255, 254 / 255, 0.90),
+            Qt.rgba(1, 1, 1, 0.76),
+            Qt.rgba(1, 1, 1, 0.64),
+            Qt.rgba(1, 1, 1, 0.66)
+        )
         textPrimary = "#4d3f63"
         textSecondary = "#8d7ca3"
         textMuted = "#b7a9c7"
@@ -509,12 +536,14 @@ QtObject {
         themeName = "Dark"
         themeMode = "dark"
         themeNotice = ""
-        surfaceBase = Qt.rgba(28 / 255, 25 / 255, 36 / 255, 0.78)
-        surfaceSidebar = Qt.rgba(34 / 255, 29 / 255, 44 / 255, 0.82)
-        surfacePopup = Qt.rgba(39 / 255, 34 / 255, 50 / 255, 0.90)
-        surfaceCard = Qt.rgba(62 / 255, 54 / 255, 74 / 255, 0.72)
-        surfaceInput = Qt.rgba(62 / 255, 54 / 255, 74 / 255, 0.50)
-        surfaceButton = Qt.rgba(1, 1, 1, 0.12)
+        setPaletteSurfaces(
+            Qt.rgba(28 / 255, 25 / 255, 36 / 255, 0.78),
+            Qt.rgba(34 / 255, 29 / 255, 44 / 255, 0.82),
+            Qt.rgba(39 / 255, 34 / 255, 50 / 255, 0.90),
+            Qt.rgba(62 / 255, 54 / 255, 74 / 255, 0.72),
+            Qt.rgba(62 / 255, 54 / 255, 74 / 255, 0.50),
+            Qt.rgba(1, 1, 1, 0.12)
+        )
         textPrimary = "#f2eaf7"
         textSecondary = "#d9c6ea"
         textMuted = "#a899b8"
@@ -547,12 +576,14 @@ QtObject {
         themeName = "Pink"
         themeMode = "light"
         themeNotice = ""
-        surfaceBase = Qt.rgba(255 / 255, 244 / 255, 249 / 255, 0.74)
-        surfaceSidebar = Qt.rgba(255 / 255, 239 / 255, 248 / 255, 0.80)
-        surfacePopup = Qt.rgba(255 / 255, 244 / 255, 250 / 255, 0.86)
-        surfaceCard = Qt.rgba(1, 1, 1, 0.72)
-        surfaceInput = Qt.rgba(1, 1, 1, 0.58)
-        surfaceButton = Qt.rgba(1, 1, 1, 0.60)
+        setPaletteSurfaces(
+            Qt.rgba(255 / 255, 244 / 255, 249 / 255, 0.74),
+            Qt.rgba(255 / 255, 239 / 255, 248 / 255, 0.80),
+            Qt.rgba(255 / 255, 244 / 255, 250 / 255, 0.86),
+            Qt.rgba(1, 1, 1, 0.72),
+            Qt.rgba(1, 1, 1, 0.58),
+            Qt.rgba(1, 1, 1, 0.60)
+        )
         textPrimary = "#5d3d56"
         textSecondary = "#966785"
         textMuted = "#c9a0b8"
@@ -585,12 +616,14 @@ QtObject {
         themeName = "Lavender"
         themeMode = "light"
         themeNotice = ""
-        surfaceBase = Qt.rgba(248 / 255, 246 / 255, 255 / 255, 0.74)
-        surfaceSidebar = Qt.rgba(244 / 255, 240 / 255, 255 / 255, 0.80)
-        surfacePopup = Qt.rgba(248 / 255, 246 / 255, 255 / 255, 0.86)
-        surfaceCard = Qt.rgba(1, 1, 1, 0.70)
-        surfaceInput = Qt.rgba(1, 1, 1, 0.56)
-        surfaceButton = Qt.rgba(1, 1, 1, 0.58)
+        setPaletteSurfaces(
+            Qt.rgba(248 / 255, 246 / 255, 255 / 255, 0.74),
+            Qt.rgba(244 / 255, 240 / 255, 255 / 255, 0.80),
+            Qt.rgba(248 / 255, 246 / 255, 255 / 255, 0.86),
+            Qt.rgba(1, 1, 1, 0.70),
+            Qt.rgba(1, 1, 1, 0.56),
+            Qt.rgba(1, 1, 1, 0.58)
+        )
         textPrimary = "#4b416a"
         textSecondary = "#8171a4"
         textMuted = "#aaa0c6"
@@ -733,6 +766,30 @@ QtObject {
         }
     }
 
+    function normalizeLanguage(value) {
+        const next = String(value || "ja")
+        if (next === "en" || next === "english")
+            return "en"
+        if (next === "pt" || next === "pt-BR" || next === "pt_BR" || next === "br")
+            return "pt-BR"
+        return "ja"
+    }
+
+    function setLanguage(value, persist) {
+        language = normalizeLanguage(value)
+        if (persist !== false)
+            saveLanguage()
+    }
+
+    function saveLanguage() {
+        if (languageSaveProc.running)
+            languageSaveProc.pending = language
+        else {
+            languageSaveProc.command = [root.stateScript, "language", "set", language]
+            languageSaveProc.running = true
+        }
+    }
+
     Component.onCompleted: {
         setDefaultPalette()
         if (!loadProc.running)
@@ -745,6 +802,8 @@ QtObject {
             borderLoadProc.running = true
         if (!layoutLoadProc.running)
             layoutLoadProc.running = true
+        if (!languageLoadProc.running)
+            languageLoadProc.running = true
     }
 
     property Process loadProc: Process {
@@ -938,6 +997,37 @@ QtObject {
                 const parts = pending.split("|")
                 pending = ""
                 command = [root.stateScript, "layout", "set", parts[0], parts.length >= 2 ? parts[1] : "1"]
+                running = true
+            }
+        }
+    }
+
+    property Process languageLoadProc: Process {
+        running: false
+        command: [root.stateScript, "language", "get"]
+
+        stdout: SplitParser {
+            onRead: function(data) {
+                const line = String(data || "").trim()
+                if (line.length > 0)
+                    root.setLanguage(line, false)
+            }
+        }
+
+        onExited: running = false
+    }
+
+    property Process languageSaveProc: Process {
+        property string pending: ""
+
+        running: false
+        command: [root.stateScript, "language", "set", "ja"]
+        onExited: {
+            running = false
+            if (pending.length > 0) {
+                const next = pending
+                pending = ""
+                command = [root.stateScript, "language", "set", next]
                 running = true
             }
         }

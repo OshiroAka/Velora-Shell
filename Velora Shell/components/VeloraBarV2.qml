@@ -15,7 +15,9 @@ Item {
     property alias panelMaskItem: panelSurface
     readonly property bool rightSoft: theme && theme.barPosition === "right"
     readonly property bool rightDark: rightSoft && theme && theme.themeMode === "dark"
-    readonly property int cornerRadius: rightSoft ? 24 : 20
+    readonly property bool softStyle: true
+    readonly property bool darkSoft: softStyle && theme && theme.themeMode === "dark"
+    readonly property int cornerRadius: softStyle ? 24 : 20
     readonly property bool pywalStyle: theme && theme.themeId === "pywal16"
     readonly property bool neon: pywalStyle && theme.themeMode === "dark"
     readonly property color ink: theme ? theme.textPrimary : Qt.rgba(0.46, 0.37, 0.54, 0.82)
@@ -23,16 +25,20 @@ Item {
     readonly property color pink: theme ? (pywalStyle ? theme.accentSecondary : theme.accentPrimary) : Qt.rgba(0.88, 0.45, 0.66, 0.86)
     readonly property color lilac: theme ? (pywalStyle ? theme.accentPrimary : theme.accentSecondary) : Qt.rgba(0.58, 0.47, 0.76, 0.78)
     readonly property bool popupAttached: activePopupType.length > 0
-    readonly property color glass: theme ? theme.surfaceSidebar : Qt.rgba(1, 0.988, 0.997, 0.66)
-    readonly property color card: theme ? theme.surfaceCard : Qt.rgba(1, 1, 1, 0.70)
+    readonly property color glass: theme
+        ? (darkSoft ? theme.withAlpha(theme.surfaceSidebar, Math.min(theme.surfaceSidebar.a, 0.72)) : theme.surfaceSidebar)
+        : Qt.rgba(1, 0.988, 0.997, 0.66)
+    readonly property color card: theme
+        ? (darkSoft ? theme.withAlpha(theme.surfaceCard, Math.min(theme.surfaceCard.a, 0.62)) : theme.surfaceCard)
+        : Qt.rgba(1, 1, 1, 0.70)
     readonly property color borderSoft: theme ? (pywalStyle ? theme.withAlpha(theme.sidebarBorderGlow, Math.min(0.30, Math.max(0.16, theme.sidebarBorderGlow.a))) : theme.borderSoft) : Qt.rgba(1, 1, 1, 0.82)
     readonly property string uiFont: "Noto Sans CJK JP"
     readonly property string monoFont: "JetBrainsMono Nerd Font"
     readonly property int notificationCount: Number(NotificationServer.trackedCount || 0)
-    readonly property real uiScale: rightSoft ? Math.min(1.08, Math.max(1.0, height / 1080)) : Math.min(1.12, Math.max(1.0, height / 1032))
-    readonly property int stretchGap: Math.round(Math.min(rightSoft ? 10 : 14, Math.max(0, (height - (rightSoft ? 1080 : 1032)) / 7)))
+    readonly property real uiScale: softStyle ? Math.min(1.08, Math.max(1.0, height / 1080)) : Math.min(1.12, Math.max(1.0, height / 1032))
+    readonly property int stretchGap: Math.round(Math.min(softStyle ? 10 : 14, Math.max(0, (height - (softStyle ? 1080 : 1032)) / 7)))
     property string clockText: Qt.formatDateTime(new Date(), "HH:mm")
-    property string dateText: formatJapaneseDate(new Date())
+    property string dateText: formatLocalizedDate(new Date())
     property var batteryDevice: null
     property int volume: 70
     property bool muted: false
@@ -341,7 +347,48 @@ Item {
         }
     }
 
-    function formatJapaneseDate(date) {
+    function tr(key) {
+        const lang = root.theme ? root.theme.language : "ja"
+        const texts = {
+            "ja": {
+                "tools": "ツール",
+                "theme": "テーマ",
+                "search": "検索",
+                "workspaces": "ワークスペース",
+                "apps": "アプリ",
+                "utilities": "ユーティリティ"
+            },
+            "en": {
+                "tools": "Tools",
+                "theme": "Theme",
+                "search": "Search",
+                "workspaces": "Workspaces",
+                "apps": "Apps",
+                "utilities": "Utilities"
+            },
+            "pt-BR": {
+                "tools": "Ferramentas",
+                "theme": "Tema",
+                "search": "Busca",
+                "workspaces": "Áreas",
+                "apps": "Apps",
+                "utilities": "Utilitários"
+            }
+        }
+        const table = texts[lang] || texts["ja"]
+        return table[key] || texts["ja"][key] || key
+    }
+
+    function formatLocalizedDate(date) {
+        const lang = root.theme ? root.theme.language : "ja"
+        if (lang === "en") {
+            const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+            return (date.getMonth() + 1) + "/" + date.getDate() + " (" + weekdays[date.getDay()] + ")"
+        }
+        if (lang === "pt-BR") {
+            const weekdays = ["dom", "seg", "ter", "qua", "qui", "sex", "sab"]
+            return date.getDate() + "/" + (date.getMonth() + 1) + " (" + weekdays[date.getDay()] + ")"
+        }
         const weekdays = ["日", "月", "火", "水", "木", "金", "土"]
         return (date.getMonth() + 1) + "月" + date.getDate() + "日 (" + weekdays[date.getDay()] + ")"
     }
@@ -364,7 +411,7 @@ Item {
         onTriggered: {
             const now = new Date()
             root.clockText = Qt.formatDateTime(now, "HH:mm")
-            root.dateText = root.formatJapaneseDate(now)
+            root.dateText = root.formatLocalizedDate(now)
         }
     }
 
@@ -503,8 +550,8 @@ Item {
         width: panelSurface.width
         height: panelSurface.height - 8
         radius: root.cornerRadius + 2
-        color: root.rightSoft
-            ? root.alpha(root.theme ? root.theme.shadowColor : Qt.rgba(0, 0, 0, 1), root.popupAttached ? 0 : (root.rightDark ? 0.16 : 0.08))
+        color: root.softStyle
+            ? root.alpha(root.theme ? root.theme.shadowColor : Qt.rgba(0, 0, 0, 1), root.popupAttached ? 0 : (root.darkSoft ? 0.16 : 0.08))
             : root.alpha(root.theme ? root.theme.shadowColor : Qt.rgba(0.56, 0.36, 0.52, 1), root.popupAttached ? 0 : (root.pywalStyle && root.theme ? 0.035 + root.theme.generalGlow * 0.02 : 0.07))
     }
 
@@ -515,7 +562,7 @@ Item {
         radius: root.cornerRadius
         color: root.glass
         border.width: root.popupAttached ? 0 : 1
-        border.color: root.rightSoft
+        border.color: root.softStyle
             ? root.borderSoft
             : root.pywalStyle && root.theme
             ? root.alpha(root.theme.popupBorderGlow, root.popupAttached ? root.theme.popupBorderGlow.a * 0.26 : root.theme.sidebarBorderGlow.a)
@@ -528,9 +575,9 @@ Item {
             radius: root.pywalStyle ? 34 : 34
             samples: root.pywalStyle ? 69 : 65
             horizontalOffset: 0
-            verticalOffset: root.rightSoft ? 7 : (root.pywalStyle ? 0 : 11)
-            color: root.rightSoft
-                ? root.alpha(root.theme ? root.theme.shadowColor : Qt.rgba(0, 0, 0, 1), root.popupAttached ? 0.03 : (root.rightDark ? 0.20 : 0.11))
+            verticalOffset: root.softStyle ? 7 : (root.pywalStyle ? 0 : 11)
+            color: root.softStyle
+                ? root.alpha(root.theme ? root.theme.shadowColor : Qt.rgba(0, 0, 0, 1), root.popupAttached ? 0.03 : (root.darkSoft ? 0.20 : 0.11))
                 : root.pywalStyle && root.theme
                 ? root.alpha(root.theme.popupBorderGlow, root.theme.popupBorderGlow.a * (root.popupAttached ? 0.08 : 0.50))
                 : root.alpha(root.theme ? root.theme.shadowColor : Qt.rgba(0.38, 0.25, 0.42, 1), root.popupAttached ? 0.035 : 0.15)
@@ -553,8 +600,8 @@ Item {
             color: "transparent"
             visible: !root.popupAttached
             border.width: 1
-            border.color: root.rightSoft
-                ? (root.rightDark ? Qt.rgba(1, 1, 1, 0.055) : root.alpha(root.borderSoft, 0.30))
+            border.color: root.softStyle
+                ? (root.darkSoft ? Qt.rgba(1, 1, 1, 0.055) : root.alpha(root.borderSoft, 0.30))
                 : root.pywalStyle && root.theme
                 ? root.alpha(root.theme.popupBorderGlow, root.theme.popupBorderGlow.a * (root.popupAttached ? 0.16 : 0.58))
                 : root.alpha(root.borderSoft, root.popupAttached ? 0.12 : 0.28)
@@ -568,10 +615,10 @@ Item {
 
         anchors {
             fill: panelSurface
-            leftMargin: root.rightSoft ? 17 : 16
-            rightMargin: root.rightSoft ? 17 : 16
-            topMargin: root.rightSoft ? Math.round(20 * root.uiScale) : Math.round(18 * root.uiScale)
-            bottomMargin: root.rightSoft ? Math.round(18 * root.uiScale) : Math.round(14 * root.uiScale)
+            leftMargin: root.softStyle ? 17 : 16
+            rightMargin: root.softStyle ? 17 : 16
+            topMargin: root.softStyle ? Math.round(20 * root.uiScale) : Math.round(18 * root.uiScale)
+            bottomMargin: root.softStyle ? Math.round(18 * root.uiScale) : Math.round(14 * root.uiScale)
         }
 
         spacing: 0
@@ -592,7 +639,7 @@ Item {
 
         SectionLabel {
             Layout.fillWidth: true
-            text: "ツール"
+            text: root.tr("tools")
         }
 
         ToolRow {
@@ -600,7 +647,7 @@ Item {
 
             Layout.fillWidth: true
             Layout.topMargin: Math.round(8 * root.uiScale)
-            label: "テーマ"
+            label: root.tr("theme")
             iconName: "palette"
             command: ""
             hoverPopupType: "theme"
@@ -613,7 +660,7 @@ Item {
 
             Layout.fillWidth: true
             Layout.topMargin: Math.round(8 * root.uiScale)
-            label: "検索"
+            label: root.tr("search")
             iconName: "search"
             selected: root.activePopupType === "search"
             command: ""
@@ -629,7 +676,7 @@ Item {
 
         SectionLabel {
             Layout.fillWidth: true
-            text: "ワークスペース"
+            text: root.tr("workspaces")
         }
 
         ColumnLayout {
@@ -678,7 +725,7 @@ Item {
 
         SectionLabel {
             Layout.fillWidth: true
-            text: "アプリ"
+            text: root.tr("apps")
         }
 
         ColumnLayout {
@@ -719,7 +766,7 @@ Item {
 
         SectionLabel {
             Layout.fillWidth: true
-            text: "ユーティリティ"
+            text: root.tr("utilities")
         }
 
         ColumnLayout {
@@ -909,7 +956,7 @@ Item {
     component Divider: Rectangle {
         height: 1
         radius: 1
-        color: root.rightDark ? Qt.rgba(1, 1, 1, 0.08) : root.alpha(root.lilac, 0.22)
+        color: root.darkSoft ? Qt.rgba(1, 1, 1, 0.08) : root.alpha(root.lilac, 0.22)
     }
 
     component WorkspaceButton: Rectangle {
@@ -998,7 +1045,7 @@ Item {
             width: Math.round(24 * root.uiScale)
             height: Math.round(24 * root.uiScale)
             iconName: row.iconName
-            lineColor: row.selected ? (root.rightSoft ? root.pink : root.lilac) : (row.hovered ? root.pink : root.inkSoft)
+            lineColor: row.selected ? (root.softStyle ? root.pink : root.lilac) : (row.hovered ? root.pink : root.inkSoft)
             layer.enabled: root.pywalStyle && (row.selected || row.hovered)
             layer.effect: DropShadow {
                 transparentBorder: true
@@ -1068,7 +1115,7 @@ Item {
         radius: Math.round(8 * root.uiScale)
         color: hovered ? root.alpha(root.card, 0.84) : root.alpha(root.card, 0.58)
         border.width: 1
-        border.color: root.rightDark ? Qt.rgba(1, 1, 1, 0.14) : root.alpha(root.borderSoft, 0.76)
+        border.color: root.darkSoft ? Qt.rgba(1, 1, 1, 0.14) : root.alpha(root.borderSoft, 0.76)
         layer.enabled: true
         layer.effect: DropShadow {
             transparentBorder: true
@@ -1154,7 +1201,7 @@ Item {
             width: Math.round(26 * root.uiScale)
             height: Math.round(26 * root.uiScale)
             iconName: button.iconName
-            lineColor: button.selected ? (root.rightSoft ? root.pink : root.lilac) : (button.hovered ? root.pink : root.inkSoft)
+            lineColor: button.selected ? (root.softStyle ? root.pink : root.lilac) : (button.hovered ? root.pink : root.inkSoft)
             value: button.iconName === "battery" && root.batteryDevice && root.batteryDevice.ready ? root.batteryDevice.percentage : Math.max(0.08, Math.min(1, root.volume / 100))
             layer.enabled: root.pywalStyle && (button.selected || button.hovered)
             layer.effect: DropShadow {
@@ -1221,7 +1268,7 @@ Item {
         radius: width / 2
         color: root.alpha(root.card, 0.62)
         border.width: 1
-        border.color: root.rightSoft ? root.alpha(root.pink, 0.42) : root.alpha(root.borderSoft, 0.84)
+        border.color: root.softStyle ? root.alpha(root.pink, 0.42) : root.alpha(root.borderSoft, 0.84)
         clip: true
         layer.enabled: true
         layer.effect: DropShadow {
@@ -1230,8 +1277,8 @@ Item {
             samples: 33
             horizontalOffset: 0
             verticalOffset: 5
-            color: root.rightSoft
-                ? root.alpha(root.theme ? root.theme.shadowColor : Qt.rgba(0, 0, 0, 1), root.rightDark ? 0.20 : 0.12)
+            color: root.softStyle
+                ? root.alpha(root.theme ? root.theme.shadowColor : Qt.rgba(0, 0, 0, 1), root.darkSoft ? 0.20 : 0.12)
                 : root.alpha(root.theme ? root.theme.shadowColor : Qt.rgba(0.38, 0.25, 0.42, 1), 0.13)
         }
 

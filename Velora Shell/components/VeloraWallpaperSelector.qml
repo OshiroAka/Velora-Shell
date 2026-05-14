@@ -10,6 +10,7 @@ Item {
     property var theme: null
     property alias surfaceItem: panelSurface
     property bool externalSurface: false
+    property string attachSide: "left"
     readonly property int cornerRadius: 28
     readonly property bool pywalStyle: theme && theme.themeId === "pywal16"
     readonly property bool neon: pywalStyle && theme.themeMode === "dark"
@@ -65,13 +66,13 @@ Item {
     }
 
     opacity: revealProgress
-    transformOrigin: Item.Left
+    transformOrigin: attachSide === "right" ? Item.Right : Item.Left
     scale: 0.992 + revealProgress * 0.008
     focus: visible
     activeFocusOnTab: true
 
     transform: Translate {
-        x: Math.round((1 - root.revealProgress) * -36)
+        x: Math.round((1 - root.revealProgress) * (root.attachSide === "right" ? 36 : -36))
         y: Math.round((1 - root.revealProgress) * 6)
     }
 

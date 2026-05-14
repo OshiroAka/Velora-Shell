@@ -387,7 +387,7 @@ patch_hyprland() {
 # Matches velora-shell and every velora-shell-* layer namespace.
 layerrule = blur on, match:namespace ^velora-shell($|-.*)
 layerrule = blur_popups on, match:namespace ^velora-shell($|-.*)
-layerrule = ignore_alpha 0.12, match:namespace ^velora-shell($|-.*)
+layerrule = ignore_alpha 0.02, match:namespace ^velora-shell($|-.*)
 EOF
   log "Hyprland snippet written: $HYPR_INCLUDE"
 

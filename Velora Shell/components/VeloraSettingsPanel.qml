@@ -11,6 +11,7 @@ Item {
     property alias surfaceItem: panelSurface
     property var theme: null
     property bool externalSurface: false
+    property string attachSide: "left"
     readonly property int cornerRadius: 18
     readonly property bool pywalStyle: theme && theme.themeId === "pywal16"
     readonly property bool neon: pywalStyle && theme.themeMode === "dark"
@@ -21,11 +22,14 @@ Item {
     readonly property string applyScript: Quickshell.shellDir + "/scripts/velora-wallpaper-apply"
     readonly property string scanScript: Quickshell.shellDir + "/scripts/velora-wallpaper-scan"
     readonly property var navItems: [
-        { key: "theme", label: "テーマ", icon: "palette" },
-        { key: "wallpaper", label: "壁紙", icon: "image" },
-        { key: "icons", label: "アイコン", icon: "puzzle" },
-        { key: "cursor", label: "カーソル", icon: "cursor" },
-        { key: "fonts", label: "フォント", icon: "font" }
+        { key: "theme", icon: "palette" },
+        { key: "wallpaper", icon: "image" },
+        { key: "language", icon: "language" }
+    ]
+    readonly property var fallbackLanguageOptions: [
+        { id: "ja", label: "日本語", shortLabel: "JP" },
+        { id: "en", label: "English", shortLabel: "EN" },
+        { id: "pt-BR", label: "Português Brasil", shortLabel: "BR" }
     ]
     readonly property var fallbackThemes: [
         { id: "default", title: "Light", subtitle: "Velora Default", mode: "light", preview: "default" },
@@ -54,12 +58,12 @@ Item {
 
     opacity: revealProgress
     scale: 0.992 + revealProgress * 0.008
-    transformOrigin: Item.Left
+    transformOrigin: attachSide === "right" ? Item.Right : Item.Left
     focus: visible
     activeFocusOnTab: true
 
     transform: Translate {
-        x: Math.round((1 - root.revealProgress) * -34)
+        x: Math.round((1 - root.revealProgress) * (root.attachSide === "right" ? 34 : -34))
         y: Math.round((1 - root.revealProgress) * 6)
     }
 
@@ -131,6 +135,98 @@ Item {
         return root.theme && root.theme.textGlow.a > 0.001
     }
 
+    function tr(key) {
+        const lang = root.theme ? root.theme.language : "ja"
+        const texts = {
+            "ja": {
+                "nav_theme": "テーマ",
+                "nav_wallpaper": "壁紙",
+                "nav_language": "言語",
+                "themeStyle": "テーマスタイル",
+                "layout": "レイアウト",
+                "frameOn": "枠 ON",
+                "frameOff": "枠 OFF",
+                "opacity": "透明度",
+                "opacityAll": "全体",
+                "opacityPanel": "バー/ポップ",
+                "opacitySync": "同期",
+                "opacityCard": "カード",
+                "reset": "リセット",
+                "materialReset": "マテリアルを復元しました。",
+                "glow": "グロー",
+                "fontGlow": "フォント",
+                "border": "ボーダー",
+                "adapt": "自動",
+                "wallpaper": "壁紙",
+                "customWallpaper": "カスタム壁紙を選択",
+                "applying": "適用中...",
+                "apply": "適用する",
+                "wallpaperFolderOpened": "壁紙フォルダを開きました。",
+                "language": "言語",
+                "languageHint": "パネルとサイドバーの表示言語。",
+                "languageApplied": "言語を適用: "
+            },
+            "en": {
+                "nav_theme": "Theme",
+                "nav_wallpaper": "Wallpaper",
+                "nav_language": "Language",
+                "themeStyle": "Theme Style",
+                "layout": "Layout",
+                "frameOn": "Frame ON",
+                "frameOff": "Frame OFF",
+                "opacity": "Opacity",
+                "opacityAll": "Global",
+                "opacityPanel": "Bar/Popup",
+                "opacitySync": "Sync",
+                "opacityCard": "Cards",
+                "reset": "Reset",
+                "materialReset": "Material reset.",
+                "glow": "Glow",
+                "fontGlow": "Font",
+                "border": "Border",
+                "adapt": "Adapt",
+                "wallpaper": "Wallpaper",
+                "customWallpaper": "Choose wallpaper folder",
+                "applying": "Applying...",
+                "apply": "Apply",
+                "wallpaperFolderOpened": "Wallpaper folder opened.",
+                "language": "Language",
+                "languageHint": "Panel and sidebar interface.",
+                "languageApplied": "Language applied: "
+            },
+            "pt-BR": {
+                "nav_theme": "Tema",
+                "nav_wallpaper": "Papel de parede",
+                "nav_language": "Idioma",
+                "themeStyle": "Estilo do tema",
+                "layout": "Layout",
+                "frameOn": "Moldura ON",
+                "frameOff": "Moldura OFF",
+                "opacity": "Transparência",
+                "opacityAll": "Geral",
+                "opacityPanel": "Barra/Popup",
+                "opacitySync": "Sincronizar",
+                "opacityCard": "Cards",
+                "reset": "Resetar",
+                "materialReset": "Material restaurado.",
+                "glow": "Glow",
+                "fontGlow": "Fonte",
+                "border": "Borda",
+                "adapt": "Adaptar",
+                "wallpaper": "Papel de parede",
+                "customWallpaper": "Escolher pasta de wallpapers",
+                "applying": "Aplicando...",
+                "apply": "Aplicar",
+                "wallpaperFolderOpened": "Pasta de wallpapers aberta.",
+                "language": "Idioma",
+                "languageHint": "Interface do painel e da barra lateral.",
+                "languageApplied": "Idioma aplicado: "
+            }
+        }
+        const table = texts[lang] || texts["ja"]
+        return table[key] || texts["ja"][key] || key
+    }
+
     component FontGlowEffect: MultiEffect {
         shadowEnabled: true
         shadowHorizontalOffset: 0
@@ -148,6 +244,38 @@ Item {
 
     function themeOptions() {
         return root.theme ? root.theme.themeOptions : root.fallbackThemes
+    }
+
+    function languageOptions() {
+        return root.theme ? root.theme.languageOptions : root.fallbackLanguageOptions
+    }
+
+    function currentLanguage() {
+        return root.theme ? root.theme.language : "ja"
+    }
+
+    function currentLanguageIndex() {
+        const options = root.languageOptions()
+        for (let i = 0; i < options.length; i += 1) {
+            if (options[i].id === root.currentLanguage())
+                return i
+        }
+        return 0
+    }
+
+    function selectLanguage(id) {
+        const options = root.languageOptions()
+        var label = id
+        for (let i = 0; i < options.length; i += 1) {
+            if (options[i].id === id) {
+                label = options[i].label
+                break
+            }
+        }
+        if (root.theme)
+            root.theme.setLanguage(id)
+        root.noticeText = root.tr("languageApplied") + label
+        noticeReset.restart()
     }
 
     function currentThemeId() {
@@ -201,6 +329,18 @@ Item {
     }
 
     function moveSelection(dir) {
+        if (root.activeNav === 2) {
+            const options = root.languageOptions()
+            if (options.length <= 0)
+                return
+            const nextIndex = (root.currentLanguageIndex() + dir + options.length) % options.length
+            root.selectLanguage(options[nextIndex].id)
+            return
+        }
+
+        if (root.activeNav !== 1)
+            return
+
         const count = root.wallpapers.length
         if (count <= 0)
             return
@@ -208,6 +348,8 @@ Item {
     }
 
     function applySelected() {
+        if (root.activeNav !== 1)
+            return
         if (applyWallpaper.running)
             return
         const item = root.currentWallpaper()
@@ -352,7 +494,7 @@ Item {
         }
 
         Rectangle {
-            x: 182
+            x: 200
             y: 0
             width: 1
             height: parent.height
@@ -364,7 +506,7 @@ Item {
 
             x: 22
             y: 26
-            width: 136
+            width: 154
             spacing: 16
 
             Repeater {
@@ -385,7 +527,7 @@ Item {
         Item {
             id: mainArea
 
-            x: 212
+            x: 230
             y: 35
             width: parent.width - x - 34
             height: parent.height - 62
@@ -394,7 +536,7 @@ Item {
                 id: mainFlick
 
                 anchors.fill: parent
-                visible: root.activeNav <= 1
+                visible: root.activeNav <= 2
                 clip: true
                 contentWidth: width
                 contentHeight: root.activeNav === 0 ? 640 : height
@@ -410,7 +552,7 @@ Item {
                     x: 0
                     y: 0
                     visible: root.activeNav === 0
-                    text: "テーマスタイル"
+                    text: root.tr("themeStyle")
                     color: root.c("textPrimary", "#4d3f63")
                     font.family: root.uiFont
                     font.pixelSize: 15
@@ -446,7 +588,7 @@ Item {
 	                    x: 0
 	                    y: 160
 	                    visible: root.activeNav === 0
-	                    text: "レイアウト"
+	                    text: root.tr("layout")
 	                    color: root.c("textPrimary", "#4d3f63")
 	                    font.family: root.uiFont
 	                    font.pixelSize: 14
@@ -464,9 +606,9 @@ Item {
                     visible: root.activeNav === 0
                     spacing: 10
 
-                    LayoutToggleButton {
-                        width: 116
-                        label: "左Classic"
+                    LayoutPreviewButton {
+                        width: 104
+                        side: "left"
                         active: root.theme ? root.theme.barPosition === "left" : true
                         onClicked: {
                             if (root.theme)
@@ -474,9 +616,9 @@ Item {
                         }
                     }
 
-                    LayoutToggleButton {
-                        width: 116
-                        label: "右Soft"
+                    LayoutPreviewButton {
+                        width: 104
+                        side: "right"
                         active: root.theme ? root.theme.barPosition === "right" : false
                         onClicked: {
                             if (root.theme)
@@ -486,7 +628,7 @@ Item {
 
                     LayoutToggleButton {
                         width: 142
-                        label: root.theme && root.theme.desktopFrameEnabled ? "枠 ON" : "枠 OFF"
+                        label: root.theme && root.theme.desktopFrameEnabled ? root.tr("frameOn") : root.tr("frameOff")
                         active: root.theme ? root.theme.desktopFrameEnabled : true
                         onClicked: {
                             if (root.theme)
@@ -499,7 +641,7 @@ Item {
                     x: 0
                     y: 256
                     visible: root.activeNav === 0
-                    text: "透明度"
+                    text: root.tr("opacity")
                     color: root.c("textPrimary", "#4d3f63")
                     font.family: root.uiFont
                     font.pixelSize: 14
@@ -519,7 +661,7 @@ Item {
 
                     OpacityControl {
                         width: Math.floor((opacityRow.width - opacityRow.spacing * 4 - 74) / 4)
-                        label: "全体"
+                        label: root.tr("opacityAll")
                         minValue: root.theme ? root.theme.minPanelOpacity() : 0.25
                         value: root.theme ? root.theme.sidebarOpacity : 0.78
                         onMoved: function(nextValue) {
@@ -530,7 +672,7 @@ Item {
 
                     OpacityControl {
                         width: Math.floor((opacityRow.width - opacityRow.spacing * 4 - 74) / 4)
-                        label: "バー/ポップ"
+                        label: root.tr("opacityPanel")
                         minValue: root.theme ? root.theme.minPanelOpacity() : 0.25
                         value: root.theme ? root.theme.sidebarOpacity : 0.78
                         onMoved: function(nextValue) {
@@ -541,7 +683,7 @@ Item {
 
                     OpacityControl {
                         width: Math.floor((opacityRow.width - opacityRow.spacing * 4 - 74) / 4)
-                        label: "同期"
+                        label: root.tr("opacitySync")
                         minValue: root.theme ? root.theme.minPanelOpacity() : 0.25
                         value: root.theme ? root.theme.popupOpacity : 0.78
                         onMoved: function(nextValue) {
@@ -552,7 +694,7 @@ Item {
 
                     OpacityControl {
                         width: Math.floor((opacityRow.width - opacityRow.spacing * 4 - 74) / 4)
-                        label: "カード"
+                        label: root.tr("opacityCard")
                         minValue: root.theme ? root.theme.minOpacityForRole("card") : 0.25
                         value: root.theme ? root.theme.cardOpacity : 0.68
                         onMoved: function(nextValue) {
@@ -577,7 +719,7 @@ Item {
 
                         Text {
                             anchors.centerIn: parent
-                            text: "リセット"
+                            text: root.tr("reset")
                             color: root.c("textSecondary", "#8d7ca3")
                             font.family: root.uiFont
                             font.pixelSize: 11
@@ -599,7 +741,7 @@ Item {
                                     root.theme.resetBorderAccent()
                                 if (root.theme)
                                     root.theme.resetOpacity()
-                                root.noticeText = "Material restaurado."
+                                root.noticeText = root.tr("materialReset")
                                 noticeReset.restart()
                             }
                         }
@@ -610,7 +752,7 @@ Item {
 	                    x: 0
 	                    y: 346
 	                    visible: root.activeNav === 0
-	                    text: "Glow"
+	                    text: root.tr("glow")
                     color: root.c("textPrimary", "#4d3f63")
                     font.family: root.uiFont
                     font.pixelSize: 14
@@ -629,7 +771,7 @@ Item {
 
                     OpacityControl {
                         width: Math.min(260, glowRow.width)
-                        label: "フォント"
+                        label: root.tr("fontGlow")
                         minValue: 0
                         maxValue: 1
                         value: root.theme ? root.theme.textGlowLevel : 0.78
@@ -644,7 +786,7 @@ Item {
 	                    x: 0
 	                    y: 436
 	                    visible: root.activeNav === 0
-	                    text: "Borda"
+	                    text: root.tr("border")
                     color: root.c("textPrimary", "#4d3f63")
                     font.family: root.uiFont
                     font.pixelSize: 14
@@ -714,7 +856,7 @@ Item {
                     x: 0
                     y: 0
                     visible: root.activeNav === 1
-                    text: "壁紙"
+                    text: root.tr("wallpaper")
                     color: root.c("textPrimary", "#4d3f63")
                     font.family: root.uiFont
                     font.pixelSize: 15
@@ -750,7 +892,7 @@ Item {
                     x: 0
                     y: 156
                     visible: root.activeNav === 1
-                    width: 178
+                    width: 242
                     height: 42
                     radius: 8
                     color: customMouse.containsMouse
@@ -778,7 +920,7 @@ Item {
                         }
 
                         Text {
-                            text: "カスタム壁紙を選択"
+                            text: root.tr("customWallpaper")
                             color: root.c("buttonSecondaryText", "#6d5a82")
                             font.family: root.uiFont
                             font.pixelSize: 12
@@ -793,7 +935,7 @@ Item {
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
                         onClicked: {
-                            root.noticeText = "Pasta de wallpapers aberta."
+                            root.noticeText = root.tr("wallpaperFolderOpened")
                             noticeReset.restart()
                             if (!customWallpaperChooser.running)
                                 customWallpaperChooser.running = true
@@ -829,7 +971,7 @@ Item {
 
                     Text {
                         anchors.centerIn: parent
-                        text: applyWallpaper.running ? "適用中..." : "適用する"
+                        text: applyWallpaper.running ? root.tr("applying") : root.tr("apply")
                         color: root.c("buttonPrimaryText", "#ffffff")
                         font.family: root.uiFont
                         font.pixelSize: 13
@@ -847,10 +989,10 @@ Item {
                 }
 
                 Text {
-                    x: 196
-                    y: 168
+                    x: 0
+                    y: 214
                     visible: root.activeNav === 1
-                    width: mainArea.width - 350
+                    width: mainArea.width
                     text: root.noticeText.length > 0 ? root.noticeText : (root.theme && root.theme.themeNotice.length > 0 ? root.theme.themeNotice : "")
                     color: root.c("textMuted", "#b7a9c7")
                     elide: Text.ElideRight
@@ -858,12 +1000,78 @@ Item {
                     font.pixelSize: 11
                     font.weight: Font.Medium
                 }
+
+                Text {
+                    x: 0
+                    y: 0
+                    visible: root.activeNav === 2
+                    text: root.tr("language")
+                    color: root.c("textPrimary", "#4d3f63")
+                    font.family: root.uiFont
+                    font.pixelSize: 15
+                    font.weight: Font.Bold
+                    layer.enabled: root.fontGlowEnabled()
+                    layer.effect: FontGlowEffect {}
+                }
+
+                Text {
+                    x: 0
+                    y: 28
+                    visible: root.activeNav === 2
+                    width: mainArea.width
+                    text: root.tr("languageHint")
+                    color: root.c("textMuted", "#b7a9c7")
+                    font.family: root.uiFont
+                    font.pixelSize: 12
+                    font.weight: Font.Medium
+                    elide: Text.ElideRight
+                    layer.enabled: root.fontGlowEnabled()
+                    layer.effect: FontGlowEffect {}
+                }
+
+                Row {
+                    id: languageRow
+
+                    x: 0
+                    y: 72
+                    width: mainArea.width
+                    visible: root.activeNav === 2
+                    spacing: 14
+
+                    Repeater {
+                        model: root.languageOptions()
+
+                        LanguageButton {
+                            required property var modelData
+
+                            width: Math.floor((languageRow.width - languageRow.spacing * 2) / 3)
+                            itemData: modelData
+                            active: root.currentLanguage() === modelData.id
+                            onClicked: root.selectLanguage(modelData.id)
+                        }
+                    }
+                }
+
+                Text {
+                    x: 0
+                    y: 162
+                    visible: root.activeNav === 2
+                    width: mainArea.width
+                    text: root.noticeText
+                    color: root.c("textMuted", "#b7a9c7")
+                    font.family: root.uiFont
+                    font.pixelSize: 11
+                    font.weight: Font.Medium
+                    elide: Text.ElideRight
+                    layer.enabled: root.fontGlowEnabled()
+                    layer.effect: FontGlowEffect {}
+                }
                 }
             }
 
             Item {
                 anchors.fill: parent
-                visible: root.activeNav > 1
+                visible: root.activeNav > 2
 
                 Text {
                     anchors.centerIn: parent
@@ -874,6 +1082,115 @@ Item {
                     font.weight: Font.Bold
                 }
             }
+        }
+    }
+
+    component LayoutPreviewButton: Rectangle {
+        id: button
+
+        property string side: "left"
+        property bool active: false
+        property bool hovered: false
+        readonly property bool rightSide: side === "right"
+        signal clicked()
+
+        height: 58
+        radius: 10
+        color: active
+            ? root.c("activeBg", Qt.rgba(0.92, 0.62, 0.78, 0.28))
+            : (hovered ? root.c("hoverBg", Qt.rgba(0.92, 0.62, 0.78, 0.14)) : root.alpha(root.c("surfaceCard", Qt.rgba(1, 1, 1, 0.68)), 0.30))
+        border.width: 1
+        border.color: active
+            ? root.c("borderActive", Qt.rgba(0.90, 0.56, 0.74, 0.72))
+            : root.alpha(root.c("borderSoft", Qt.rgba(1, 1, 1, 0.68)), 0.52)
+        antialiasing: true
+        scale: previewMouse.pressed ? 0.97 : (hovered ? 1.012 : 1.0)
+
+        Behavior on color { ColorAnimation { duration: 140; easing.type: Easing.OutCubic } }
+        Behavior on border.color { ColorAnimation { duration: 140; easing.type: Easing.OutCubic } }
+        Behavior on scale { NumberAnimation { duration: 110; easing.type: Easing.OutCubic } }
+
+        Rectangle {
+            id: previewScreen
+
+            anchors {
+                fill: parent
+                margins: 9
+            }
+
+            radius: 6
+            color: root.alpha(root.c("surfaceBase", Qt.rgba(1, 1, 1, 0.72)), 0.36)
+            border.width: 1
+            border.color: root.alpha(root.c("borderSoft", Qt.rgba(1, 1, 1, 0.68)), 0.38)
+            clip: true
+            antialiasing: true
+
+            Rectangle {
+                anchors.fill: parent
+                anchors.margins: 4
+                radius: 4
+                color: "transparent"
+                border.width: 1
+                border.color: root.alpha(root.c("borderSoft", Qt.rgba(1, 1, 1, 0.68)), 0.22)
+                antialiasing: true
+            }
+
+            Rectangle {
+                width: 13
+                height: parent.height - 8
+                x: button.rightSide ? parent.width - width - 4 : 4
+                y: 4
+                radius: 6
+                color: root.alpha(root.c("surfaceSidebar", Qt.rgba(1, 1, 1, 0.78)), button.active ? 0.96 : 0.74)
+                border.width: 1
+                border.color: button.active ? root.accentPrimary() : root.alpha(root.c("borderSoft", Qt.rgba(1, 1, 1, 0.68)), 0.46)
+                antialiasing: true
+
+                Column {
+                    anchors.centerIn: parent
+                    spacing: 3
+
+                    Repeater {
+                        model: 4
+
+                        Rectangle {
+                            width: 5
+                            height: 5
+                            radius: 2.5
+                            color: index === 0 ? root.accentPrimary() : root.alpha(root.c("textSecondary", "#8d7ca3"), 0.55)
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                x: button.rightSide ? 6 : 21
+                y: 9
+                width: Math.max(10, parent.width - 34)
+                height: 3
+                radius: 2
+                color: root.alpha(root.c("textSecondary", "#8d7ca3"), 0.22)
+            }
+
+            Rectangle {
+                x: button.rightSide ? 6 : 21
+                y: 17
+                width: Math.max(10, parent.width - 44)
+                height: 18
+                radius: 4
+                color: root.alpha(root.accentSecondary(), button.active ? 0.24 : 0.12)
+            }
+        }
+
+        MouseArea {
+            id: previewMouse
+
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onEntered: button.hovered = true
+            onExited: button.hovered = false
+            onClicked: button.clicked()
         }
     }
 
@@ -914,6 +1231,79 @@ Item {
 
         MouseArea {
             id: clickArea
+
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onEntered: button.hovered = true
+            onExited: button.hovered = false
+            onClicked: button.clicked()
+        }
+    }
+
+    component LanguageButton: Rectangle {
+        id: button
+
+        property var itemData
+        property bool active: false
+        property bool hovered: false
+        signal clicked()
+
+        height: 72
+        radius: 10
+        color: active
+            ? root.c("activeBg", Qt.rgba(0.92, 0.62, 0.78, 0.28))
+            : (hovered ? root.c("hoverBg", Qt.rgba(0.92, 0.62, 0.78, 0.14)) : root.alpha(root.c("surfaceCard", Qt.rgba(1, 1, 1, 0.68)), 0.32))
+        border.width: 1
+        border.color: active
+            ? root.c("borderActive", Qt.rgba(0.90, 0.56, 0.74, 0.72))
+            : root.alpha(root.c("borderSoft", Qt.rgba(1, 1, 1, 0.68)), 0.52)
+        antialiasing: true
+        scale: languageMouse.pressed ? 0.97 : (hovered ? 1.012 : 1.0)
+
+        Behavior on color { ColorAnimation { duration: 140; easing.type: Easing.OutCubic } }
+        Behavior on border.color { ColorAnimation { duration: 140; easing.type: Easing.OutCubic } }
+        Behavior on scale { NumberAnimation { duration: 110; easing.type: Easing.OutCubic } }
+
+        Rectangle {
+            x: 12
+            y: 14
+            width: 34
+            height: 34
+            radius: 17
+            color: button.active ? root.alpha(root.accentPrimary(), 0.32) : root.alpha(root.c("surfaceInput", Qt.rgba(1, 1, 1, 0.58)), 0.52)
+            border.width: 1
+            border.color: button.active ? root.accentPrimary() : root.alpha(root.c("borderSoft", Qt.rgba(1, 1, 1, 0.68)), 0.48)
+            antialiasing: true
+
+            Text {
+                anchors.centerIn: parent
+                text: button.itemData.shortLabel || ""
+                color: button.active ? root.accentPrimary() : root.c("textSecondary", "#8d7ca3")
+                font.family: root.monoFont
+                font.pixelSize: 11
+                font.weight: Font.Bold
+                layer.enabled: root.fontGlowEnabled()
+                layer.effect: FontGlowEffect {}
+            }
+        }
+
+        Text {
+            x: 56
+            y: 18
+            width: parent.width - x - 12
+            text: button.itemData.label || ""
+            color: button.active ? root.c("textPrimary", "#4d3f63") : root.c("textSecondary", "#8d7ca3")
+            font.family: root.uiFont
+            font.pixelSize: 13
+            font.weight: Font.Bold
+            elide: Text.ElideRight
+            layer.enabled: root.fontGlowEnabled()
+            layer.effect: FontGlowEffect {}
+        }
+
+        MouseArea {
+            id: languageMouse
 
             anchors.fill: parent
             hoverEnabled: true
@@ -1044,7 +1434,7 @@ Item {
 
         Text {
             anchors.centerIn: parent
-            text: "Adaptar"
+            text: root.tr("adapt")
             color: root.c("textPrimary", "#4d3f63")
             font.family: root.uiFont
             font.pixelSize: 11
@@ -1199,11 +1589,13 @@ Item {
             }
 
             Text {
-                text: item.itemData.label
+                width: item.width - 52
+                text: root.tr("nav_" + item.itemData.key)
                 color: item.active ? root.c("textPrimary", "#4d3f63") : root.c("textSecondary", "#8d7ca3")
                 font.family: root.uiFont
                 font.pixelSize: 13
                 font.weight: Font.Bold
+                elide: Text.ElideRight
                 layer.enabled: root.fontGlowEnabled()
                 layer.effect: FontGlowEffect {}
             }
@@ -1542,6 +1934,16 @@ Item {
                 ctx.lineTo(s * 0.68, s * 0.76)
                 ctx.moveTo(s * 0.34, s * 0.56)
                 ctx.lineTo(s * 0.58, s * 0.56)
+                ctx.stroke()
+            } else if (iconName === "language") {
+                ctx.beginPath()
+                ctx.arc(cx, cy, s * 0.35, 0, Math.PI * 2)
+                ctx.moveTo(cx - s * 0.35, cy)
+                ctx.lineTo(cx + s * 0.35, cy)
+                ctx.moveTo(cx, cy - s * 0.35)
+                ctx.bezierCurveTo(cx - s * 0.16, cy - s * 0.12, cx - s * 0.16, cy + s * 0.12, cx, cy + s * 0.35)
+                ctx.moveTo(cx, cy - s * 0.35)
+                ctx.bezierCurveTo(cx + s * 0.16, cy - s * 0.12, cx + s * 0.16, cy + s * 0.12, cx, cy + s * 0.35)
                 ctx.stroke()
             }
         }
