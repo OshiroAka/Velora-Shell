@@ -21,6 +21,7 @@ Item {
     readonly property string wallpaperDir: homeDir + "/Pictures/Wallpapers"
     readonly property string applyScript: Quickshell.shellDir + "/scripts/velora-wallpaper-apply"
     readonly property string scanScript: Quickshell.shellDir + "/scripts/velora-wallpaper-scan"
+    readonly property string zenLiveScript: Quickshell.shellDir + "/scripts/velora-zen-live-apply"
     readonly property var navItems: [
         { key: "theme", icon: "palette" },
         { key: "wallpaper", icon: "image" },
@@ -51,8 +52,19 @@ Item {
     property var allWallpapers: fallbackWallpapers
     property var wallpapers: fallbackWallpapers
     property string noticeText: ""
+    property bool zenAutoRestart: true
     property bool open: visible
+    property bool loadedOnce: false
+    property bool scanComplete: false
+    readonly property bool contentActive: visible || open || revealProgress > 0.01
     property real revealProgress: 0
+    readonly property int motionPanelIn: theme ? theme.motionPanelIn : 220
+    readonly property int motionPanelOut: theme ? theme.motionPanelOut : 140
+    readonly property int motionHover: theme ? theme.motionHover : 120
+    readonly property int motionPanelOffset: theme ? theme.motionPanelOffset : 28
+    readonly property int motionEaseEnter: theme ? theme.motionEaseEnter : Easing.OutCubic
+    readonly property int motionEaseExit: theme ? theme.motionEaseExit : Easing.InCubic
+    readonly property int motionEaseHover: theme ? theme.motionEaseHover : Easing.OutCubic
 
     signal closeRequested()
 
@@ -63,21 +75,27 @@ Item {
     activeFocusOnTab: true
 
     transform: Translate {
-        x: Math.round((1 - root.revealProgress) * (root.attachSide === "right" ? 34 : -34))
+        x: Math.round((1 - root.revealProgress) * (root.attachSide === "right" ? root.motionPanelOffset : -root.motionPanelOffset))
         y: Math.round((1 - root.revealProgress) * 6)
     }
 
-    onOpenChanged: animateReveal()
+    onOpenChanged: {
+        animateReveal()
+        if (open)
+            ensureLoaded()
+    }
     onVisibleChanged: {
         if (visible && open && revealProgress <= 0.001)
             animateReveal()
+        if (visible && open)
+            ensureLoaded()
     }
 
     function animateReveal() {
         revealAnimation.stop()
         revealAnimation.from = revealProgress
         revealAnimation.to = open ? 1 : 0
-        revealAnimation.duration = open ? 420 : 170
+        revealAnimation.duration = open ? motionPanelIn : motionPanelOut
         revealAnimation.restart()
     }
 
@@ -88,12 +106,14 @@ Item {
         property: "revealProgress"
         from: root.revealProgress
         to: root.open ? 1 : 0
-        duration: root.open ? 420 : 170
-        easing.type: Easing.BezierSpline
-        easing.bezierCurve: [0.05, 0, 0.133, 0.06, 0.166, 0.4, 0.208, 0.82, 0.25, 1, 1, 1]
+        duration: root.open ? root.motionPanelIn : root.motionPanelOut
+        easing.type: root.open ? root.motionEaseEnter : root.motionEaseExit
     }
 
-    Component.onCompleted: reload()
+    Component.onCompleted: {
+        if (open)
+            ensureLoaded()
+    }
 
     Keys.onEscapePressed: root.closeRequested()
     Keys.onPressed: function(event) {
@@ -148,7 +168,8 @@ Item {
                 "frameOff": "枠 OFF",
                 "opacity": "透明度",
                 "opacityAll": "全体",
-                "opacityPanel": "バー/ポップ",
+                "opacityBar": "バー",
+                "opacityPanel": "パネル",
                 "opacitySync": "同期",
                 "opacityCard": "カード",
                 "reset": "リセット",
@@ -156,7 +177,13 @@ Item {
                 "glow": "グロー",
                 "fontGlow": "フォント",
                 "border": "ボーダー",
+                "visualizer": "ビジュアライザー",
+                "visualizerStrength": "強さ",
                 "adapt": "自動",
+                "zenRestartOn": "Zen 自動 ON",
+                "zenRestartOff": "Zen 自動 OFF",
+                "zenRestartOnNotice": "Zen の自動再起動を有効にしました。",
+                "zenRestartOffNotice": "Zen の自動再起動を停止しました。",
                 "wallpaper": "壁紙",
                 "customWallpaper": "カスタム壁紙を選択",
                 "applying": "適用中...",
@@ -176,7 +203,8 @@ Item {
                 "frameOff": "Frame OFF",
                 "opacity": "Opacity",
                 "opacityAll": "Global",
-                "opacityPanel": "Bar/Popup",
+                "opacityBar": "Bar",
+                "opacityPanel": "Panels",
                 "opacitySync": "Sync",
                 "opacityCard": "Cards",
                 "reset": "Reset",
@@ -184,7 +212,13 @@ Item {
                 "glow": "Glow",
                 "fontGlow": "Font",
                 "border": "Border",
+                "visualizer": "Visualizer",
+                "visualizerStrength": "Strength",
                 "adapt": "Adapt",
+                "zenRestartOn": "Zen auto ON",
+                "zenRestartOff": "Zen auto OFF",
+                "zenRestartOnNotice": "Zen auto restart enabled.",
+                "zenRestartOffNotice": "Zen auto restart disabled.",
                 "wallpaper": "Wallpaper",
                 "customWallpaper": "Choose wallpaper folder",
                 "applying": "Applying...",
@@ -204,7 +238,8 @@ Item {
                 "frameOff": "Moldura OFF",
                 "opacity": "Transparência",
                 "opacityAll": "Geral",
-                "opacityPanel": "Barra/Popup",
+                "opacityBar": "Barra",
+                "opacityPanel": "Painéis",
                 "opacitySync": "Sincronizar",
                 "opacityCard": "Cards",
                 "reset": "Resetar",
@@ -212,7 +247,13 @@ Item {
                 "glow": "Glow",
                 "fontGlow": "Fonte",
                 "border": "Borda",
+                "visualizer": "Visualizer",
+                "visualizerStrength": "Força",
                 "adapt": "Adaptar",
+                "zenRestartOn": "Zen auto ON",
+                "zenRestartOff": "Zen auto OFF",
+                "zenRestartOnNotice": "Reinício automático do Zen ativado.",
+                "zenRestartOffNotice": "Reinício automático do Zen desativado.",
                 "wallpaper": "Papel de parede",
                 "customWallpaper": "Escolher pasta de wallpapers",
                 "applying": "Aplicando...",
@@ -357,9 +398,32 @@ Item {
         applyWallpaper.running = true
     }
 
+    function setZenAutoRestart(enabled) {
+        root.zenAutoRestart = enabled
+        if (!zenModeSave.running) {
+            zenModeSave.command = [root.zenLiveScript, "mode", "set", enabled ? "restart" : "off"]
+            zenModeSave.running = true
+        } else {
+            zenModeSave.pendingMode = enabled ? "restart" : "off"
+        }
+
+        root.noticeText = enabled ? root.tr("zenRestartOnNotice") : root.tr("zenRestartOffNotice")
+        noticeReset.restart()
+    }
+
     function reload() {
         if (!scanWallpapers.running)
             scanWallpapers.running = true
+    }
+
+    function ensureLoaded() {
+        if (loadedOnce)
+            return
+
+        loadedOnce = true
+        reload()
+        if (!zenModeLoad.running)
+            zenModeLoad.running = true
     }
 
     Timer {
@@ -390,13 +454,48 @@ Item {
     }
 
     Process {
+        id: zenModeLoad
+
+        running: false
+        command: [root.zenLiveScript, "mode", "get"]
+
+        stdout: SplitParser {
+            onRead: function(data) {
+                root.zenAutoRestart = String(data || "").trim() !== "off"
+            }
+        }
+
+        onExited: running = false
+    }
+
+    Process {
+        id: zenModeSave
+
+        property string pendingMode: ""
+        running: false
+        command: [root.zenLiveScript, "mode", "set", "restart"]
+        onExited: {
+            running = false
+            if (pendingMode.length > 0) {
+                const next = pendingMode
+                pendingMode = ""
+                command = [root.zenLiveScript, "mode", "set", next]
+                running = true
+            }
+        }
+    }
+
+    Process {
         id: scanWallpapers
 
         running: false
         property var tmp: []
         command: [root.scanScript]
 
-        onStarted: tmp = []
+        onStarted: {
+            tmp = []
+            root.scanComplete = false
+        }
 
         stdout: SplitParser {
             onRead: function(data) {
@@ -410,6 +509,7 @@ Item {
                         root.wallpapers = scanWallpapers.tmp.slice(0, Math.min(5, scanWallpapers.tmp.length))
                         root.selectedIndex = 0
                     }
+                    root.scanComplete = true
                     return
                 }
 
@@ -441,6 +541,7 @@ Item {
                 root.allWallpapers = tmp.slice()
                 root.wallpapers = tmp.slice(0, Math.min(5, tmp.length))
                 root.selectedIndex = 0
+                root.scanComplete = true
             }
         }
     }
@@ -539,7 +640,7 @@ Item {
                 visible: root.activeNav <= 2
                 clip: true
                 contentWidth: width
-                contentHeight: root.activeNav === 0 ? 640 : height
+                contentHeight: root.activeNav === 0 ? 780 : height
                 boundsBehavior: Flickable.StopAtBounds
 
                 Item {
@@ -635,6 +736,13 @@ Item {
                                 root.theme.setDesktopFrameEnabled(!root.theme.desktopFrameEnabled)
                         }
                     }
+
+                    LayoutToggleButton {
+                        width: 154
+                        label: root.zenAutoRestart ? root.tr("zenRestartOn") : root.tr("zenRestartOff")
+                        active: root.zenAutoRestart
+                        onClicked: root.setZenAutoRestart(!root.zenAutoRestart)
+                    }
                 }
 
                 Text {
@@ -658,20 +766,25 @@ Item {
 	                    width: mainArea.width
 	                    visible: root.activeNav === 0
 	                    spacing: 12
+                        property int resetWidth: 74
+                        property int controlCount: 4
+                        property int controlWidth: Math.floor((width - spacing * controlCount - resetWidth) / controlCount)
 
                     OpacityControl {
-                        width: Math.floor((opacityRow.width - opacityRow.spacing * 4 - 74) / 4)
+                        width: opacityRow.controlWidth
                         label: root.tr("opacityAll")
                         minValue: root.theme ? root.theme.minPanelOpacity() : 0.25
                         value: root.theme ? root.theme.sidebarOpacity : 0.78
                         onMoved: function(nextValue) {
-                            if (root.theme)
+                            if (root.theme) {
                                 root.theme.applyOpacity(nextValue, nextValue, Math.max(root.theme.minOpacityForRole("card"), nextValue - 0.10))
+                                root.theme.applyBarOpacity(nextValue)
+                            }
                         }
                     }
 
                     OpacityControl {
-                        width: Math.floor((opacityRow.width - opacityRow.spacing * 4 - 74) / 4)
+                        width: opacityRow.controlWidth
                         label: root.tr("opacityPanel")
                         minValue: root.theme ? root.theme.minPanelOpacity() : 0.25
                         value: root.theme ? root.theme.sidebarOpacity : 0.78
@@ -682,7 +795,7 @@ Item {
                     }
 
                     OpacityControl {
-                        width: Math.floor((opacityRow.width - opacityRow.spacing * 4 - 74) / 4)
+                        width: opacityRow.controlWidth
                         label: root.tr("opacitySync")
                         minValue: root.theme ? root.theme.minPanelOpacity() : 0.25
                         value: root.theme ? root.theme.popupOpacity : 0.78
@@ -693,7 +806,7 @@ Item {
                     }
 
                     OpacityControl {
-                        width: Math.floor((opacityRow.width - opacityRow.spacing * 4 - 74) / 4)
+                        width: opacityRow.controlWidth
                         label: root.tr("opacityCard")
                         minValue: root.theme ? root.theme.minOpacityForRole("card") : 0.25
                         value: root.theme ? root.theme.cardOpacity : 0.68
@@ -706,7 +819,7 @@ Item {
                     Rectangle {
                         id: resetOpacityButton
 
-                        width: 74
+                        width: opacityRow.resetWidth
                         height: 42
                         radius: 9
                         color: resetOpacityMouse.containsMouse
@@ -741,16 +854,75 @@ Item {
                                     root.theme.resetBorderAccent()
                                 if (root.theme)
                                     root.theme.resetOpacity()
+                                if (root.theme)
+                                    root.theme.resetVisualizerStrength()
                                 root.noticeText = root.tr("materialReset")
                                 noticeReset.restart()
                             }
                         }
+	                    }
+	                }
+
+                Row {
+                    id: barOpacityRow
+
+                    x: 0
+                    y: 346
+                    width: mainArea.width
+                    visible: root.activeNav === 0
+                    spacing: 12
+
+                    OpacityControl {
+                        width: Math.min(280, barOpacityRow.width)
+                        label: root.tr("opacityBar")
+                        minValue: root.theme ? root.theme.minOpacityForRole("sidebar") : 0.25
+                        maxValue: 0.98
+                        value: root.theme ? root.theme.barOpacity : 0.78
+                        onMoved: function(nextValue) {
+                            if (root.theme)
+                                root.theme.applyBarOpacity(nextValue)
+                        }
                     }
                 }
 
-	                Text {
-	                    x: 0
-	                    y: 346
+                Text {
+                    x: 0
+                    y: 656
+                    visible: root.activeNav === 0
+                    text: root.tr("visualizer")
+                    color: root.c("textPrimary", "#4d3f63")
+                    font.family: root.uiFont
+                    font.pixelSize: 14
+                    font.weight: Font.Bold
+                    layer.enabled: root.fontGlowEnabled()
+                    layer.effect: FontGlowEffect {}
+                }
+
+                Row {
+                    id: visualizerRow
+
+                    x: 0
+                    y: 686
+                    width: mainArea.width
+                    visible: root.activeNav === 0
+                    spacing: 12
+
+                    OpacityControl {
+                        width: Math.min(280, visualizerRow.width)
+                        label: root.tr("visualizerStrength")
+                        minValue: 0.20
+                        maxValue: 0.90
+                        value: root.theme ? root.theme.visualizerStrength : 0.46
+                        onMoved: function(nextValue) {
+                            if (root.theme)
+                                root.theme.setVisualizerStrength(nextValue)
+                        }
+                    }
+                }
+
+                Text {
+                    x: 0
+	                    y: 406
 	                    visible: root.activeNav === 0
 	                    text: root.tr("glow")
                     color: root.c("textPrimary", "#4d3f63")
@@ -765,7 +937,7 @@ Item {
 	                    id: glowRow
 
 	                    x: 0
-	                    y: 376
+	                    y: 436
 	                    width: mainArea.width
                     visible: root.activeNav === 0
 
@@ -784,7 +956,7 @@ Item {
 
 	                Text {
 	                    x: 0
-	                    y: 436
+	                    y: 496
 	                    visible: root.activeNav === 0
 	                    text: root.tr("border")
                     color: root.c("textPrimary", "#4d3f63")
@@ -799,7 +971,7 @@ Item {
 	                    id: borderRow
 
 	                    x: 0
-	                    y: 466
+	                    y: 526
 	                    width: mainArea.width
                     visible: root.activeNav === 0
                     spacing: 14
@@ -879,7 +1051,7 @@ Item {
 
                             width: Math.floor((mainArea.width - wallpaperRow.spacing * 4) / 5)
                             height: 88
-                            source: root.displaySource(root.wallpapers[index])
+                            source: root.contentActive && root.scanComplete ? root.displaySource(root.wallpapers[index]) : ""
                             selected: root.selectedIndex === index
                             onClicked: root.selectedIndex = index
                         }
@@ -905,8 +1077,8 @@ Item {
                     scale: customMouse.pressed ? 0.97 : (customMouse.containsMouse ? 1.015 : 1.0)
                     antialiasing: true
 
-                    Behavior on color { ColorAnimation { duration: 130; easing.type: Easing.OutCubic } }
-                    Behavior on scale { NumberAnimation { duration: 115; easing.type: Easing.OutCubic } }
+                    Behavior on color { ColorAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
+                    Behavior on scale { NumberAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
 
                     Row {
                         anchors.centerIn: parent
@@ -955,7 +1127,7 @@ Item {
                     color: applyMouse.containsMouse
                         ? root.c("buttonPrimaryBg", root.accentPrimary())
                         : root.alpha(root.c("buttonPrimaryBg", root.accentPrimary()), 0.82)
-                    scale: applyMouse.pressed ? 0.96 : (applyMouse.containsMouse ? 1.018 : 1.0)
+                    scale: applyMouse.pressed ? 0.96 : (applyMouse.containsMouse ? 1.012 : 1.0)
                     layer.enabled: true
                     layer.effect: DropShadow {
                         transparentBorder: true
@@ -966,8 +1138,8 @@ Item {
                         color: root.c("buttonPrimaryGlow", root.c("shadowColor", Qt.rgba(0.50, 0.28, 0.46, 0.15)))
                     }
 
-                    Behavior on color { ColorAnimation { duration: 130; easing.type: Easing.OutCubic } }
-                    Behavior on scale { NumberAnimation { duration: 110; easing.type: Easing.OutCubic } }
+                    Behavior on color { ColorAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
+                    Behavior on scale { NumberAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
 
                     Text {
                         anchors.centerIn: parent
@@ -1106,9 +1278,9 @@ Item {
         antialiasing: true
         scale: previewMouse.pressed ? 0.97 : (hovered ? 1.012 : 1.0)
 
-        Behavior on color { ColorAnimation { duration: 140; easing.type: Easing.OutCubic } }
-        Behavior on border.color { ColorAnimation { duration: 140; easing.type: Easing.OutCubic } }
-        Behavior on scale { NumberAnimation { duration: 110; easing.type: Easing.OutCubic } }
+        Behavior on color { ColorAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
+        Behavior on border.color { ColorAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
+        Behavior on scale { NumberAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
 
         Rectangle {
             id: previewScreen
@@ -1214,9 +1386,9 @@ Item {
         antialiasing: true
         scale: clickArea.pressed ? 0.97 : (hovered ? 1.012 : 1.0)
 
-        Behavior on color { ColorAnimation { duration: 140; easing.type: Easing.OutCubic } }
-        Behavior on border.color { ColorAnimation { duration: 140; easing.type: Easing.OutCubic } }
-        Behavior on scale { NumberAnimation { duration: 110; easing.type: Easing.OutCubic } }
+        Behavior on color { ColorAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
+        Behavior on border.color { ColorAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
+        Behavior on scale { NumberAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
 
         Text {
             anchors.centerIn: parent
@@ -1261,9 +1433,9 @@ Item {
         antialiasing: true
         scale: languageMouse.pressed ? 0.97 : (hovered ? 1.012 : 1.0)
 
-        Behavior on color { ColorAnimation { duration: 140; easing.type: Easing.OutCubic } }
-        Behavior on border.color { ColorAnimation { duration: 140; easing.type: Easing.OutCubic } }
-        Behavior on scale { NumberAnimation { duration: 110; easing.type: Easing.OutCubic } }
+        Behavior on color { ColorAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
+        Behavior on border.color { ColorAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
+        Behavior on scale { NumberAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
 
         Rectangle {
             x: 12
@@ -1429,8 +1601,8 @@ Item {
         border.color: active && root.theme ? root.theme.sidebarBorderGlow : root.alpha(root.c("borderSoft", Qt.rgba(1, 1, 1, 0.68)), 0.52)
         antialiasing: true
 
-        Behavior on color { ColorAnimation { duration: 150; easing.type: Easing.OutCubic } }
-        Behavior on border.color { ColorAnimation { duration: 150; easing.type: Easing.OutCubic } }
+        Behavior on color { ColorAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
+        Behavior on border.color { ColorAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
 
         Text {
             anchors.centerIn: parent
@@ -1565,14 +1737,31 @@ Item {
 
         height: 54
         radius: 8
+        scale: hovered ? 1.006 : 1.0
+        transform: Translate {
+            x: item.hovered || item.active ? 1 : 0
+        }
         color: active
-            ? root.c("activeBg", Qt.rgba(0.92, 0.62, 0.78, 0.28))
-            : (hovered ? root.c("hoverBg", Qt.rgba(0.92, 0.62, 0.78, 0.14)) : "transparent")
-        border.width: active ? 1 : 0
-        border.color: root.c("borderActive", Qt.rgba(0.90, 0.56, 0.74, 0.45))
+            ? root.alpha(root.c("activeBg", Qt.rgba(0.92, 0.62, 0.78, 0.28)), 0.58)
+            : (hovered ? root.alpha(root.c("hoverBg", Qt.rgba(0.92, 0.62, 0.78, 0.14)), 0.36) : "transparent")
+        border.width: 1
+        border.color: active
+            ? root.alpha(root.c("borderActive", Qt.rgba(0.90, 0.56, 0.74, 0.45)), 0.62)
+            : (hovered ? root.alpha(root.accentPrimary(), 0.18) : "transparent")
         antialiasing: true
+        layer.enabled: false
+        layer.effect: DropShadow {
+            transparentBorder: true
+            radius: hovered ? 24 : 17
+            samples: hovered ? 49 : 35
+            horizontalOffset: 0
+            verticalOffset: hovered ? 7 : 4
+            color: root.alpha(root.c("shadowColor", Qt.rgba(0.28, 0.20, 0.34, 1)), hovered ? 0.20 : 0.12)
+        }
 
-        Behavior on color { ColorAnimation { duration: 140; easing.type: Easing.OutCubic } }
+        Behavior on color { ColorAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
+        Behavior on scale { NumberAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
+        Behavior on border.color { ColorAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
 
         Row {
             anchors.verticalCenter: parent.verticalCenter
@@ -1619,10 +1808,10 @@ Item {
         property bool hovered: false
         signal clicked()
 
-        scale: mouse.pressed ? 0.96 : (hovered ? 1.02 : 1.0)
+        scale: mouse.pressed ? 0.96 : (hovered ? 1.012 : 1.0)
         transformOrigin: Item.Center
 
-        Behavior on scale { NumberAnimation { duration: 130; easing.type: Easing.OutCubic } }
+        Behavior on scale { NumberAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
 
         Rectangle {
             id: preview
@@ -1647,7 +1836,7 @@ Item {
                 color: root.c("shadowColor", Qt.rgba(0.46, 0.28, 0.48, card.hovered || card.selected ? 0.14 : 0.07))
             }
 
-            Behavior on border.color { ColorAnimation { duration: 150; easing.type: Easing.OutCubic } }
+            Behavior on border.color { ColorAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
 
             ThemePreview {
                 anchors.fill: parent
@@ -1720,7 +1909,7 @@ Item {
             : root.c("borderSoft", Qt.rgba(1, 1, 1, 0.52))
         clip: true
         antialiasing: true
-        scale: mouse.pressed ? 0.97 : (hovered ? 1.02 : 1.0)
+        scale: mouse.pressed ? 0.97 : (hovered ? 1.012 : 1.0)
         layer.enabled: true
         layer.effect: DropShadow {
             transparentBorder: true
@@ -1731,13 +1920,13 @@ Item {
             color: root.c("shadowColor", Qt.rgba(0.38, 0.25, 0.44, hovered || selected ? 0.13 : 0.06))
         }
 
-        Behavior on scale { NumberAnimation { duration: 130; easing.type: Easing.OutCubic } }
-        Behavior on border.color { ColorAnimation { duration: 150; easing.type: Easing.OutCubic } }
+        Behavior on scale { NumberAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
+        Behavior on border.color { ColorAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
 
         Image {
             anchors.fill: parent
             anchors.margins: 1
-            source: card.source
+            source: root.contentActive ? card.source : ""
             fillMode: Image.PreserveAspectCrop
             sourceSize.width: 260
             sourceSize.height: 170

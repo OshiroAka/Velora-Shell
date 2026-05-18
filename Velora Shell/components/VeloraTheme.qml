@@ -15,6 +15,7 @@ QtObject {
     property string themeNotice: ""
     property bool pywalAvailable: false
     property bool opacityOverrideActive: false
+    property bool barOpacityOverrideActive: false
     property bool glowOverrideActive: false
     property bool borderOverrideActive: false
     property bool borderAdaptEnabled: true
@@ -22,10 +23,35 @@ QtObject {
     property bool paletteAnimatedApply: false
     readonly property bool paletteBehaviorEnabled: !paletteApplying || paletteAnimatedApply
     readonly property int paletteTransitionDuration: paletteAnimatedApply ? 560 : 260
+    property bool motionEnabled: true
+    readonly property int motionFast: motionEnabled ? 120 : 1
+    readonly property int motionNormal: motionEnabled ? 200 : 1
+    readonly property int motionSlow: motionEnabled ? 320 : 1
+    readonly property int motionPanelIn: motionEnabled ? 220 : 1
+    readonly property int motionPanelOut: motionEnabled ? 140 : 1
+    readonly property int motionPanelGeometry: motionEnabled ? 220 : 1
+    readonly property int motionMenuIn: motionEnabled ? 320 : 1
+    readonly property int motionMenuOut: motionEnabled ? 180 : 1
+    readonly property int motionHover: motionEnabled ? 120 : 1
+    readonly property int motionUnmountDelay: motionEnabled ? motionPanelOut + 60 : 1
+    readonly property int motionPanelOffset: motionEnabled ? 28 : 0
+    readonly property int motionLayersIn: motionEnabled ? 520 : 1
+    readonly property int motionLayersOut: motionEnabled ? 360 : 1
+    readonly property int motionFadeLayers: motionEnabled ? 320 : 1
+    readonly property int motionEaseEnter: Easing.OutCubic
+    readonly property int motionEaseExit: Easing.InCubic
+    readonly property int motionEaseHover: Easing.OutCubic
+    readonly property int motionEaseEmphasized: Easing.BezierSpline
+    readonly property var motionCurveSpecialWorkSwitch: [0.05, 0.7, 0.1, 1, 1, 1]
+    readonly property var motionCurveEmphasizedAccel: [0.3, 0, 0.8, 0.15, 1, 1]
+    readonly property var motionCurveEmphasizedDecel: [0.05, 0.7, 0.1, 1, 1, 1]
+    readonly property var motionCurveStandard: [0.2, 0, 0, 1, 1, 1]
+    readonly property var motionEmphasizedCurve: [0.05, 0, 0.133, 0.06, 0.166, 0.4, 0.208, 0.82, 0.25, 1, 1, 1]
     property string barPosition: "left"
     property bool desktopFrameEnabled: true
     property string language: "ja"
     property real sidebarOpacity: 0.88
+    property real barOpacity: 0.88
     property real popupOpacity: 0.90
     property real cardOpacity: 0.76
     property real generalGlow: 0.50
@@ -34,6 +60,7 @@ QtObject {
     property real iconGlowLevel: 0.50
     property real textGlowLevel: 0.78
     property real borderHue: 0.55
+    property real visualizerStrength: 0.46
 
     property color surfaceBase: Qt.rgba(255 / 255, 250 / 255, 254 / 255, 0.86)
     property color surfaceSidebar: Qt.rgba(255 / 255, 247 / 255, 253 / 255, 0.88)
@@ -151,9 +178,9 @@ QtObject {
 
     function minPanelOpacity() {
         if (themeId === "pywal16" && themeMode === "dark")
-            return 0.48
+            return 0.64
         if (themeMode === "dark")
-            return 0.46
+            return 0.56
         return 0.25
     }
 
@@ -168,6 +195,12 @@ QtObject {
         const n = Number(value)
         const base = isNaN(n) ? fallback : n
         return Math.max(minPanelOpacity(), Math.min(0.98, base))
+    }
+
+    function clampBarOpacity(value, fallback) {
+        const n = Number(value)
+        const base = isNaN(n) ? fallback : n
+        return Math.max(minOpacityForRole("sidebar"), Math.min(0.98, base))
     }
 
     function beginPaletteApply(animate) {
@@ -214,11 +247,23 @@ QtObject {
         popupOpacity = sharedOpacity
     }
 
+    function syncBarOpacityFromSurface() {
+        if (!barOpacityOverrideActive)
+            barOpacity = clampBarOpacity(surfaceSidebar.a, surfaceSidebar.a)
+    }
+
     function clampLevel(value, fallback) {
         const n = Number(value)
         if (isNaN(n))
             return fallback
         return Math.max(0, Math.min(1, n))
+    }
+
+    function clampVisualizerStrength(value) {
+        const n = Number(value)
+        if (isNaN(n))
+            return visualizerStrength
+        return Math.max(0.20, Math.min(0.90, n))
     }
 
     function withOpacity(colorValue, opacity, role) {
@@ -308,6 +353,7 @@ QtObject {
     function syncOpacityValuesFromSurfaces() {
         syncPanelMaterial(Math.max(surfaceSidebar.a, surfacePopup.a))
         cardOpacity = surfaceCard.a
+        syncBarOpacityFromSurface()
     }
 
     function applyOpacity(sidebar, popup, card, persist) {
@@ -317,8 +363,23 @@ QtObject {
         surfaceCard = withOpacity(paletteSurfaceCard, cardOpacity, "card")
         surfaceInput = withOpacity(paletteSurfaceInput, Math.max(minOpacityForRole("card"), cardOpacity - 0.08), "card")
         surfaceButton = withOpacity(paletteSurfaceButton, Math.max(minOpacityForRole("card"), cardOpacity - 0.06), "card")
+        syncBarOpacityFromSurface()
         if (persist !== false)
             saveOpacity()
+    }
+
+    function applyBarOpacity(opacity, persist) {
+        barOpacityOverrideActive = true
+        barOpacity = clampBarOpacity(opacity, barOpacity)
+        if (persist !== false)
+            saveBarOpacity()
+    }
+
+    function applyLoadedBarOpacityOverride() {
+        if (barOpacityOverrideActive)
+            applyBarOpacity(barOpacity, false)
+        else
+            syncBarOpacityFromSurface()
     }
 
     function applyLoadedOpacityOverrides() {
@@ -326,10 +387,12 @@ QtObject {
             applyOpacity(sidebarOpacity, popupOpacity, cardOpacity, false)
         else
             syncOpacityValuesFromSurfaces()
+        applyLoadedBarOpacityOverride()
     }
 
     function resetOpacity() {
         opacityOverrideActive = false
+        barOpacityOverrideActive = false
         opacityResetProc.running = true
         applyTheme(themeId, false)
     }
@@ -714,6 +777,16 @@ QtObject {
         }
     }
 
+    function saveBarOpacity() {
+        const opacity = Number(barOpacity).toFixed(2)
+        if (barOpacitySaveProc.running)
+            barOpacitySaveProc.pending = opacity
+        else {
+            barOpacitySaveProc.command = [root.stateScript, "bar-opacity", "set", opacity]
+            barOpacitySaveProc.running = true
+        }
+    }
+
     function saveGlow() {
         const general = Number(generalGlow).toFixed(2)
         const sidebarBorder = Number(sidebarBorderGlowLevel).toFixed(2)
@@ -736,6 +809,27 @@ QtObject {
         else {
             borderSaveProc.command = [root.stateScript, "border", "set", mode, hue]
             borderSaveProc.running = true
+        }
+    }
+
+    function setVisualizerStrength(value, persist) {
+        visualizerStrength = clampVisualizerStrength(value)
+        if (persist !== false)
+            saveVisualizerStrength()
+    }
+
+    function resetVisualizerStrength() {
+        visualizerStrength = 0.46
+        visualizerResetProc.running = true
+    }
+
+    function saveVisualizerStrength() {
+        const strength = Number(visualizerStrength).toFixed(2)
+        if (visualizerSaveProc.running)
+            visualizerSaveProc.pending = strength
+        else {
+            visualizerSaveProc.command = [root.stateScript, "visualizer", "set", strength]
+            visualizerSaveProc.running = true
         }
     }
 
@@ -790,20 +884,108 @@ QtObject {
         }
     }
 
+    function applyDumpRecord(key, value) {
+        const line = String(value || "").trim()
+
+        if (key === "theme") {
+            if (line.length > 0)
+                root.applyTheme(line, false)
+            return
+        }
+
+        if (key === "opacity") {
+            if (line.length <= 0 || line === "auto") {
+                root.opacityOverrideActive = false
+                root.syncOpacityValuesFromSurfaces()
+                return
+            }
+
+            const opacityParts = line.split("|")
+            if (opacityParts.length >= 3)
+                root.applyOpacity(opacityParts[0], opacityParts[1], opacityParts[2], false)
+            return
+        }
+
+        if (key === "barOpacity") {
+            if (line.length <= 0 || line === "auto") {
+                root.barOpacityOverrideActive = false
+                root.syncBarOpacityFromSurface()
+                return
+            }
+
+            root.applyBarOpacity(line, false)
+            return
+        }
+
+        if (key === "glow") {
+            if (line.length <= 0 || line === "auto") {
+                root.glowOverrideActive = false
+                root.syncGlowValuesFromSurfaces()
+                return
+            }
+
+            const glowParts = line.split("|")
+            if (glowParts.length >= 3)
+                root.applyGlow(glowParts[0], glowParts[1], glowParts[2], glowParts.length >= 4 ? glowParts[3] : glowParts[0], glowParts.length >= 5 ? glowParts[4] : root.textGlowLevel, false)
+            return
+        }
+
+        if (key === "border") {
+            if (line.length <= 0 || line === "auto") {
+                root.borderOverrideActive = false
+                root.syncBorderValuesFromSurfaces()
+                return
+            }
+
+            const borderParts = line.split("|")
+            root.applyBorderAccent(borderParts[0] !== "manual", borderParts.length >= 2 ? borderParts[1] : root.borderHue, false)
+            return
+        }
+
+        if (key === "layout") {
+            if (line.length <= 0)
+                return
+
+            const layoutParts = line.split("|")
+            root.applyLayout(layoutParts[0], layoutParts.length >= 2 ? layoutParts[1] : "1", false)
+            return
+        }
+
+        if (key === "language") {
+            if (line.length > 0)
+                root.setLanguage(line, false)
+            return
+        }
+
+        if (key === "visualizer" && line.length > 0 && line !== "auto")
+            root.setVisualizerStrength(line, false)
+    }
+
     Component.onCompleted: {
         setDefaultPalette()
-        if (!loadProc.running)
-            loadProc.running = true
-        if (!opacityLoadProc.running)
-            opacityLoadProc.running = true
-        if (!glowLoadProc.running)
-            glowLoadProc.running = true
-        if (!borderLoadProc.running)
-            borderLoadProc.running = true
-        if (!layoutLoadProc.running)
-            layoutLoadProc.running = true
-        if (!languageLoadProc.running)
-            languageLoadProc.running = true
+        if (!loadAllProc.running)
+            loadAllProc.running = true
+    }
+
+    property Process loadAllProc: Process {
+        running: false
+        command: [root.stateScript, "dump"]
+
+        stdout: SplitParser {
+            onRead: function(data) {
+                const raw = String(data || "").trim()
+                if (raw.length <= 0)
+                    return
+
+                const sep = raw.indexOf("|")
+                if (sep < 0)
+                    return
+
+                root.applyDumpRecord(raw.slice(0, sep), raw.slice(sep + 1))
+            }
+        }
+
+        onExited: running = false
     }
 
     property Process loadProc: Process {
@@ -879,6 +1061,22 @@ QtObject {
         running: false
         command: [root.stateScript, "opacity", "reset"]
         onExited: running = false
+    }
+
+    property Process barOpacitySaveProc: Process {
+        property string pending: ""
+
+        running: false
+        command: [root.stateScript, "bar-opacity", "set", "0.88"]
+        onExited: {
+            running = false
+            if (pending.length > 0) {
+                const next = pending
+                pending = ""
+                command = [root.stateScript, "bar-opacity", "set", next]
+                running = true
+            }
+        }
     }
 
     property Process glowLoadProc: Process {
@@ -965,6 +1163,43 @@ QtObject {
     property Process borderResetProc: Process {
         running: false
         command: [root.stateScript, "border", "reset"]
+        onExited: running = false
+    }
+
+    property Process visualizerLoadProc: Process {
+        running: false
+        command: [root.stateScript, "visualizer", "get"]
+
+        stdout: SplitParser {
+            onRead: function(data) {
+                const line = String(data || "").trim()
+                if (line.length > 0 && line !== "auto")
+                    root.setVisualizerStrength(line, false)
+            }
+        }
+
+        onExited: running = false
+    }
+
+    property Process visualizerSaveProc: Process {
+        property string pending: ""
+
+        running: false
+        command: [root.stateScript, "visualizer", "set", "0.46"]
+        onExited: {
+            running = false
+            if (pending.length > 0) {
+                const next = pending
+                pending = ""
+                command = [root.stateScript, "visualizer", "set", next]
+                running = true
+            }
+        }
+    }
+
+    property Process visualizerResetProc: Process {
+        running: false
+        command: [root.stateScript, "visualizer", "reset"]
         onExited: running = false
     }
 

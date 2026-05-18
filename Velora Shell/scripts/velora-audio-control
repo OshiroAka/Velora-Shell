@@ -1,0 +1,513 @@
+#!/usr/bin/env python3
+import json
+import os
+import re
+import shutil
+import socket
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+
+STATE_DIR = Path.home() / ".local" / "state" / "velora-shell"
+STATE_FILE = STATE_DIR / "audio.json"
+PRESET_NAME = "VeloraMedia"
+PRESET_DIRS = [
+    Path.home() / ".config" / "easyeffects" / "output",
+    Path.home() / ".local" / "share" / "easyeffects" / "output",
+]
+FREQUENCIES = [60, 150, 400, 1000, 2500, 6000, 12000]
+
+
+DEFAULT_STATE = {
+    "fx": False,
+    "bass": False,
+    "treble": False,
+    "surround": False,
+    "boost": False,
+    "preset": "Custom",
+    "bands": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+}
+
+
+PRESETS = {
+    "Flat": {
+        "fx": False,
+        "bass": False,
+        "treble": False,
+        "surround": False,
+        "boost": False,
+        "bands": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    },
+    "Music": {
+        "fx": True,
+        "bass": True,
+        "treble": True,
+        "surround": False,
+        "boost": False,
+        "bands": [3.0, 2.0, 0.5, -1.0, 1.5, 2.2, 2.8],
+    },
+    "Bass": {
+        "fx": True,
+        "bass": True,
+        "treble": False,
+        "surround": True,
+        "boost": True,
+        "bands": [5.0, 4.0, 1.5, -1.5, 0.8, 1.2, 1.5],
+    },
+    "Bass+": {
+        "fx": True,
+        "bass": True,
+        "treble": False,
+        "surround": False,
+        "boost": False,
+        "bands": [12.0, 3.07, -2.08, -12.0, -12.0, -12.0, -12.0],
+    },
+    "Voice": {
+        "fx": True,
+        "bass": False,
+        "treble": True,
+        "surround": False,
+        "boost": True,
+        "bands": [-2.0, -1.0, 1.0, 2.5, 3.0, 1.6, 0.4],
+    },
+}
+
+
+def clamp(value, low, high):
+    return max(low, min(high, value))
+
+
+def load_state():
+    state = dict(DEFAULT_STATE)
+    try:
+        data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            state.update(data)
+    except (OSError, json.JSONDecodeError):
+        pass
+
+    bands = state.get("bands", DEFAULT_STATE["bands"])
+    if not isinstance(bands, list):
+        bands = DEFAULT_STATE["bands"]
+    bands = (bands + DEFAULT_STATE["bands"])[: len(FREQUENCIES)]
+    state["bands"] = [float(clamp(float(v), -12.0, 12.0)) for v in bands]
+
+    for key in ("fx", "bass", "treble", "surround", "boost"):
+        state[key] = bool(state.get(key, False))
+    state["preset"] = str(state.get("preset", "Custom") or "Custom")
+    return state
+
+
+def save_state(state):
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    STATE_FILE.write_text(json.dumps(state, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def run_quiet(args):
+    try:
+        return subprocess.run(args, text=True, capture_output=True, check=False)
+    except OSError:
+        return None
+
+
+def wpctl_volume():
+    proc = run_quiet(["wpctl", "get-volume", "@DEFAULT_AUDIO_SINK@"])
+    if proc is None or proc.returncode != 0:
+        return 0.60, False
+
+    text = (proc.stdout or "").strip()
+    match = re.search(r"([0-9]+(?:\.[0-9]+)?)", text)
+    value = float(match.group(1)) if match else 0.60
+    return clamp(value, 0.0, 1.50), "MUTED" in text.upper()
+
+
+def set_volume(percent):
+    value = int(clamp(float(percent), 0, 150))
+    return run_quiet(["wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", f"{value}%"])
+
+
+def toggle_mute():
+    return run_quiet(["wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"])
+
+
+def easy_socket_path():
+    runtime = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
+    return Path(runtime) / "EasyEffectsServer"
+
+
+def easy_installed():
+    return shutil.which("easyeffects") is not None
+
+
+def easy_socket_ready():
+    path = easy_socket_path()
+    return path.exists() and path.is_socket()
+
+
+def start_easyeffects():
+    exe = shutil.which("easyeffects")
+    if exe is None:
+        return False
+    if easy_socket_ready():
+        return True
+
+    for args in ([exe, "--gapplication-service", "--hide-window"], [exe, "-w"]):
+        try:
+            subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        except OSError:
+            continue
+        for _ in range(20):
+            if easy_socket_ready():
+                return True
+            time.sleep(0.08)
+    return easy_socket_ready()
+
+
+def easy_send(command, timeout=0.35, expect_reply=True):
+    if not easy_socket_ready():
+        return None
+
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    sock.settimeout(timeout)
+    try:
+        sock.connect(str(easy_socket_path()))
+        sock.sendall((command + "\n").encode("utf-8"))
+        if not expect_reply:
+            return ""
+        try:
+            return sock.recv(4096).decode("utf-8", "replace").strip()
+        except socket.timeout:
+            return ""
+    except OSError:
+        return None
+    finally:
+        sock.close()
+
+
+def equalizer_channels(bands):
+    channel = {}
+    for idx, freq in enumerate(FREQUENCIES):
+        channel[f"band{idx}"] = {
+            "frequency": float(freq),
+            "gain": float(clamp(bands[idx], -12.0, 12.0)),
+            "mode": "RLC (BT)",
+            "mute": False,
+            "q": 1.504760237537245,
+            "slope": "x1",
+            "solo": False,
+            "type": "Bell",
+        }
+    return channel
+
+
+def preset_json(state):
+    bands = state["bands"]
+    bass_amount = 7.5 if state["bass"] else 0.0
+    exciter_amount = 4.8 if state["treble"] else 0.0
+    stereo_base = 0.28 if state["surround"] else 0.0
+    maximizer_threshold = -5.0 if state["boost"] else 0.0
+
+    return {
+        "output": {
+            "blocklist": [],
+            "bass_enhancer": {
+                "amount": bass_amount,
+                "blend": 0.0,
+                "floor": 20.0,
+                "floor-active": False,
+                "harmonics": 8.5,
+                "input-gain": -1.0 if state["bass"] else 0.0,
+                "output-gain": 0.0,
+                "scope": 95.0,
+            },
+            "equalizer": {
+                "input-gain": -2.0 if state["fx"] else 0.0,
+                "left": equalizer_channels(bands),
+                "mode": "IIR",
+                "num-bands": len(FREQUENCIES),
+                "output-gain": 0.0,
+                "right": equalizer_channels(bands),
+                "split-channels": False,
+            },
+            "exciter": {
+                "amount": exciter_amount,
+                "blend": 0.0,
+                "ceil": 16000.0,
+                "ceil-active": False,
+                "harmonics": 8.5,
+                "input-gain": 0.0,
+                "listen": False,
+                "output-gain": 0.0,
+                "scope": 7500.0,
+            },
+            "stereo_tools": {
+                "balance-in": 0.0,
+                "balance-out": 0.0,
+                "delay": 0.0,
+                "dry": -100.0,
+                "input-gain": 0.0,
+                "mode": "LR > LR (Stereo Default)",
+                "mutel": False,
+                "muter": False,
+                "output-gain": 0.0,
+                "phasel": False,
+                "phaser": False,
+                "sc-level": 1.0,
+                "slev": stereo_base,
+                "stereo-base": stereo_base,
+                "stereo-phase": 0.0,
+            },
+            "maximizer": {
+                "ceiling": 0.0,
+                "release": 25.0,
+                "threshold": maximizer_threshold,
+            },
+            "plugins_order": [
+                "equalizer",
+                "bass_enhancer",
+                "exciter",
+                "stereo_tools",
+                "maximizer",
+            ],
+        }
+    }
+
+
+def write_easy_preset(state):
+    payload = preset_json(state)
+    for directory in PRESET_DIRS:
+        try:
+            directory.mkdir(parents=True, exist_ok=True)
+            (directory / f"{PRESET_NAME}.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        except OSError:
+            continue
+
+
+def apply_easy_effects(state):
+    if not easy_installed():
+        return "missing"
+
+    write_easy_preset(state)
+    if not start_easyeffects():
+        return "offline"
+
+    if not state["fx"]:
+        if easy_send("global_bypass:1") is None:
+            return "socket-error"
+        return "bypassed"
+
+    if easy_send("global_bypass:0") is None:
+        return "socket-error"
+    if easy_send(f"load_preset:output:{PRESET_NAME}") is None:
+        return "socket-error"
+
+    return "active"
+
+
+def push_plugin_overrides(state):
+    bool_text = lambda value: "false" if value else "true"
+    easy_send(f"set_property:output:bass_enhancer:0:bypass:{bool_text(state['bass'])}", expect_reply=False)
+    easy_send(f"set_property:output:bass_enhancer:0:amount:{7.5 if state['bass'] else 0.0}", expect_reply=False)
+    easy_send(f"set_property:output:exciter:0:bypass:{bool_text(state['treble'])}", expect_reply=False)
+    easy_send(f"set_property:output:exciter:0:amount:{4.8 if state['treble'] else 0.0}", expect_reply=False)
+    easy_send(f"set_property:output:stereo_tools:0:bypass:{bool_text(state['surround'])}", expect_reply=False)
+    easy_send(f"set_property:output:maximizer:0:bypass:{bool_text(state['boost'])}", expect_reply=False)
+    easy_send(f"set_property:output:maximizer:0:threshold:{-5.0 if state['boost'] else 0.0}", expect_reply=False)
+
+
+def easy_get(command):
+    reply = easy_send(command, timeout=0.28)
+    return "" if reply is None else str(reply).strip()
+
+
+def easy_property(plugin, prop):
+    value = easy_get(f"get_property:output:{plugin}:0:{prop}")
+    if value.startswith("error_"):
+        return ""
+    return value
+
+
+def as_float(value, fallback=0.0):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return fallback
+
+
+def easy_drift_reasons(state):
+    reasons = []
+    bypass = easy_get("get_global_bypass")
+
+    if not state["fx"]:
+        if bypass and bypass != "1":
+            reasons.append("bypass-on")
+        return reasons
+
+    if bypass != "2":
+        reasons.append("global-bypass")
+
+    loaded = easy_get("get_last_loaded_preset:output")
+    if loaded != PRESET_NAME:
+        reasons.append("preset")
+
+    if easy_property("equalizer", "bypass") == "true":
+        reasons.append("equalizer")
+
+    bass_bypass = easy_property("bass_enhancer", "bypass")
+    bass_amount = as_float(easy_property("bass_enhancer", "amount"))
+    if state["bass"]:
+        if bass_bypass != "false" or bass_amount < 1.0:
+            reasons.append("bass")
+    elif bass_bypass == "false" and bass_amount > 0.1:
+        reasons.append("bass")
+
+    exciter_bypass = easy_property("exciter", "bypass")
+    exciter_amount = as_float(easy_property("exciter", "amount"))
+    if state["treble"]:
+        if exciter_bypass != "false" or exciter_amount < 1.0:
+            reasons.append("treble")
+    elif exciter_bypass == "false" and exciter_amount > 0.1:
+        reasons.append("treble")
+
+    surround_bypass = easy_property("stereo_tools", "bypass")
+    if surround_bypass and surround_bypass != ("false" if state["surround"] else "true"):
+        reasons.append("surround")
+
+    maximizer_bypass = easy_property("maximizer", "bypass")
+    maximizer_threshold = as_float(easy_property("maximizer", "threshold"))
+    if state["boost"]:
+        if maximizer_bypass != "false" or maximizer_threshold > -1.0:
+            reasons.append("boost")
+    elif maximizer_bypass == "false" and maximizer_threshold < -0.1:
+        reasons.append("boost")
+
+    return reasons
+
+
+def guard_easy_effects(state):
+    if not easy_installed():
+        return "missing"
+    write_easy_preset(state)
+    if not start_easyeffects():
+        return "offline"
+
+    reasons = easy_drift_reasons(state)
+    if not reasons:
+        return "guard-ok"
+
+    result = apply_easy_effects(state)
+    if state["fx"]:
+        push_plugin_overrides(state)
+    return f"repaired:{','.join(reasons)}:{result}"
+
+
+def print_status():
+    state = load_state()
+    volume, muted = wpctl_volume()
+    ee = "missing"
+    bypass = ""
+    loaded = ""
+    if easy_installed():
+        ee = "ready" if easy_socket_ready() else "installed"
+        if easy_socket_ready():
+            bypass = easy_get("get_global_bypass")
+            loaded = easy_get("get_last_loaded_preset:output")
+
+    fields = {
+        "volume": str(int(round(volume * 100))),
+        "muted": "1" if muted else "0",
+        "fx": "1" if state["fx"] else "0",
+        "bass": "1" if state["bass"] else "0",
+        "treble": "1" if state["treble"] else "0",
+        "surround": "1" if state["surround"] else "0",
+        "boost": "1" if state["boost"] else "0",
+        "preset": state["preset"],
+        "ee": ee,
+        "socket": "1" if easy_socket_ready() else "0",
+        "bypass": bypass,
+        "loaded": loaded,
+        "bands": ",".join(str(round(v, 2)) for v in state["bands"]),
+    }
+    print("|".join(f"{key}={value}" for key, value in fields.items()))
+
+
+def set_preset(name):
+    state = load_state()
+    preset = PRESETS.get(name, PRESETS["Music"])
+    state.update(preset)
+    state["preset"] = name if name in PRESETS else "Music"
+    save_state(state)
+    return apply_easy_effects(state)
+
+
+def set_effect(key, raw_value):
+    state = load_state()
+    enabled = str(raw_value).lower() in ("1", "true", "yes", "on")
+    if key in ("bass", "treble", "surround", "boost"):
+        state[key] = enabled
+        if enabled:
+            state["fx"] = True
+        state["preset"] = "Custom"
+    elif key == "fx":
+        state["fx"] = enabled
+        if not enabled:
+            state["bass"] = False
+            state["treble"] = False
+            state["surround"] = False
+            state["boost"] = False
+        state["preset"] = "Custom"
+    save_state(state)
+    return apply_easy_effects(state)
+
+
+def set_band(index, raw_value):
+    state = load_state()
+    idx = int(index)
+    if idx < 0 or idx >= len(FREQUENCIES):
+        raise ValueError("band index out of range")
+    state["bands"][idx] = float(clamp(float(raw_value), -12.0, 12.0))
+    state["fx"] = True
+    state["preset"] = "Custom"
+    save_state(state)
+    return apply_easy_effects(state)
+
+
+def main(argv):
+    if len(argv) < 2 or argv[1] == "status":
+        print_status()
+        return 0
+
+    command = argv[1]
+    result = ""
+    try:
+        if command == "volume" and len(argv) >= 4 and argv[2] == "set":
+            set_volume(argv[3])
+            result = "volume"
+        elif command == "volume" and len(argv) >= 3 and argv[2] == "mute-toggle":
+            toggle_mute()
+            result = "mute"
+        elif command == "preset" and len(argv) >= 3:
+            result = set_preset(argv[2])
+        elif command == "effect" and len(argv) >= 4:
+            result = set_effect(argv[2], argv[3])
+        elif command == "band" and len(argv) >= 4:
+            result = set_band(argv[2], argv[3])
+        elif command == "apply":
+            result = apply_easy_effects(load_state())
+        elif command == "guard":
+            result = guard_easy_effects(load_state())
+        else:
+            print("unknown-command", file=sys.stderr)
+            return 2
+    except Exception as exc:
+        print(f"error={exc}", file=sys.stderr)
+        return 1
+
+    print(result)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))

@@ -1,0 +1,178 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/velora-shell"
+mode_file="${state_dir}/zen-live-mode"
+stamp_file="${state_dir}/zen-live-stamp"
+lock_dir="${state_dir}/zen-live.lock"
+log_file="/tmp/velora-zen-live-apply.log"
+command="${1:-apply}"
+
+mkdir -p "$state_dir"
+
+get_mode() {
+  if [ -s "$mode_file" ]; then
+    cat "$mode_file"
+  else
+    printf 'restart\n'
+  fi
+}
+
+set_mode() {
+  local mode="${1:-restart}"
+  case "$mode" in
+    restart|off) ;;
+    *) mode="restart" ;;
+  esac
+  printf '%s\n' "$mode" > "$mode_file"
+}
+
+zen_main_pids() {
+  pgrep -u "$(id -u)" -af '(^|/)zen-bin([[:space:]]|$)|(^|/)zen-browser([[:space:]]|$)' 2>/dev/null \
+    | while IFS= read -r line; do
+        local pid
+        local command
+
+        pid="${line%% *}"
+        command="${line#* }"
+        [ "$pid" != "$$" ] || continue
+        case "$command" in
+          *" -contentproc "*|*"velora-zen-live-apply"*|*"pgrep -u "*) continue ;;
+        esac
+        printf '%s\n' "$pid"
+      done
+}
+
+zen_is_running() {
+  [ -n "$(zen_main_pids | head -n 1)" ]
+}
+
+start_zen() {
+  local zen_cmd=""
+
+  if command -v zen-browser >/dev/null 2>&1; then
+    zen_cmd="$(command -v zen-browser)"
+  elif command -v zen >/dev/null 2>&1; then
+    zen_cmd="$(command -v zen)"
+  elif [ -x /usr/bin/zen-browser ]; then
+    zen_cmd="/usr/bin/zen-browser"
+  elif [ -x /opt/zen-browser-bin/zen-bin ]; then
+    zen_cmd="/opt/zen-browser-bin/zen-bin"
+  else
+    printf '[%s] Zen binary not found\n' "$(date --iso-8601=seconds)"
+    return 127
+  fi
+
+  if command -v systemd-run >/dev/null 2>&1; then
+    systemd-run --user \
+      --collect \
+      --quiet \
+      --unit=velora-zen-browser \
+      --setenv="XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}" \
+      --setenv="WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-wayland-1}" \
+      --setenv="DISPLAY=${DISPLAY:-:1}" \
+      --setenv="DBUS_SESSION_BUS_ADDRESS=${DBUS_SESSION_BUS_ADDRESS:-unix:path=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/bus}" \
+      --setenv="MOZ_ENABLE_WAYLAND=${MOZ_ENABLE_WAYLAND:-1}" \
+      "$zen_cmd" >>"$log_file" 2>&1 && return 0
+  fi
+
+  nohup "$zen_cmd" >>"$log_file" 2>&1 &
+}
+
+restart_zen() {
+  local pid
+  local waited
+
+  zen_is_running || return 0
+  if ! mkdir "$lock_dir" 2>/dev/null; then
+    return 0
+  fi
+  trap 'rmdir "$lock_dir" 2>/dev/null || true' EXIT
+
+  {
+    printf '[%s] restarting Zen for Velora wallpaper theme\n' "$(date --iso-8601=seconds)"
+    zen_main_pids | while read -r pid; do
+      kill -TERM "$pid" 2>/dev/null || true
+    done
+
+    waited=0
+    while zen_is_running && [ "$waited" -lt 40 ]; do
+      sleep 0.10
+      waited=$((waited + 1))
+    done
+
+    if zen_is_running; then
+      printf '[%s] Zen still running after graceful quit; skipped relaunch\n' "$(date --iso-8601=seconds)"
+      exit 0
+    fi
+
+    sleep 0.25
+    start_zen || true
+  } >>"$log_file" 2>&1
+}
+
+debounced_apply() {
+  local stamp
+  stamp="$(date +%s%N)"
+  printf '%s\n' "$stamp" > "$stamp_file"
+
+  (
+    sleep 1.25
+    [ -s "$stamp_file" ] || exit 0
+    [ "$(cat "$stamp_file")" = "$stamp" ] || exit 0
+    "$0" apply
+  ) >/dev/null 2>&1 &
+}
+
+case "$command" in
+  mode)
+    subcommand="${2:-get}"
+    case "$subcommand" in
+      get)
+        get_mode
+        ;;
+      set)
+        set_mode "${3:-restart}"
+        ;;
+      *)
+        printf 'usage: %s mode get|set [restart|off]\n' "$0" >&2
+        exit 2
+        ;;
+    esac
+    ;;
+  apply)
+    case "$(get_mode)" in
+      restart)
+        restart_zen
+        ;;
+      off)
+        exit 0
+        ;;
+    esac
+    ;;
+  start)
+    start_zen || true
+    ;;
+  --debounced|debounced)
+    case "$(get_mode)" in
+      restart)
+        debounced_apply
+        ;;
+      off)
+        exit 0
+        ;;
+    esac
+    ;;
+  status)
+    printf 'mode=%s\n' "$(get_mode)"
+    if zen_is_running; then
+      printf 'zen=running\n'
+    else
+      printf 'zen=stopped\n'
+    fi
+    ;;
+  *)
+    printf 'usage: %s apply|debounced|--debounced|status|mode get|set [restart|off]\n' "$0" >&2
+    exit 2
+    ;;
+esac

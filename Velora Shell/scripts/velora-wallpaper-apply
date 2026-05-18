@@ -21,6 +21,9 @@ theme_path="$path"
 base_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 theme_state_script="${base_dir}/scripts/velora-theme-state"
 pywal_theme_script="${base_dir}/scripts/velora-pywal-theme.py"
+discord_theme_script="${base_dir}/scripts/velora-discord-theme.py"
+zen_theme_script="${base_dir}/scripts/velora-zen-theme.py"
+zen_live_script="${base_dir}/scripts/velora-zen-live-apply"
 
 mkdir -p "$HOME/.cache/velora-shell"
 printf '%s|%s|%s\n' "$kind" "$path" "$preview" > "$HOME/.cache/velora-shell/current_wallpaper"
@@ -58,6 +61,35 @@ stop_swww_wallpapers() {
   if pgrep -x swww-daemon >/dev/null 2>&1; then
     swww kill >/dev/null 2>&1 || true
   fi
+}
+
+show_static_fallback() {
+  local img="$1"
+
+  [ -f "$img" ] || return 0
+
+  if command -v awww >/dev/null 2>&1; then
+    start_awww_daemon || return 0
+    awww img "$img" --transition-type fade --transition-duration 0.25 --transition-fps 60 >/dev/null 2>&1 || true
+  elif command -v swww >/dev/null 2>&1; then
+    if ! pgrep -x swww-daemon >/dev/null 2>&1; then
+      nohup swww-daemon >/dev/null 2>&1 &
+      sleep 0.20
+    fi
+    swww img "$img" --transition-type fade --transition-duration 0.25 >/dev/null 2>&1 || true
+  fi
+}
+
+any_pid_alive() {
+  local pid
+
+  for pid in "$@"; do
+    if kill -0 "$pid" >/dev/null 2>&1; then
+      return 0
+    fi
+  done
+
+  return 1
 }
 
 start_awww_daemon() {
@@ -125,15 +157,24 @@ apply_theme() {
   if [ -x "$pywal_theme_script" ]; then
     "$pywal_theme_script" >/dev/null 2>&1 || true
   fi
+
+  if [ -x "$zen_theme_script" ]; then
+    "$zen_theme_script" --quiet >/dev/null 2>&1 || true
+  fi
+
+  if [ -x "$discord_theme_script" ]; then
+    "$discord_theme_script" >/dev/null 2>&1 || true
+  fi
+
+  if [ -x "$zen_live_script" ]; then
+    "$zen_live_script" --debounced >/dev/null 2>&1 || true
+  fi
 }
 
 static_wallpaper() {
   local img="$1"
 
   [ -f "$img" ] || exit 2
-
-  stop_engine_wallpapers
-  stop_mpv_wallpapers
 
   if command -v awww >/dev/null 2>&1; then
     start_awww_daemon
@@ -150,12 +191,16 @@ static_wallpaper() {
     exit 127
   fi
 
+  stop_engine_wallpapers
+  stop_mpv_wallpapers
   apply_theme "$img"
 }
 
 live_wallpaper() {
   local file="$1"
   local monitors
+  local pids=()
+  local mon
 
   [ -f "$file" ] || exit 2
   apply_theme "$theme_path"
@@ -163,25 +208,38 @@ live_wallpaper() {
   monitors="$(hyprctl monitors -j 2>/dev/null | python3 -c 'import json,sys; data=json.load(sys.stdin); print(" ".join(m.get("name","") for m in data if m.get("name")))' 2>/dev/null || true)"
   [ -n "$monitors" ] || monitors="eDP-1"
 
+  show_static_fallback "$theme_path"
   stop_engine_wallpapers
-  stop_static_wallpapers
   stop_mpv_wallpapers
   sleep 0.10
   : > /tmp/velora-mpvpaper.log
   for mon in $monitors; do
     nohup mpvpaper -o 'no-audio loop-file=inf panscan=1.0 video-unscaled=no hwdec=auto-safe scale=bilinear cscale=bilinear dscale=bilinear interpolation=no deband=no' "$mon" "$file" >>/tmp/velora-mpvpaper.log 2>&1 &
+    pids+=("$!")
   done
+
+  sleep 0.55
+  if any_pid_alive "${pids[@]}"; then
+    stop_static_wallpapers
+  fi
 }
 
 engine_wallpaper() {
   local id="$1"
+  local pid
 
   apply_theme "$theme_path"
+  show_static_fallback "$theme_path"
   stop_mpv_wallpapers
-  stop_static_wallpapers
   stop_engine_wallpapers
-  sleep 0.18
+  sleep 0.10
   nohup linux-wallpaperengine --screen-root eDP-1 --bg "$id" --scaling fill --clamp border --disable-mouse --disable-parallax >/tmp/velora-wallpaperengine.log 2>&1 &
+  pid="$!"
+
+  sleep 0.70
+  if any_pid_alive "$pid"; then
+    stop_static_wallpapers
+  fi
 }
 
 case "$kind" in

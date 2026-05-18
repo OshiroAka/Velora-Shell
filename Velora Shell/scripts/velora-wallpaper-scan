@@ -4,10 +4,55 @@ set -euo pipefail
 cache_root="$HOME/.cache/velora-shell"
 cache_live="$cache_root/live-previews"
 cache_engine="$cache_root/engine-previews"
+runtime_root="${XDG_RUNTIME_DIR:-}"
+if [ -z "$runtime_root" ] || [ ! -d "$runtime_root" ]; then
+  runtime_root="/dev/shm"
+fi
+cache_ram="$runtime_root/velora-shell/wallpaper-previews"
 declare -A seen_static=()
 declare -A seen_engine=()
 
 mkdir -p "$cache_live" "$cache_engine"
+if ! mkdir -p "$cache_ram" >/dev/null 2>&1 || ! touch "$cache_ram/.write-test" >/dev/null 2>&1; then
+  cache_ram="/tmp/velora-shell/wallpaper-previews"
+  if ! mkdir -p "$cache_ram" >/dev/null 2>&1 || ! touch "$cache_ram/.write-test" >/dev/null 2>&1; then
+    cache_ram="/dev/shm/velora-shell/wallpaper-previews"
+    if ! mkdir -p "$cache_ram" >/dev/null 2>&1 || ! touch "$cache_ram/.write-test" >/dev/null 2>&1; then
+      cache_ram="$cache_root/ram-fallback-previews"
+      mkdir -p "$cache_ram"
+    fi
+  fi
+fi
+rm -f "$cache_ram/.write-test" >/dev/null 2>&1 || true
+cache_list="$cache_ram/wallpapers.list"
+cache_lock="$cache_ram/wallpapers.lock"
+find "$cache_ram" -type f -mmin +720 -delete >/dev/null 2>&1 || true
+
+emit_cached_list() {
+  [ -s "$cache_list" ] || return 1
+  find "$cache_list" -mmin -10 -print -quit 2>/dev/null | grep -q . || return 1
+  cat "$cache_list"
+  return 0
+}
+
+if [ "${1:-}" != "--refresh" ] && emit_cached_list; then
+  exit 0
+fi
+
+exec 9>"$cache_lock"
+if ! flock -n 9; then
+  for _ in $(seq 1 80); do
+    if [ "${1:-}" != "--refresh" ] && emit_cached_list; then
+      exit 0
+    fi
+    sleep 0.05
+  done
+
+  flock 9
+  if [ "${1:-}" != "--refresh" ] && emit_cached_list; then
+    exit 0
+  fi
+fi
 
 make_thumb() {
   local input="$1"
@@ -26,6 +71,49 @@ make_thumb() {
 safe_name() {
   local base="$1"
   printf '%s' "$base" | tr -c 'A-Za-z0-9._-' '_'
+}
+
+cache_key() {
+  local input="$1"
+  local size mtime
+
+  size="$(stat -c '%s' "$input" 2>/dev/null || printf '0')"
+  mtime="$(stat -c '%Y' "$input" 2>/dev/null || printf '0')"
+  printf '%s|%s|%s' "$input" "$size" "$mtime" | sha256sum | awk '{print $1}'
+}
+
+cache_preview_ram() {
+  local input="$1"
+  local key output tmp
+
+  [ -f "$input" ] || {
+    printf '%s' "$input"
+    return 0
+  }
+
+  key="$(cache_key "$input")"
+  output="$cache_ram/${key}.jpg"
+  [ -s "$output" ] && {
+    printf '%s' "$output"
+    return 0
+  }
+
+  tmp="$cache_ram/${key}.$$-tmp.jpg"
+  if command -v magick >/dev/null 2>&1; then
+    magick "${input}[0]" -auto-orient -resize '1200x720>' -strip -quality 84 "$tmp" >/dev/null 2>&1 || true
+  elif command -v convert >/dev/null 2>&1; then
+    convert "${input}[0]" -auto-orient -resize '1200x720>' -strip -quality 84 "$tmp" >/dev/null 2>&1 || true
+  elif command -v ffmpeg >/dev/null 2>&1; then
+    ffmpeg -hide_banner -loglevel error -y -i "$input" -frames:v 1 -vf "scale=1200:-2:force_original_aspect_ratio=decrease" "$tmp" >/dev/null 2>&1 || true
+  fi
+
+  if [ -s "$tmp" ]; then
+    mv -f "$tmp" "$output"
+    printf '%s' "$output"
+  else
+    rm -f "$tmp"
+    printf '%s' "$input"
+  fi
 }
 
 project_preview() {
@@ -79,9 +167,11 @@ emit_static_dir() {
   find "$dir" -maxdepth 1 -type f \
     \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.webp' -o -iname '*.gif' \) \
     2>/dev/null | sort | while IFS= read -r file; do
+    local preview
     [ -n "${seen_static[$file]:-}" ] && continue
     seen_static[$file]=1
-    printf 'STATIC|%s|%s|%s\n' "$file" "$file" "$(basename "${file%.*}")"
+    preview="$(cache_preview_ram "$file")"
+    printf 'STATIC|%s|%s|%s\n' "$file" "$preview" "$(basename "${file%.*}")"
   done
 }
 
@@ -97,7 +187,11 @@ emit_live_dir() {
     safe="$(safe_name "${base%.*}")"
     thumb="$cache_live/${safe}.jpg"
     make_thumb "$file" "$thumb"
-    [ -s "$thumb" ] || thumb=""
+    if [ -s "$thumb" ]; then
+      thumb="$(cache_preview_ram "$thumb")"
+    else
+      thumb=""
+    fi
     printf 'LIVE|%s|%s|%s\n' "$file" "$thumb" "${base%.*}"
   done
 }
@@ -165,14 +259,22 @@ emit_engine_root() {
     fi
 
     [ -n "$preview" ] || continue
+    preview="$(cache_preview_ram "$preview")"
     printf 'ENGINE|%s|%s|%s\n' "$id" "$preview" "$title"
   done
 }
 
-printf 'BEGIN\n'
-emit_static_dir "$HOME/Pictures/Wallpapers/static"
-emit_static_dir "$HOME/Pictures/Wallpapers/WallpaperSelector"
-emit_live_dir "$HOME/Pictures/Wallpapers/live"
-emit_engine_root "$HOME/.steam/steam/steamapps/workshop/content/431960"
-emit_engine_root "$HOME/.local/share/Steam/steamapps/workshop/content/431960"
-printf 'END\n'
+tmp_list="$cache_ram/wallpapers.$$-tmp.list"
+trap 'rm -f "$tmp_list"' EXIT
+
+{
+  printf 'BEGIN\n'
+  emit_static_dir "$HOME/Pictures/Wallpapers/static"
+  emit_static_dir "$HOME/Pictures/Wallpapers/WallpaperSelector"
+  emit_live_dir "$HOME/Pictures/Wallpapers/live"
+  emit_engine_root "$HOME/.steam/steam/steamapps/workshop/content/431960"
+  emit_engine_root "$HOME/.local/share/Steam/steamapps/workshop/content/431960"
+  printf 'END\n'
+} | tee "$tmp_list"
+
+[ -s "$tmp_list" ] && mv -f "$tmp_list" "$cache_list"

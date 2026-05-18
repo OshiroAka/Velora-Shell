@@ -14,101 +14,267 @@ Item {
     readonly property int cornerRadius: 28
     readonly property bool pywalStyle: theme && theme.themeId === "pywal16"
     readonly property bool neon: pywalStyle && theme.themeMode === "dark"
-    readonly property color ink: theme ? theme.textPrimary : Qt.rgba(0.43, 0.36, 0.52, 0.90)
-    readonly property color inkSoft: theme ? theme.textSecondary : Qt.rgba(0.56, 0.48, 0.64, 0.64)
+    readonly property color ink: theme ? theme.textPrimary : Qt.rgba(0.90, 0.88, 0.92, 0.94)
+    readonly property color inkSoft: theme ? theme.textSecondary : Qt.rgba(0.78, 0.74, 0.82, 0.70)
     readonly property color pink: theme ? (pywalStyle ? theme.accentSecondary : theme.accentPrimary) : Qt.rgba(0.88, 0.43, 0.66, 0.92)
-    readonly property color pinkSoft: theme ? theme.activeBg : Qt.rgba(0.96, 0.72, 0.84, 0.34)
     readonly property color lilac: theme ? (pywalStyle ? theme.accentPrimary : theme.accentSecondary) : Qt.rgba(0.58, 0.48, 0.73, 0.78)
-    readonly property color line: theme ? theme.alpha(theme.borderActive, 0.18) : Qt.rgba(0.72, 0.54, 0.65, 0.16)
-    readonly property color glass: theme ? theme.surfacePopup : Qt.rgba(1.0, 0.986, 1.0, 0.82)
-    readonly property color card: theme ? theme.surfaceCard : Qt.rgba(1, 1, 1, 0.68)
-    readonly property color borderSoft: theme ? theme.borderSoft : Qt.rgba(1, 1, 1, 0.76)
-    readonly property color shadow: theme ? (neon ? theme.alpha(theme.popupBorderGlow, theme.popupBorderGlow.a * 0.50) : theme.shadowColor) : Qt.rgba(0.56, 0.30, 0.50, 0.075)
+    readonly property color glass: theme ? theme.surfacePopup : Qt.rgba(0.10, 0.09, 0.11, 0.82)
+    readonly property color card: theme ? theme.surfaceCard : Qt.rgba(1, 1, 1, 0.62)
+    readonly property color borderSoft: theme ? theme.borderSoft : Qt.rgba(1, 1, 1, 0.38)
     readonly property string uiFont: "Noto Sans CJK JP"
     readonly property string monoFont: "JetBrainsMono Nerd Font"
     readonly property string homeDir: Quickshell.env("HOME") || ""
     readonly property string wallpaperDir: homeDir + "/Pictures/Wallpapers"
     readonly property string applyScript: Quickshell.shellDir + "/scripts/velora-wallpaper-apply"
     readonly property string scanScript: Quickshell.shellDir + "/scripts/velora-wallpaper-scan"
-    readonly property var tabs: ["壁紙", "カラー", "アイコン", "カーソル"]
-    readonly property var filters: ["すべて", "静止画", "MPV", "Engine", "人物", "風景", "お気に入り"]
-    readonly property var filterKeys: ["all", "static", "live", "engine", "人物", "風景", "favorite"]
+    readonly property string visibilityScript: Quickshell.shellDir + "/scripts/velora-wallpaper-visibility"
+    readonly property var filterKeys: ["all", "static", "live", "engine"]
+    readonly property var modeFilterIndexes: [1, 2, 3]
     readonly property var fallbackWallpapers: [
-        { kind: "static", label: "夢見る白羽", title: "白い朝", category: "人物", path: wallpaperDir + "/static/wp15708544.jpg", preview: wallpaperDir + "/static/wp15708544.jpg" },
-        { kind: "static", label: "朱の回廊", title: "朱の回廊", category: "風景", path: wallpaperDir + "/WallpaperSelector/1238960-best-japan-wallpaper-4k-3840x2160-for-xiaomi.jpg", preview: wallpaperDir + "/WallpaperSelector/1238960-best-japan-wallpaper-4k-3840x2160-for-xiaomi.jpg" },
-        { kind: "static", label: "静寂の夕暮れ", title: "静寂の夕暮れ", category: "風景", path: wallpaperDir + "/WallpaperSelector/1238973-japan-wallpaper-4k-3840x2160-for-mobile-hd.jpg", preview: wallpaperDir + "/WallpaperSelector/1238973-japan-wallpaper-4k-3840x2160-for-mobile-hd.jpg" },
-        { kind: "static", label: "淡い記憶", title: "淡い記憶", category: "アニメ", path: wallpaperDir + "/WallpaperSelector/columbina-anime-3840x2160-26082.jpg", preview: wallpaperDir + "/WallpaperSelector/columbina-anime-3840x2160-26082.jpg" },
-        { kind: "static", label: "夜の都市", title: "夜の都市", category: "シンプル", path: wallpaperDir + "/static/wp12419255-tokyo-night-4k-wallpapers.jpg", preview: wallpaperDir + "/static/wp12419255-tokyo-night-4k-wallpapers.jpg" }
+        { kind: "static", label: "夢見る白羽", title: "白い朝", category: "静止画", path: wallpaperDir + "/static/wp15708544.jpg", preview: wallpaperDir + "/static/wp15708544.jpg" },
+        { kind: "static", label: "青い記憶", title: "青い記憶", category: "静止画", path: wallpaperDir + "/static/WPP_blue.png", preview: wallpaperDir + "/static/WPP_blue.png" },
+        { kind: "static", label: "白い少女", title: "白い少女", category: "静止画", path: wallpaperDir + "/static/anime-anime-devushki-anime-anime-girls-belye-volosy-golub-zh.jpg", preview: wallpaperDir + "/static/anime-anime-devushki-anime-anime-girls-belye-volosy-golub-zh.jpg" },
+        { kind: "static", label: "東京の夜", title: "東京の夜", category: "静止画", path: wallpaperDir + "/static/wp12419427-tokyo-night-4k-wallpapers.jpg", preview: wallpaperDir + "/static/wp12419427-tokyo-night-4k-wallpapers.jpg" },
+        { kind: "static", label: "東京の朝", title: "東京の朝", category: "静止画", path: wallpaperDir + "/static/wp6570018-tokyo-aesthetic-wallpapers.jpg", preview: wallpaperDir + "/static/wp6570018-tokyo-aesthetic-wallpapers.jpg" }
     ]
 
-    property int activeTab: 0
-    property int activeFilter: 0
+    property int activeFilter: 1
     property int selectedIndex: 2
-    property bool favoriteSelected: false
-    property bool open: visible
-    property real revealProgress: 0
-    property var allWallpapers: fallbackWallpapers
-    property var wallpapers: fallbackWallpapers
-    property bool suppressDeckAnimation: false
-    property bool deckReady: false
     property int deckLastIndex: selectedIndex
     property int deckDirection: 1
-    property real deckProgress: 1
-    property real deckSnapScale: 1
-    property real thumbProgress: 1
-    property string deckFromSource: ""
-    property string deckToSource: ""
+    property bool suppressDeckAnimation: false
+    property bool rouletteSpinning: false
+    property int rouletteTargetIndex: selectedIndex
+    property int rouletteSpinStepsRemaining: 0
+    property int rouletteSpinTotalSteps: 0
+    property bool loadedOnce: false
+    property bool scanComplete: false
+    property bool open: visible
+    property bool preload: false
+    property bool visibilitySaveQueued: false
+    property var allWallpapers: fallbackWallpapers
+    property var wallpapers: fallbackWallpapers
+    property var lowerWallpapers: []
+    property var hiddenWallpapers: []
+    property real revealProgress: 0
+    property real wheelProgress: 1
+    property real rouletteRotation: 0
+    property real modeSwapProgress: 1
+    property real applyPulse: 0
+    readonly property bool contentActive: visible || open || revealProgress > 0.01
+    readonly property int preloadThumbLimit: 96
+    readonly property int preloadHeroLimit: 10
+    readonly property int motionFast: theme ? theme.motionFast : 120
+    readonly property int motionSlow: theme ? theme.motionSlow : 320
+    readonly property int motionPanelIn: theme ? theme.motionPanelIn : 220
+    readonly property int motionPanelOut: theme ? theme.motionPanelOut : 140
+    readonly property int motionHover: theme ? theme.motionHover : 120
+    readonly property int motionPanelOffset: theme ? theme.motionPanelOffset : 28
+    readonly property int motionEaseEnter: theme ? theme.motionEaseEnter : Easing.OutCubic
+    readonly property int motionEaseExit: theme ? theme.motionEaseExit : Easing.InCubic
+    readonly property int motionEaseHover: theme ? theme.motionEaseHover : Easing.OutCubic
 
     signal closeRequested()
+    signal visibilityRequested()
+
+    opacity: revealProgress
+    scale: 0.985 + revealProgress * 0.015
+    transformOrigin: Item.Bottom
+    focus: visible
+    activeFocusOnTab: true
+
+    transform: Translate {
+        y: Math.round((1 - root.revealProgress) * 34)
+    }
+
+    onOpenChanged: {
+        animateReveal()
+        if (open)
+            ensureLoaded()
+    }
+
+    onPreloadChanged: {
+        if (preload)
+            ensureLoaded()
+    }
+
+    onVisibleChanged: {
+        if (visible && open && revealProgress <= 0.001)
+            animateReveal()
+        if (visible && open)
+            ensureLoaded()
+    }
+
+    onActiveFilterChanged: {
+        refreshWallpapers()
+        syncModeFromFilter()
+    }
+
+    onAllWallpapersChanged: refreshWallpapers()
+    onHiddenWallpapersChanged: refreshWallpapers()
+    onSelectedIndexChanged: startWheelTransition()
+
+    Component.onCompleted: {
+        syncWheelState()
+        if (open || preload)
+            ensureLoaded()
+    }
 
     function alpha(colorValue, opacity) {
         return root.theme ? root.theme.alpha(colorValue, opacity) : Qt.rgba(colorValue.r, colorValue.g, colorValue.b, opacity)
     }
 
-    opacity: revealProgress
-    transformOrigin: attachSide === "right" ? Item.Right : Item.Left
-    scale: 0.992 + revealProgress * 0.008
-    focus: visible
-    activeFocusOnTab: true
-
-    transform: Translate {
-        x: Math.round((1 - root.revealProgress) * (root.attachSide === "right" ? 36 : -36))
-        y: Math.round((1 - root.revealProgress) * 6)
-    }
-
-    onOpenChanged: animateReveal()
-    onVisibleChanged: {
-        if (visible && open && revealProgress <= 0.001)
-            animateReveal()
+    function cssColor(colorValue, opacity) {
+        const c = root.alpha(colorValue, opacity)
+        return "rgba(" + Math.round(c.r * 255) + "," + Math.round(c.g * 255) + "," + Math.round(c.b * 255) + "," + c.a + ")"
     }
 
     function animateReveal() {
         revealAnimation.stop()
         revealAnimation.from = revealProgress
         revealAnimation.to = open ? 1 : 0
-        revealAnimation.duration = open ? 440 : 180
+        revealAnimation.duration = open ? motionPanelIn : motionPanelOut
         revealAnimation.restart()
     }
 
-    NumberAnimation {
-        id: revealAnimation
-
-        target: root
-        property: "revealProgress"
-        from: root.revealProgress
-        to: root.open ? 1 : 0
-        duration: root.open ? 440 : 180
-        easing.type: Easing.BezierSpline
-        easing.bezierCurve: [0.05, 0, 0.133, 0.06, 0.166, 0.4, 0.208, 0.82, 0.25, 1, 1, 1]
+    function basename(path) {
+        var name = String(path || "").split("/").pop()
+        var dot = name.lastIndexOf(".")
+        if (dot > 0)
+            name = name.slice(0, dot)
+        return name.replace(/[-_]+/g, " ")
     }
 
-    onActiveFilterChanged: refreshWallpapers()
-    onAllWallpapersChanged: refreshWallpapers()
-    onSelectedIndexChanged: startDeckTransition()
+    function kindCategory(kind) {
+        if (kind === "live")
+            return "MPV"
+        if (kind === "engine")
+            return "Engine"
+        return "静止画"
+    }
 
-    Component.onCompleted: {
-        syncDeckState()
-        reload()
+    function modeLabelFromFilter(index) {
+        const key = filterKeys[Math.max(0, Math.min(index, filterKeys.length - 1))]
+        if (key === "live")
+            return "MPV"
+        if (key === "engine")
+            return "ENGINE"
+        if (key === "static")
+            return "STATIC"
+        return "ALL"
+    }
+
+    function syncModeFromFilter() {
+        if (modeFilterIndexes.indexOf(activeFilter) >= 0)
+            return
+    }
+
+    function displaySource(entry) {
+        if (!entry)
+            return ""
+        if (entry.preview && String(entry.preview).length > 0)
+            return entry.preview
+        if ((entry.kind || "static") !== "engine")
+            return entry.path || ""
+        return ""
+    }
+
+    function wallpaperKey(entry) {
+        if (!entry)
+            return ""
+        return String(entry.path || "")
+    }
+
+    function isWallpaperHidden(entry) {
+        const key = root.wallpaperKey(entry)
+        return key.length > 0 && root.hiddenWallpapers.indexOf(key) >= 0
+    }
+
+    function visibleAllWallpapers() {
+        var next = []
+        for (var i = 0; i < root.allWallpapers.length; i++) {
+            if (!root.isWallpaperHidden(root.allWallpapers[i]))
+                next.push(root.allWallpapers[i])
+        }
+        return next
+    }
+
+    function visibleWallpapersByKinds(kinds) {
+        var next = []
+        for (var i = 0; i < root.allWallpapers.length; i++) {
+            const entry = root.allWallpapers[i]
+            if (!entry || root.isWallpaperHidden(entry))
+                continue
+            if (kinds.indexOf(entry.kind || "static") >= 0)
+                next.push(entry)
+        }
+        return next
+    }
+
+    function activeWallpaperKinds() {
+        const key = filterKeys[Math.max(0, Math.min(root.activeFilter, filterKeys.length - 1))]
+        if (key === "all")
+            return ["static", "live", "engine"]
+        return [key]
+    }
+
+    function bottomWallpapers() {
+        return root.lowerWallpapers
+    }
+
+    function filterMatches(entry) {
+        if (!entry || root.isWallpaperHidden(entry))
+            return false
+
+        const key = root.filterKeys[Math.max(0, Math.min(root.activeFilter, root.filterKeys.length - 1))]
+        if (key === "all")
+            return true
+        return (entry.kind || "static") === key
+    }
+
+    function refreshWallpapers() {
+        const next = root.visibleWallpapersByKinds(root.activeWallpaperKinds())
+
+        root.suppressDeckAnimation = true
+        root.wallpapers = next.length > 0 ? next : root.fallbackWallpapers
+        root.lowerWallpapers = []
+        root.selectedIndex = Math.max(0, Math.min(root.selectedIndex, Math.max(0, root.wallpapers.length - 1)))
+        root.syncWheelState()
+        root.suppressDeckAnimation = false
+    }
+
+    function ensureLoaded() {
+        if (!loadedOnce) {
+            loadedOnce = true
+            reload()
+        }
+        loadVisibility()
+    }
+
+    function reload() {
+        if (!scanWallpapers.running) {
+            scanComplete = false
+            scanWallpapers.running = true
+        }
+    }
+
+    function loadVisibility() {
+        if (!loadVisibilityProcess.running)
+            loadVisibilityProcess.running = true
+    }
+
+    function queueVisibilitySave() {
+        root.visibilitySaveQueued = true
+        visibilitySaveDebounce.restart()
+    }
+
+    function flushVisibilitySave() {
+        if (visibilitySaveProcess.running)
+            return
+
+        root.visibilitySaveQueued = false
+        visibilitySaveProcess.command = [root.visibilityScript, "set", JSON.stringify(root.hiddenWallpapers)]
+        visibilitySaveProcess.running = true
     }
 
     function normalizedIndex() {
@@ -134,89 +300,18 @@ Item {
     }
 
     function currentWallpaperTitle() {
-        return root.currentWallpaper().title || root.currentWallpaper().label
+        return root.currentWallpaper().title || root.currentWallpaper().label || root.basename(root.currentWallpaper().path)
     }
 
     function currentWallpaperCategory() {
-        return root.currentWallpaper().category || "壁紙"
+        return root.currentWallpaper().category || root.kindCategory(root.currentWallpaperKind())
     }
 
-    function displaySource(entry) {
-        if (!entry)
-            return ""
-        if (entry.preview && String(entry.preview).length > 0)
-            return entry.preview
-        if ((entry.kind || "static") !== "engine")
-            return entry.path || ""
-        return ""
-    }
-
-    function basename(path) {
-        var name = String(path || "").split("/").pop()
-        var dot = name.lastIndexOf(".")
-        if (dot > 0)
-            name = name.slice(0, dot)
-        return name.replace(/[-_]+/g, " ")
-    }
-
-    function kindCategory(kind) {
-        if (kind === "live")
-            return "MPV"
-        if (kind === "engine")
-            return "Engine"
-        return "静止画"
-    }
-
-    function filterMatches(entry) {
-        if (!entry)
-            return false
-
-        const key = root.filterKeys[Math.max(0, Math.min(root.activeFilter, root.filterKeys.length - 1))]
-        if (key === "all")
-            return true
-        if (key === "favorite")
-            return root.favoriteSelected
-        if (key === "static" || key === "live" || key === "engine")
-            return (entry.kind || "static") === key
-        return entry.category === key
-    }
-
-    function refreshWallpapers() {
-        var next = []
-        for (var i = 0; i < root.allWallpapers.length; i++) {
-            if (root.filterMatches(root.allWallpapers[i]))
-                next.push(root.allWallpapers[i])
-        }
-
-        root.suppressDeckAnimation = true
-        root.wallpapers = next.length > 0 ? next : root.allWallpapers
-        root.selectedIndex = Math.max(0, Math.min(root.selectedIndex, Math.max(0, root.wallpapers.length - 1)))
-        root.syncDeckState()
-        root.suppressDeckAnimation = false
-    }
-
-    function reload() {
-        if (!scanWallpapers.running)
-            scanWallpapers.running = true
-    }
-
-    function thumbCount() {
-        return Math.min(5, root.wallpapers.length)
-    }
-
-    function thumbIndex(slot) {
-        const count = root.wallpapers.length
-        if (count <= 5)
-            return slot
-
-        const center = Math.floor(root.thumbCount() / 2)
-        return (root.selectedIndex - center + slot + count) % count
-    }
-
-    function thumbWallpaper(slot) {
-        if (root.wallpapers.length <= 0)
-            return root.fallbackWallpapers[0]
-        return root.wallpapers[root.thumbIndex(slot)]
+    function preloadWallpaper(index) {
+        const list = root.allWallpapers.length > 0 ? root.allWallpapers : root.fallbackWallpapers
+        if (list.length <= 0)
+            return null
+        return list[Math.max(0, Math.min(index, list.length - 1))]
     }
 
     function selectionDirection(fromIndex, toIndex) {
@@ -230,28 +325,38 @@ Item {
         return toIndex > fromIndex ? 1 : -1
     }
 
-    function syncDeckState() {
-        const item = root.currentWallpaper()
-        const src = root.displaySource(item)
-        deckAnimation.stop()
-        thumbAnimation.stop()
-        root.deckFromSource = src
-        root.deckToSource = src
-        root.deckLastIndex = root.normalizedIndex()
-        root.deckProgress = 1
-        root.deckSnapScale = 1
-        root.thumbProgress = 1
-        root.deckReady = true
+    function rouletteStep() {
+        const count = Math.max(1, root.wheelSlotCount())
+        return 180 / count
     }
 
-    function startDeckTransition() {
-        if (root.suppressDeckAnimation) {
-            root.syncDeckState()
-            return
-        }
+    function rouletteBaseRotation(index) {
+        const count = Math.max(1, root.wheelSlotCount())
+        return 90 - (Math.max(0, index) + 0.5) * (180 / count)
+    }
 
-        if (!root.deckReady) {
-            root.syncDeckState()
+    function nearestRouletteRotation(index) {
+        const base = root.rouletteBaseRotation(index)
+        const turns = Math.round((root.rouletteRotation - base) / 360)
+        return base + turns * 360
+    }
+
+    function syncRouletteRotation() {
+        rouletteSettleAnimation.stop()
+        rouletteSpinAnimation.stop()
+        root.rouletteRotation = 0
+    }
+
+    function syncWheelState() {
+        wheelAnimation.stop()
+        root.deckLastIndex = root.normalizedIndex()
+        root.wheelProgress = 1
+        root.syncRouletteRotation()
+    }
+
+    function startWheelTransition() {
+        if (root.suppressDeckAnimation) {
+            root.syncWheelState()
             return
         }
 
@@ -261,25 +366,15 @@ Item {
 
         const nextIndex = root.normalizedIndex()
         const prevIndex = Math.max(0, Math.min(root.deckLastIndex, count - 1))
-        const fromItem = root.wallpapers[prevIndex]
-        const toItem = root.wallpapers[nextIndex]
-        const fromSource = root.displaySource(fromItem)
-        const toSource = root.displaySource(toItem)
-
-        if (prevIndex === nextIndex && root.deckToSource === toSource)
+        if (prevIndex === nextIndex)
             return
 
-        deckAnimation.stop()
-        thumbAnimation.stop()
+        wheelAnimation.stop()
+        rouletteSettleAnimation.stop()
         root.deckDirection = root.selectionDirection(prevIndex, nextIndex)
-        root.deckFromSource = fromSource
-        root.deckToSource = toSource
-        root.deckProgress = 0
-        root.deckSnapScale = 1
-        root.thumbProgress = 0
         root.deckLastIndex = nextIndex
-        deckAnimation.restart()
-        thumbAnimation.restart()
+        root.wheelProgress = 0
+        wheelAnimation.restart()
     }
 
     function moveSelection(dir) {
@@ -289,10 +384,111 @@ Item {
         root.selectedIndex = (root.selectedIndex + dir + count) % count
     }
 
+    function wheelSlotCount() {
+        if (root.wallpapers.length <= 0)
+            return 1
+        if (root.wallpapers.length <= 4)
+            return root.wallpapers.length
+
+        const visible = Math.min(13, root.wallpapers.length)
+        return visible % 2 === 0 ? visible - 1 : visible
+    }
+
+    function wheelIndex(slot) {
+        const count = root.wallpapers.length
+        if (count <= 0)
+            return 0
+        const visibleCount = root.wheelSlotCount()
+        const center = Math.floor(visibleCount / 2)
+        return (root.selectedIndex - center + slot + count) % count
+    }
+
+    function wheelWallpaper(slot) {
+        if (root.wallpapers.length <= 0)
+            return root.fallbackWallpapers[0]
+        return root.wallpapers[root.wheelIndex(slot)]
+    }
+
+    function wheelBoundaryAngle(offset, slotCount) {
+        const centerSlot = Math.floor(slotCount / 2)
+        const leftSpan = Math.max(1, centerSlot + 0.5)
+        const rightSpan = Math.max(1, slotCount - centerSlot - 0.5)
+        const span = offset < 0 ? leftSpan : rightSpan
+        const sign = offset < 0 ? -1 : 1
+        const distance = Math.min(Math.abs(offset), span)
+
+        if (distance <= 0.001)
+            return 0
+
+        const centerHalf = slotCount <= 3 ? 42 : (slotCount <= 5 ? 37 : 38)
+        const maxAngle = 88
+        if (distance <= 0.5)
+            return sign * centerHalf * (distance / 0.5)
+
+        const sideT = Math.min(1, (distance - 0.5) / Math.max(0.001, span - 0.5))
+        const compressed = Math.pow(sideT, 0.90)
+        return sign * (centerHalf + (maxAngle - centerHalf) * compressed)
+    }
+
+    function bottomWheelSlotCount() {
+        return root.lowerWallpapers.length > 0 ? 7 : 0
+    }
+
+    function bottomWheelWallpaper(slot) {
+        const list = root.lowerWallpapers
+        if (list.length <= 0)
+            return null
+        const center = Math.floor(root.bottomWheelSlotCount() / 2)
+        return list[(slot - center + list.length) % list.length]
+    }
+
+    function setModeFilter(index) {
+        if (root.activeFilter === index)
+            return
+        modeSwapAnimation.stop()
+        root.modeSwapProgress = 0
+        root.activeFilter = index
+        modeSwapAnimation.restart()
+    }
+
+    function cycleWallpaperMode(dir) {
+        var current = root.modeFilterIndexes.indexOf(root.activeFilter)
+        if (current < 0)
+            current = 0
+        const next = (current + dir + root.modeFilterIndexes.length) % root.modeFilterIndexes.length
+        root.setModeFilter(root.modeFilterIndexes[next])
+    }
+
+    function spinRoulette() {
+        const count = root.wallpapers.length
+        if (count <= 0 || root.rouletteSpinning)
+            return
+
+        var target = Math.floor(Math.random() * count)
+        if (count > 1 && target === root.normalizedIndex())
+            target = (target + 1 + Math.floor(Math.random() * (count - 1))) % count
+
+        root.rouletteTargetIndex = target
+        root.rouletteSpinning = true
+        rouletteSettleAnimation.stop()
+        rouletteSpinAnimation.stop()
+
+        const currentIndex = root.normalizedIndex()
+        var forward = (target - currentIndex + count) % count
+        if (forward === 0)
+            forward = count
+        const turns = 4 + Math.floor(Math.random() * 3)
+        root.rouletteSpinStepsRemaining = turns * count + forward
+        root.rouletteSpinTotalSteps = root.rouletteSpinStepsRemaining
+        rouletteStepTimer.interval = 58
+        rouletteStepTimer.restart()
+    }
+
     function applySelected() {
         if (applyWallpaper.running)
             return
         const item = root.currentWallpaper()
+        applyPulseAnimation.restart()
         applyWallpaper.command = [root.applyScript, item.kind || "static", item.path, root.displaySource(item)]
         applyWallpaper.running = true
     }
@@ -311,9 +507,139 @@ Item {
             return
         }
 
+        if (event.key === Qt.Key_Down || event.key === Qt.Key_S) {
+            root.cycleWallpaperMode(1)
+            event.accepted = true
+            return
+        }
+
+        if (event.key === Qt.Key_Up || event.key === Qt.Key_W) {
+            root.cycleWallpaperMode(-1)
+            event.accepted = true
+            return
+        }
+
         if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
             root.applySelected()
             event.accepted = true
+            return
+        }
+
+        if (event.key === Qt.Key_Space) {
+            root.spinRoulette()
+            event.accepted = true
+        }
+    }
+
+    NumberAnimation {
+        id: revealAnimation
+
+        target: root
+        property: "revealProgress"
+        from: root.revealProgress
+        to: root.open ? 1 : 0
+        duration: root.open ? root.motionPanelIn : root.motionPanelOut
+        easing.type: root.open ? root.motionEaseEnter : root.motionEaseExit
+    }
+
+    NumberAnimation {
+        id: wheelAnimation
+
+        target: root
+        property: "wheelProgress"
+        from: 0
+        to: 1
+        duration: Math.max(300, root.motionSlow + 80)
+        easing.type: Easing.OutCubic
+    }
+
+    NumberAnimation {
+        id: rouletteSettleAnimation
+
+        target: root
+        property: "rouletteRotation"
+        from: root.rouletteRotation
+        to: root.nearestRouletteRotation(root.normalizedIndex())
+        duration: Math.max(360, root.motionSlow + 120)
+        easing.type: Easing.OutCubic
+    }
+
+    NumberAnimation {
+        id: rouletteSpinAnimation
+
+        target: root
+        property: "rouletteRotation"
+        from: root.rouletteRotation
+        to: root.rouletteRotation
+        duration: 2600
+        easing.type: Easing.OutCubic
+
+        onRunningChanged: {
+            if (!running && root.rouletteSpinning) {
+                root.suppressDeckAnimation = true
+                root.selectedIndex = Math.max(0, Math.min(root.rouletteTargetIndex, Math.max(0, root.wallpapers.length - 1)))
+                root.deckLastIndex = root.selectedIndex
+                root.wheelProgress = 1
+                root.suppressDeckAnimation = false
+                root.rouletteSpinning = false
+            }
+        }
+    }
+
+    Timer {
+        id: rouletteStepTimer
+
+        interval: 70
+        repeat: false
+        onTriggered: {
+            if (root.rouletteSpinStepsRemaining <= 0) {
+                root.rouletteSpinning = false
+                return
+            }
+
+            root.moveSelection(1)
+            root.rouletteSpinStepsRemaining--
+
+            if (root.rouletteSpinStepsRemaining > 0) {
+                const done = root.rouletteSpinTotalSteps - root.rouletteSpinStepsRemaining
+                interval = Math.min(190, 58 + done * 5)
+                restart()
+            } else {
+                root.rouletteSpinning = false
+            }
+        }
+    }
+
+    NumberAnimation {
+        id: modeSwapAnimation
+
+        target: root
+        property: "modeSwapProgress"
+        from: 0
+        to: 1
+        duration: Math.max(300, root.motionSlow)
+        easing.type: Easing.OutCubic
+    }
+
+    SequentialAnimation {
+        id: applyPulseAnimation
+
+        NumberAnimation {
+            target: root
+            property: "applyPulse"
+            from: 0
+            to: 1
+            duration: root.motionFast
+            easing.type: Easing.OutCubic
+        }
+
+        NumberAnimation {
+            target: root
+            property: "applyPulse"
+            from: 1
+            to: 0
+            duration: root.motionFast
+            easing.type: Easing.InOutSine
         }
     }
 
@@ -347,6 +673,7 @@ Item {
                 if (line === "END") {
                     if (scanWallpapers.tmp.length > 0)
                         root.allWallpapers = scanWallpapers.tmp.slice()
+                    root.scanComplete = true
                     return
                 }
 
@@ -360,7 +687,7 @@ Item {
                 const title = parts.length > 3 && parts.slice(3).join("|").length > 0
                     ? parts.slice(3).join("|")
                     : (kind === "engine" ? "Workshop " + path : root.basename(path))
-                const category = kind === "static" ? root.kindCategory(kind) : root.kindCategory(kind)
+                const category = root.kindCategory(kind)
 
                 scanWallpapers.tmp.push({
                     kind: kind,
@@ -375,83 +702,97 @@ Item {
 
         onExited: {
             running = false
-            if (tmp.length > 0)
+            if (tmp.length > 0) {
                 root.allWallpapers = tmp.slice()
+                root.scanComplete = true
+            }
         }
     }
 
-    SequentialAnimation {
-        id: deckAnimation
+    Process {
+        id: loadVisibilityProcess
 
-        NumberAnimation {
-            target: root
-            property: "deckProgress"
-            from: 0
-            to: 1
-            duration: 520
-            easing.type: Easing.OutCubic
+        running: false
+        command: [root.visibilityScript, "list"]
+
+        stdout: SplitParser {
+            onRead: function(data) {
+                try {
+                    const parsed = JSON.parse(String(data).trim() || "[]")
+                    root.hiddenWallpapers = Array.isArray(parsed) ? parsed : []
+                } catch(e) {
+                    root.hiddenWallpapers = []
+                }
+            }
         }
 
-        NumberAnimation {
-            target: root
-            property: "deckSnapScale"
-            from: 1
-            to: 1.012
-            duration: 58
-            easing.type: Easing.OutSine
-        }
+        onExited: running = false
+    }
 
-        NumberAnimation {
-            target: root
-            property: "deckSnapScale"
-            from: 1.012
-            to: 1
-            duration: 72
-            easing.type: Easing.InOutSine
-        }
+    Timer {
+        id: visibilitySaveDebounce
 
-        onFinished: {
-            root.deckFromSource = root.deckToSource
-            root.deckProgress = 1
-            root.deckSnapScale = 1
+        interval: 180
+        repeat: false
+        onTriggered: root.flushVisibilitySave()
+    }
+
+    Process {
+        id: visibilitySaveProcess
+
+        running: false
+        command: [root.visibilityScript, "set", "[]"]
+        onExited: {
+            running = false
+            if (root.visibilitySaveQueued)
+                visibilitySaveDebounce.restart()
         }
     }
 
-    SequentialAnimation {
-        id: thumbAnimation
+    Item {
+        id: ramPreloadCache
 
-        PauseAnimation { duration: 55 }
+        width: 1
+        height: 1
+        opacity: 0
+        visible: root.preload
+        z: -1000
 
-        NumberAnimation {
-            target: root
-            property: "thumbProgress"
-            from: 0
-            to: 1
-            duration: 445
-            easing.type: Easing.OutCubic
+        Repeater {
+            model: root.preload && root.scanComplete ? Math.min(root.allWallpapers.length, root.preloadThumbLimit) : 0
+
+            Image {
+                required property int index
+
+                width: 1
+                height: 1
+                source: root.displaySource(root.preloadWallpaper(index))
+                sourceSize.width: 320
+                sourceSize.height: 192
+                fillMode: Image.PreserveAspectCrop
+                asynchronous: true
+                cache: true
+                smooth: false
+                mipmap: false
+            }
         }
-    }
 
-    Repeater {
-        model: 2
+        Repeater {
+            model: root.preload && root.scanComplete ? Math.min(root.allWallpapers.length, root.preloadHeroLimit) : 0
 
-        Rectangle {
-            required property int index
+            Image {
+                required property int index
 
-            visible: !root.externalSurface
-            x: -12 * (index + 1)
-            y: 10 * (index + 1)
-            width: root.width
-            height: root.height
-            radius: root.cornerRadius + 2
-            opacity: index === 0 ? 0.18 : 0.08
-            color: root.glass
-            border.width: 1
-            border.color: root.theme ? (root.pywalStyle ? root.theme.alpha(root.lilac, index === 0 ? 0.18 : 0.10) : root.theme.alpha(root.borderSoft, index === 0 ? 0.34 : 0.20)) : Qt.rgba(1, 1, 1, index === 0 ? 0.34 : 0.20)
-            antialiasing: true
-            layer.enabled: true
-            layer.effect: FastBlur {
-                radius: index === 0 ? 2 : 4
+                width: 1
+                height: 1
+                source: root.displaySource(root.preloadWallpaper(index))
+                sourceSize.width: 1000
+                sourceSize.height: 560
+                fillMode: Image.PreserveAspectCrop
+                asynchronous: true
+                cache: true
+                smooth: false
+                mipmap: false
             }
         }
     }
@@ -461,20 +802,10 @@ Item {
 
         anchors.fill: parent
         radius: root.cornerRadius
-        color: root.externalSurface ? "transparent" : root.glass
-        border.width: root.externalSurface ? 0 : 1
-        border.color: root.pywalStyle && root.theme ? root.theme.popupBorderGlow : root.borderSoft
+        color: "transparent"
+        border.width: 0
         clip: true
         antialiasing: true
-        layer.enabled: !root.externalSurface
-        layer.effect: DropShadow {
-            transparentBorder: true
-            radius: root.pywalStyle ? 52 : 60
-            samples: root.pywalStyle ? 105 : 105
-            horizontalOffset: 0
-            verticalOffset: root.pywalStyle ? 0 : 18
-            color: root.shadow
-        }
 
         MouseArea {
             anchors.fill: parent
@@ -482,572 +813,650 @@ Item {
             onClicked: mouse.accepted = true
         }
 
+        Image {
+            id: heroBackdrop
+
+            anchors.fill: parent
+            source: root.contentActive ? root.currentWallpaperPreview() : ""
+            fillMode: Image.PreserveAspectCrop
+            sourceSize.width: 1600
+            sourceSize.height: 900
+            asynchronous: true
+            cache: true
+            smooth: true
+            visible: false
+        }
+
+        FastBlur {
+            anchors.fill: parent
+            source: heroBackdrop
+            radius: 54
+            opacity: root.pywalStyle && root.theme.themeMode === "dark" ? 0.24 : 0.34
+            visible: false
+        }
+
         Rectangle {
             anchors.fill: parent
-            radius: parent.radius
-            visible: !root.externalSurface
+            color: root.alpha(root.glass, root.pywalStyle && root.theme.themeMode === "dark" ? 0.72 : 0.82)
+            visible: false
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            visible: false
             gradient: Gradient {
-                GradientStop { position: 0.0; color: root.theme ? root.theme.alpha(root.card, root.neon ? 0.26 : 0.42) : Qt.rgba(1, 1, 1, 0.42) }
-                GradientStop { position: 0.52; color: root.theme ? root.theme.alpha(root.card, root.neon ? 0.14 : 0.20) : Qt.rgba(1, 1, 1, 0.20) }
-                GradientStop { position: 1.0; color: root.theme ? root.theme.alpha(root.pink, root.neon ? 0.10 : 0.14) : Qt.rgba(1, 0.965, 0.995, 0.24) }
+                orientation: Gradient.Horizontal
+                GradientStop { position: 0.0; color: root.alpha(root.lilac, root.neon ? 0.12 : 0.18) }
+                GradientStop { position: 0.48; color: Qt.rgba(1, 1, 1, root.neon ? 0.02 : 0.14) }
+                GradientStop { position: 1.0; color: root.alpha(root.pink, root.neon ? 0.10 : 0.20) }
             }
         }
 
         Rectangle {
-            visible: !root.externalSurface
-            anchors {
-                fill: parent
-                margins: 1
-            }
-
-            radius: parent.radius - 1
+            anchors.fill: parent
+            radius: root.cornerRadius
             color: "transparent"
-            border.width: 1
-            border.color: root.alpha(root.borderSoft, root.pywalStyle ? 0.28 : 0.18)
+            visible: false
+            border.width: 0
+            border.color: root.alpha(root.borderSoft, 0.62)
         }
 
-        Rectangle {
-            anchors {
-                left: parent.left
-                right: parent.right
-                top: parent.top
-                leftMargin: 28
-                rightMargin: 28
-                topMargin: 88
-            }
+        Item {
+            id: wheelStage
 
-            height: 1
-            color: root.line
-        }
-
-        Text {
-            id: titleText
-
-            x: 42
-            y: 31
-            text: "テーマ"
-            color: root.ink
-            font.family: root.uiFont
-            font.pixelSize: 18
-            font.weight: Font.Bold
-            opacity: 0.86
-            layer.enabled: root.pywalStyle
-            layer.effect: DropShadow {
-                transparentBorder: true
-                radius: 8
-                samples: 17
-                horizontalOffset: 0
-                verticalOffset: 0
-                color: root.theme ? root.theme.textGlow : Qt.rgba(0, 0, 0, 0)
-            }
-        }
-
-        Rectangle {
-            x: titleText.x + titleText.implicitWidth + 13
-            y: 31
-            width: 52
-            height: 24
-            radius: 12
-            color: root.pinkSoft
-
-            Text {
-                anchors.centerIn: parent
-                text: "壁紙"
-                color: root.pink
-                font.family: root.uiFont
-                font.pixelSize: 11
-                font.weight: Font.Bold
-            }
-        }
-
-        Text {
-            x: 42
-            y: 62
-            text: "お気に入りの壁紙で、心地よいデスクトップに。"
-            color: root.inkSoft
-            font.family: root.uiFont
-            font.pixelSize: 12
-            font.weight: Font.Medium
-        }
-
-        Row {
-            id: topActions
-
-            x: parent.width - width - 34
-            y: 31
-            height: 40
-            spacing: 18
-
-            Rectangle {
-                id: favoriteButton
-
-                width: 40
-                height: 40
-                radius: 20
-                color: root.theme
-                    ? (favoriteMouse.containsMouse || root.favoriteSelected ? root.theme.alpha(root.card, 0.72) : root.theme.alpha(root.card, 0.50))
-                    : (favoriteMouse.containsMouse || root.favoriteSelected ? Qt.rgba(1, 1, 1, 0.72) : Qt.rgba(1, 1, 1, 0.50))
-                border.width: 1
-                border.color: root.theme
-                    ? (root.favoriteSelected ? root.theme.alpha(root.pink, 0.48) : root.theme.alpha(root.borderSoft, 0.56))
-                    : (root.favoriteSelected ? Qt.rgba(0.86, 0.47, 0.66, 0.42) : Qt.rgba(1, 1, 1, 0.56))
-                scale: favoriteMouse.pressed ? 0.96 : (favoriteMouse.containsMouse ? 1.03 : 1.0)
-                layer.enabled: true
-                layer.effect: DropShadow {
-                    transparentBorder: true
-                    radius: 20
-                    samples: 41
-                    horizontalOffset: 0
-                    verticalOffset: 8
-                    color: root.theme ? (root.pywalStyle ? root.theme.iconGlow : root.theme.alpha(root.theme.shadowColor, 0.12)) : Qt.rgba(0.42, 0.24, 0.42, 0.12)
-                }
-
-                Behavior on scale { NumberAnimation { duration: 110; easing.type: Easing.OutCubic } }
-                Behavior on color { ColorAnimation { duration: 130; easing.type: Easing.OutCubic } }
-
-                HeartIcon {
-                    anchors.centerIn: parent
-                    width: 18
-                    height: 18
-                    filled: root.favoriteSelected
-                }
-
-                MouseArea {
-                    id: favoriteMouse
-
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: root.favoriteSelected = !root.favoriteSelected
-                }
-            }
-
-            Rectangle {
-                id: applyButton
-
-                width: 126
-                height: 40
-                radius: 19
-                color: root.theme
-                    ? (applyMouse.containsMouse || activeFocus ? root.theme.alpha(root.theme.buttonPrimaryBg, 0.96) : root.theme.alpha(root.theme.buttonPrimaryBg, 0.86))
-                    : (applyMouse.containsMouse || activeFocus ? Qt.rgba(0.88, 0.45, 0.67, 0.94) : Qt.rgba(0.86, 0.45, 0.66, 0.82))
-                scale: applyMouse.pressed ? 0.96 : (applyMouse.containsMouse ? 1.02 : 1.0)
-                layer.enabled: true
-                layer.effect: DropShadow {
-                    transparentBorder: true
-                    radius: 24
-                    samples: 49
-                    horizontalOffset: 0
-                    verticalOffset: 8
-                    color: root.theme ? root.theme.buttonPrimaryGlow : Qt.rgba(0.60, 0.28, 0.48, 0.16)
-                }
-
-                Behavior on color { ColorAnimation { duration: 130; easing.type: Easing.OutCubic } }
-                Behavior on scale { NumberAnimation { duration: 110; easing.type: Easing.OutCubic } }
-
-                Text {
-                    anchors.centerIn: parent
-                    text: applyWallpaper.running ? "適用中..." : "適用する"
-                    color: root.theme ? root.theme.buttonPrimaryText : "white"
-                    font.family: root.uiFont
-                    font.pixelSize: 13
-                    font.weight: Font.Bold
-                }
-
-                MouseArea {
-                    id: applyMouse
-
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: root.applySelected()
-                }
-            }
-        }
-
-        Row {
-            id: filterRow
-
-            x: 42
-            y: 108
-            spacing: 10
-
-            Repeater {
-                model: root.filters
-
-                FilterChip {
-                    required property int index
-                    required property string modelData
-
-                    text: modelData
-                    active: root.activeFilter === index
-                    onClicked: root.activeFilter = index
-                }
-            }
-        }
-
-        Rectangle {
-            id: tuneButton
-
-            width: 30
-            height: 30
-            radius: 15
-            x: parent.width - width - 42
-            y: 105
-            color: tuneMouse.containsMouse ? root.alpha(root.card, 0.58) : root.alpha(root.card, 0.38)
-            border.width: 1
-            border.color: root.alpha(root.borderSoft, 0.46)
-
-            TuneIcon {
-                anchors.centerIn: parent
-                width: 15
-                height: 15
-            }
-
-            MouseArea {
-                id: tuneMouse
-
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-            }
-        }
-
-        Rectangle {
-            id: heroCard
-
-            x: 34
-            y: 151
-            width: parent.width - 68
-            height: Math.round(parent.height * 0.415)
-            radius: 15
-            color: root.alpha(root.card, 0.30)
-            border.width: root.activeFocus ? 2 : 1
-            border.color: root.pywalStyle ? root.alpha(root.lilac, root.activeFocus ? 0.54 : 0.34) : (root.activeFocus ? root.alpha(root.pink, 0.52) : root.alpha(root.borderSoft, 0.68))
+            x: 0
+            y: 0
+            width: parent.width
+            height: parent.height
             clip: true
-            antialiasing: true
-            layer.enabled: true
-            layer.effect: DropShadow {
-                transparentBorder: true
-                radius: 22
-                samples: 47
-                horizontalOffset: 0
-                verticalOffset: 8
-                color: root.pywalStyle && root.theme ? root.theme.popupGlow : root.alpha(root.theme ? root.theme.shadowColor : Qt.rgba(0.42, 0.24, 0.40, 1), 0.10)
+            z: 20
+            readonly property real centerX: width * 0.50
+            readonly property real centerY: height + 8
+            readonly property real outerRadiusX: width * 0.485
+            readonly property real outerRadiusY: outerRadiusX
+            readonly property real innerRadiusX: width * 0.185
+            readonly property real innerRadiusY: innerRadiusX
+
+            WheelHandler {
+                onWheel: function(event) {
+                    if (!root.rouletteSpinning)
+                        root.moveSelection(event.angleDelta.y < 0 ? 1 : -1)
+                    event.accepted = true
+                }
             }
 
-            Behavior on border.color { ColorAnimation { duration: 140; easing.type: Easing.OutCubic } }
+            Rectangle {
+                x: wheelStage.centerX - wheelStage.outerRadiusX - 10
+                y: wheelStage.centerY - wheelStage.outerRadiusY - 10
+                width: wheelStage.outerRadiusX * 2 + 20
+                height: width
+                radius: width / 2
+                color: root.alpha(root.card, root.neon ? 0.18 : 0.30)
+                border.width: 1
+                border.color: root.alpha(root.borderSoft, root.neon ? 0.62 : 0.56)
+                antialiasing: true
+                layer.enabled: true
+                layer.effect: DropShadow {
+                    transparentBorder: true
+                    radius: 34
+                    samples: 69
+                    horizontalOffset: 0
+                    verticalOffset: 18
+                    color: root.alpha(root.neon ? root.lilac : root.pink, root.neon ? 0.20 : 0.16)
+                }
+            }
 
             Item {
-                id: deckStage
+                id: rouletteWheel
 
                 anchors.fill: parent
-                anchors.margins: 1
-                clip: true
-
-                DeckImage {
-                    width: parent.width
-                    height: parent.height
-                    source: root.deckFromSource
-                    direction: root.deckDirection
-                    progress: root.deckProgress
-                    incoming: false
-                    visible: root.deckProgress < 0.995 && root.deckFromSource !== root.deckToSource
+                transform: Rotation {
+                    origin.x: wheelStage.centerX
+                    origin.y: wheelStage.centerY
+                    angle: 0
                 }
 
-                DeckImage {
-                    width: parent.width
-                    height: parent.height
-                    source: root.deckToSource.length > 0 ? root.deckToSource : root.currentWallpaperPreview()
-                    direction: root.deckDirection
-                    progress: root.deckProgress
-                    incoming: true
-                    snapScale: root.deckSnapScale
-                }
-            }
+                Repeater {
+                    model: root.wheelSlotCount()
 
-            Rectangle {
-                anchors.fill: parent
-                radius: heroCard.radius
-                gradient: Gradient {
-                    GradientStop { position: 0.00; color: Qt.rgba(1, 1, 1, 0.03) }
-                    GradientStop { position: 0.46; color: Qt.rgba(0.18, 0.10, 0.17, 0.00) }
-                    GradientStop { position: 1.00; color: Qt.rgba(0.13, 0.09, 0.16, 0.56) }
-                }
-            }
-
-            Rectangle {
-                x: 18
-                y: parent.height - 44
-                width: 28
-                height: 22
-                radius: 8
-                color: Qt.rgba(0.05, 0.05, 0.08, 0.30)
-                border.width: 1
-                border.color: Qt.rgba(1, 1, 1, 0.72)
-
-                Text {
-                    anchors.centerIn: parent
-                    text: "4K"
-                    color: "white"
-                    font.family: root.monoFont
-                    font.pixelSize: 10
-                    font.weight: Font.Bold
-                }
-            }
-
-            Column {
-                x: 58
-                y: parent.height - 55
-                spacing: 2
-
-                Text {
-                    text: root.currentWallpaperTitle()
-                    color: "white"
-                    font.family: root.uiFont
-                    font.pixelSize: 16
-                    font.weight: Font.Bold
-                    style: Text.Raised
-                    styleColor: Qt.rgba(0, 0, 0, 0.22)
-                }
-
-                Text {
-                    text: root.currentWallpaperCategory() + "・" + root.currentWallpaperTitle()
-                    color: Qt.rgba(1, 1, 1, 0.86)
-                    font.family: root.uiFont
-                    font.pixelSize: 12
-                    font.weight: Font.Medium
-                }
-            }
-
-            Row {
-                anchors {
-                    right: heroCheck.left
-                    rightMargin: 18
-                    bottom: parent.bottom
-                    bottomMargin: 23
-                }
-
-                spacing: 5
-
-                    Repeater {
-                    model: root.thumbCount()
-
-                    Rectangle {
+                    WheelTile {
                         required property int index
 
-                        width: root.thumbIndex(index) === root.selectedIndex ? 8 : 6
-                        height: 6
-                        radius: 3
-                        color: root.thumbIndex(index) === root.selectedIndex ? root.pink : Qt.rgba(1, 1, 1, 0.46)
+                        readonly property int slotCount: Math.max(1, root.wheelSlotCount())
+                        readonly property int centerSlot: Math.floor(slotCount / 2)
+                        readonly property int slotOffset: index - centerSlot
+                        readonly property real offsetPhase: slotOffset + root.deckDirection * (1 - root.wheelProgress)
+                        readonly property real startDegrees: root.wheelBoundaryAngle(offsetPhase - 0.5, slotCount)
+                        readonly property real endDegrees: root.wheelBoundaryAngle(offsetPhase + 0.5, slotCount)
+                        readonly property real focusAmount: Math.max(0, 1 - Math.min(1, Math.abs(offsetPhase)))
+                        readonly property int wallpaperIndex: root.wheelIndex(index)
 
-                        Behavior on width { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
-                        Behavior on color { ColorAnimation { duration: 120; easing.type: Easing.OutCubic } }
+                        entry: root.wheelWallpaper(index)
+                        selected: focusAmount > 0.48
+                        width: wheelStage.width
+                        height: wheelStage.height
+                        centerX: wheelStage.centerX
+                        centerY: wheelStage.centerY
+                        outerRadiusX: wheelStage.outerRadiusX
+                        outerRadiusY: wheelStage.outerRadiusY
+                        innerRadiusX: wheelStage.innerRadiusX * (1 - focusAmount * 0.120)
+                        innerRadiusY: wheelStage.innerRadiusY * (1 - focusAmount * 0.120)
+                        startAngle: (-90 + startDegrees) * Math.PI / 180
+                        endAngle: (-90 + endDegrees) * Math.PI / 180
+                        z: Math.round(30 - Math.abs(offsetPhase) * 2) + (selected ? 10 : 0)
+                        opacity: root.rouletteSpinning ? 0.98 : Math.max(0.58, 0.82 + focusAmount * 0.18 - Math.abs(offsetPhase) * 0.035)
+                        scale: 1.0 + root.applyPulse * focusAmount * 0.018
+                        onClicked: {
+                            if (root.rouletteSpinning)
+                                return
+                            const next = root.wheelIndex(index)
+                            if (next === root.selectedIndex)
+                                root.applySelected()
+                            else
+                                root.selectedIndex = next
+                        }
+                    }
+                }
+
+                RouletteRimCanvas {
+                    anchors.fill: parent
+                    outerRadius: wheelStage.outerRadiusX
+                    innerRadius: wheelStage.innerRadiusX
+                    centerX: wheelStage.centerX
+                    centerY: wheelStage.centerY
+                    slotCount: root.wheelSlotCount()
+                    phase: root.deckDirection * (1 - root.wheelProgress)
+                    opacity: 0.94
+                }
+            }
+
+            PointerNeedle {
+                x: Math.round(wheelStage.centerX - width / 2)
+                y: Math.round(wheelStage.centerY - wheelStage.outerRadiusY - 13)
+                z: 80
+            }
+
+            Rectangle {
+                x: Math.round(wheelStage.centerX - wheelStage.outerRadiusX - 4)
+                y: wheelStage.height - 4
+                width: Math.round(wheelStage.outerRadiusX * 2 + 8)
+                height: 4
+                radius: 2
+                color: root.alpha(root.borderSoft, root.neon ? 0.62 : 0.54)
+                z: 72
+            }
+
+            Rectangle {
+                id: visibilityHub
+
+                property bool hovered: false
+
+                x: wheelStage.centerX - width / 2
+                y: wheelStage.centerY - height / 2
+                width: Math.round(wheelStage.innerRadiusX * 1.62)
+                height: width
+                radius: width / 2
+                color: root.alpha(root.card, root.neon ? (visibilityHub.hovered ? 0.84 : 0.76) : (visibilityHub.hovered ? 0.92 : 0.84))
+                border.width: 1
+                border.color: root.alpha(root.borderSoft, visibilityHub.hovered ? 0.82 : 0.64)
+                antialiasing: true
+                z: 60
+                scale: visibilityHub.hovered ? 1.018 : 1
+                layer.enabled: true
+                layer.effect: DropShadow {
+                    transparentBorder: true
+                    radius: 22
+                    samples: 45
+                    horizontalOffset: 0
+                    verticalOffset: 9
+                    color: root.alpha(root.neon ? root.lilac : root.pink, visibilityHub.hovered ? 0.22 : 0.14)
+                }
+
+                Behavior on color { ColorAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
+                Behavior on border.color { ColorAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
+                Behavior on scale { NumberAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
+
+                MouseArea {
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onEntered: visibilityHub.hovered = true
+                    onExited: visibilityHub.hovered = false
+                    onClicked: root.visibilityRequested()
+                }
+
+                Column {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    y: Math.round(parent.height * 0.16)
+                    spacing: 3
+
+                    PanelIcon {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        width: Math.max(18, Math.round(parent.parent.width * 0.16))
+                        height: width
+                        kind: "hide"
+                    }
+
+                    Text {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        text: "非表示"
+                        color: root.ink
+                        font.family: root.uiFont
+                        font.pixelSize: Math.max(13, Math.round(parent.parent.width * 0.105))
+                        font.weight: Font.Bold
+                    }
+
+                    Text {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        text: "HIDE"
+                        color: root.inkSoft
+                        font.family: root.monoFont
+                        font.pixelSize: Math.max(8, Math.round(parent.parent.width * 0.060))
+                        font.weight: Font.Bold
                     }
                 }
             }
 
-            Rectangle {
-                id: heroHeart
-
-                anchors {
-                    right: parent.right
-                    top: parent.top
-                    rightMargin: 18
-                    topMargin: 16
-                }
-
-                width: 25
-                height: 25
-                radius: 13
-                color: Qt.rgba(1, 1, 1, 0.22)
-                border.width: 2
-                border.color: Qt.rgba(1, 1, 1, 0.84)
-
-                MouseArea {
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: root.favoriteSelected = !root.favoriteSelected
-                }
+            RoundButton {
+                compact: true
+                icon: "left"
+                x: Math.round(wheelStage.centerX - wheelStage.innerRadiusX * 1.42 - width / 2)
+                y: wheelStage.height - height - 18
+                z: 86
+                onClicked: if (!root.rouletteSpinning) root.moveSelection(-1)
             }
 
-            Rectangle {
-                id: heroCheck
-
-                anchors {
-                    right: parent.right
-                    bottom: parent.bottom
-                    rightMargin: 20
-                    bottomMargin: 15
-                }
-
-                width: 37
-                height: 37
-                radius: 19
-                color: Qt.rgba(1, 1, 1, 0.86)
-                border.width: 1
-                border.color: Qt.rgba(1, 1, 1, 0.74)
-
-                CheckIcon {
-                    anchors.centerIn: parent
-                    width: 17
-                    height: 17
-                }
+            RoundButton {
+                compact: true
+                icon: "right"
+                x: Math.round(wheelStage.centerX + wheelStage.innerRadiusX * 1.42 - width / 2)
+                y: wheelStage.height - height - 18
+                z: 86
+                onClicked: if (!root.rouletteSpinning) root.moveSelection(1)
             }
-
-            MouseArea {
-                anchors.fill: parent
-                acceptedButtons: Qt.LeftButton
-                cursorShape: Qt.PointingHandCursor
-                onClicked: root.applySelected()
-            }
-
-            WheelHandler {
-                onWheel: function(event) {
-                    root.moveSelection(event.angleDelta.y < 0 ? 1 : -1)
-                    event.accepted = true
-                }
-            }
-        }
-
-        Row {
-            id: thumbStrip
-
-            x: 46
-            y: parent.height - 104
-            width: parent.width - 92
-            height: 82
-            spacing: 12
-            opacity: 0.60 + root.thumbProgress * 0.40
-            scale: 0.985 + root.thumbProgress * 0.015
-            transformOrigin: Item.Center
-
-            transform: Translate {
-                x: Math.round(-root.deckDirection * 24 * (1 - root.thumbProgress))
-                y: Math.round(2 * (1 - root.thumbProgress))
-            }
-
-            WheelHandler {
-                onWheel: function(event) {
-                    root.moveSelection(event.angleDelta.y < 0 ? 1 : -1)
-                    event.accepted = true
-                }
-            }
-
-            Repeater {
-                model: root.thumbCount()
-
-                WallpaperThumb {
-                    required property int index
-
-                    width: (thumbStrip.width - thumbStrip.spacing * 4) / 5
-                    height: thumbStrip.height
-                    source: root.displaySource(root.thumbWallpaper(index))
-                    selected: root.thumbIndex(index) === root.selectedIndex
-                    onClicked: root.selectedIndex = root.thumbIndex(index)
-                }
-            }
-        }
-
-        NavButton {
-            x: 18
-            y: thumbStrip.y + Math.round((thumbStrip.height - height) / 2)
-            direction: -1
-            onClicked: root.moveSelection(-1)
-        }
-
-        NavButton {
-            x: parent.width - width - 18
-            y: thumbStrip.y + Math.round((thumbStrip.height - height) / 2)
-            direction: 1
-            onClicked: root.moveSelection(1)
-        }
-    }
-
-    component DeckImage: Item {
-        id: deckLayer
-
-        property string source: ""
-        property int direction: 1
-        property real progress: 1
-        property bool incoming: true
-        property real snapScale: 1
-        readonly property real travel: 90
-        readonly property real visualProgress: Math.max(0, Math.min(1, progress))
-        readonly property real stickyPull: Math.sin(visualProgress * Math.PI) * 10
-
-        x: Math.round(incoming
-            ? direction * (travel * (1 - visualProgress) - stickyPull)
-            : -direction * (travel * visualProgress - stickyPull * 0.35))
-        y: 0
-        scale: (incoming ? 0.96 + visualProgress * 0.04 : 1.0 - visualProgress * 0.04) * (incoming ? snapScale : 1.0)
-        opacity: incoming ? 0.55 + visualProgress * 0.45 : 1.0 - visualProgress * 0.45
-        z: incoming ? 3 : (visualProgress < 0.82 ? 2 : 1)
-        transformOrigin: Item.Center
-        clip: true
-        layer.enabled: true
-        layer.effect: FastBlur {
-            radius: deckLayer.incoming
-                ? Math.max(0, 1.5 * (1 - deckLayer.visualProgress))
-                : Math.min(1.5, 1.5 * deckLayer.visualProgress)
-        }
-
-        Image {
-            anchors.fill: parent
-            source: deckLayer.source
-            fillMode: Image.PreserveAspectCrop
-            sourceSize.width: 1000
-            sourceSize.height: 560
-            asynchronous: true
-            smooth: true
-            mipmap: true
         }
 
         Rectangle {
-            anchors.fill: parent
-            color: deckLayer.incoming
-                ? Qt.rgba(1, 1, 1, 0.030 * (1 - deckLayer.visualProgress))
-                : Qt.rgba(0.18, 0.10, 0.18, 0.045 * deckLayer.visualProgress)
+            id: infoPanel
+
+            visible: false
+            x: Math.round(wheelStage.x + wheelStage.width + 24)
+            y: 28
+            width: Math.max(248, parent.width - x - 28)
+            height: parent.height - 56
+            radius: 24
+            color: root.alpha(root.card, root.neon ? 0.32 : 0.46)
+            border.width: 1
+            border.color: root.alpha(root.borderSoft, 0.48)
+            antialiasing: true
+            z: 30
+
+            Column {
+                anchors.fill: parent
+                anchors.margins: 18
+                spacing: 14
+
+                Row {
+                    width: parent.width
+                    height: 28
+                    spacing: 8
+
+                    Text {
+                        width: parent.width - 92
+                        height: parent.height
+                        verticalAlignment: Text.AlignVCenter
+                        text: "壁紙ルーレット"
+                        color: root.ink
+                        font.family: root.uiFont
+                        font.pixelSize: 19
+                        font.weight: Font.Bold
+                        elide: Text.ElideRight
+                    }
+
+                    Text {
+                        width: 84
+                        height: parent.height
+                        horizontalAlignment: Text.AlignRight
+                        verticalAlignment: Text.AlignVCenter
+                        text: root.wallpapers.length + " slots"
+                        color: root.inkSoft
+                        font.family: root.monoFont
+                        font.pixelSize: 10
+                        font.weight: Font.Bold
+                    }
+                }
+
+                Row {
+                    spacing: 8
+                    ModeButton { label: "STATIC"; active: root.activeFilter === 1; onClicked: root.setModeFilter(1) }
+                    ModeButton { label: "MPV"; active: root.activeFilter === 2; onClicked: root.setModeFilter(2) }
+                    ModeButton { label: "ENGINE"; active: root.activeFilter === 3; onClicked: root.setModeFilter(3) }
+                }
+
+                Rectangle {
+                    width: parent.width
+                    height: Math.min(178, Math.max(130, parent.height * 0.31))
+                    radius: 20
+                    color: root.alpha(root.glass, 0.34)
+                    border.width: 1
+                    border.color: root.alpha(root.borderSoft, 0.44)
+                    clip: true
+                    antialiasing: true
+
+                    Image {
+                        anchors.fill: parent
+                        source: root.contentActive ? root.currentWallpaperPreview() : ""
+                        fillMode: Image.PreserveAspectCrop
+                        sourceSize.width: 680
+                        sourceSize.height: 420
+                        asynchronous: true
+                        cache: true
+                        smooth: true
+                    }
+
+                    Rectangle {
+                        anchors.fill: parent
+                        gradient: Gradient {
+                            GradientStop { position: 0.0; color: Qt.rgba(0, 0, 0, 0.00) }
+                            GradientStop { position: 1.0; color: Qt.rgba(0, 0, 0, root.neon ? 0.42 : 0.28) }
+                        }
+                    }
+                }
+
+                Column {
+                    width: parent.width
+                    spacing: 5
+
+                    Text {
+                        width: parent.width
+                        text: root.currentWallpaperTitle()
+                        color: root.ink
+                        font.family: root.uiFont
+                        font.pixelSize: 18
+                        font.weight: Font.Bold
+                        elide: Text.ElideRight
+                    }
+
+                    Text {
+                        width: parent.width
+                        text: root.currentWallpaperCategory() + " / " + root.modeLabelFromFilter(root.activeFilter)
+                        color: root.inkSoft
+                        font.family: root.monoFont
+                        font.pixelSize: 11
+                        font.weight: Font.DemiBold
+                        elide: Text.ElideRight
+                    }
+                }
+
+                Row {
+                    width: parent.width
+                    height: 44
+                    spacing: 10
+
+                    RoundButton {
+                        compact: true
+                        icon: "left"
+                        onClicked: if (!root.rouletteSpinning) root.moveSelection(-1)
+                    }
+
+                    RoundButton {
+                        compact: true
+                        icon: "right"
+                        onClicked: if (!root.rouletteSpinning) root.moveSelection(1)
+                    }
+
+                    VisibilityButton {
+                        onClicked: root.visibilityRequested()
+                    }
+                }
+
+                Item {
+                    width: 1
+                    height: 1
+                    Layout.fillHeight: true
+                }
+
+                ActionButton {
+                    width: parent.width
+                    label: root.rouletteSpinning ? "回転中..." : "ランダムに回す"
+                    primary: false
+                    enabled: !root.rouletteSpinning
+                    onClicked: root.spinRoulette()
+                }
+
+                ActionButton {
+                    width: parent.width
+                    label: applyWallpaper.running ? "適用中..." : "選択を適用"
+                    primary: true
+                    enabled: !applyWallpaper.running && !root.rouletteSpinning
+                    onClicked: root.applySelected()
+                }
+            }
         }
     }
 
-    component FilterChip: Rectangle {
+    component WheelTile: Item {
+        id: tile
+
+        property var entry: null
+        property bool selected: false
+        property real centerX: width * 0.5
+        property real centerY: height
+        property real outerRadiusX: width * 0.45
+        property real outerRadiusY: height * 0.8
+        property real innerRadiusX: width * 0.28
+        property real innerRadiusY: height * 0.5
+        property real startAngle: Math.PI
+        property real endAngle: Math.PI * 2
+        readonly property real segmentPadding: 4
+        readonly property real segmentMid: (startAngle + endAngle) / 2
+        readonly property real segmentX: Math.max(0, Math.floor(segmentMinX() - segmentPadding))
+        readonly property real segmentY: Math.max(0, Math.floor(segmentMinY() - segmentPadding))
+        readonly property real segmentWidth: Math.min(width - segmentX, Math.ceil(segmentMaxX() - segmentMinX() + segmentPadding * 2))
+        readonly property real segmentHeight: Math.min(height - segmentY, Math.ceil(segmentMaxY() - segmentMinY() + segmentPadding * 2))
+        signal clicked()
+
+        onCenterXChanged: requestSegmentPaint()
+        onCenterYChanged: requestSegmentPaint()
+        onOuterRadiusXChanged: requestSegmentPaint()
+        onOuterRadiusYChanged: requestSegmentPaint()
+        onInnerRadiusXChanged: requestSegmentPaint()
+        onInnerRadiusYChanged: requestSegmentPaint()
+        onStartAngleChanged: requestSegmentPaint()
+        onEndAngleChanged: requestSegmentPaint()
+        onSelectedChanged: requestSegmentPaint()
+
+        function px(angle, radiusX) {
+            return centerX + Math.cos(angle) * radiusX
+        }
+
+        function py(angle, radiusY) {
+            return centerY + Math.sin(angle) * radiusY
+        }
+
+        function segmentMinX() {
+            return Math.min(px(startAngle, outerRadiusX), px(endAngle, outerRadiusX), px(segmentMid, outerRadiusX), px(startAngle, innerRadiusX), px(endAngle, innerRadiusX), px(segmentMid, innerRadiusX))
+        }
+
+        function segmentMaxX() {
+            return Math.max(px(startAngle, outerRadiusX), px(endAngle, outerRadiusX), px(segmentMid, outerRadiusX), px(startAngle, innerRadiusX), px(endAngle, innerRadiusX), px(segmentMid, innerRadiusX))
+        }
+
+        function segmentMinY() {
+            return Math.min(py(startAngle, outerRadiusY), py(endAngle, outerRadiusY), py(segmentMid, outerRadiusY), py(startAngle, innerRadiusY), py(endAngle, innerRadiusY), py(segmentMid, innerRadiusY))
+        }
+
+        function segmentMaxY() {
+            return Math.max(py(startAngle, outerRadiusY), py(endAngle, outerRadiusY), py(segmentMid, outerRadiusY), py(startAngle, innerRadiusY), py(endAngle, innerRadiusY), py(segmentMid, innerRadiusY))
+        }
+
+        function requestSegmentPaint() {
+            tileMask.requestPaint()
+            tileBorder.requestPaint()
+        }
+
+        function drawSegment(ctx, offsetX, offsetY) {
+            const ox = offsetX || 0
+            const oy = offsetY || 0
+            const samples = 22
+            ctx.beginPath()
+
+            for (let i = 0; i <= samples; i++) {
+                const angle = startAngle + (endAngle - startAngle) * i / samples
+                const x = px(angle, outerRadiusX) - ox
+                const y = py(angle, outerRadiusY) - oy
+                if (i === 0)
+                    ctx.moveTo(x, y)
+                else
+                    ctx.lineTo(x, y)
+            }
+
+            for (let i = samples; i >= 0; i--) {
+                const angle = startAngle + (endAngle - startAngle) * i / samples
+                ctx.lineTo(px(angle, innerRadiusX) - ox, py(angle, innerRadiusY) - oy)
+            }
+
+            ctx.closePath()
+        }
+
+        Item {
+            id: tileSource
+
+            x: tile.segmentX
+            y: tile.segmentY
+            width: tile.segmentWidth
+            height: tile.segmentHeight
+            visible: false
+
+            Rectangle {
+                anchors.fill: parent
+                gradient: Gradient {
+                    GradientStop { position: 0.0; color: root.alpha(root.lilac, root.neon ? 0.28 : 0.18) }
+                    GradientStop { position: 1.0; color: root.alpha(root.pink, root.neon ? 0.18 : 0.12) }
+                }
+            }
+
+            Image {
+                anchors.fill: parent
+                source: root.contentActive ? root.displaySource(tile.entry) : ""
+                fillMode: Image.PreserveAspectCrop
+                horizontalAlignment: Image.AlignHCenter
+                verticalAlignment: Image.AlignVCenter
+                sourceSize.width: 420
+                sourceSize.height: 260
+                asynchronous: true
+                smooth: true
+                mipmap: true
+            }
+
+            Rectangle {
+                anchors.fill: parent
+                gradient: Gradient {
+                    GradientStop { position: 0.0; color: Qt.rgba(1, 1, 1, selected ? 0.18 : 0.08) }
+                    GradientStop { position: 0.55; color: Qt.rgba(0, 0, 0, 0.00) }
+                    GradientStop { position: 1.0; color: Qt.rgba(0, 0, 0, selected ? 0.26 : 0.18) }
+                }
+            }
+        }
+
+        Canvas {
+            id: tileMask
+
+            x: tile.segmentX
+            y: tile.segmentY
+            width: tile.segmentWidth
+            height: tile.segmentHeight
+            visible: false
+            onWidthChanged: requestPaint()
+            onHeightChanged: requestPaint()
+            onPaint: {
+                const ctx = getContext("2d")
+
+                ctx.reset()
+                ctx.clearRect(0, 0, width, height)
+                ctx.fillStyle = "white"
+                tile.drawSegment(ctx, tile.segmentX, tile.segmentY)
+                ctx.fill()
+            }
+        }
+
+        OpacityMask {
+            x: tile.segmentX
+            y: tile.segmentY
+            width: tile.segmentWidth
+            height: tile.segmentHeight
+            source: tileSource
+            maskSource: tileMask
+            cached: false
+        }
+
+        Canvas {
+            id: tileBorder
+
+            x: tile.segmentX
+            y: tile.segmentY
+            width: tile.segmentWidth
+            height: tile.segmentHeight
+            opacity: selected ? 0.92 : 0.56
+            onWidthChanged: requestPaint()
+            onHeightChanged: requestPaint()
+            onPaint: {
+                const ctx = getContext("2d")
+
+                ctx.reset()
+                ctx.clearRect(0, 0, width, height)
+                ctx.strokeStyle = selected ? "rgba(255,255,255,0.82)" : "rgba(255,255,255,0.48)"
+                ctx.lineWidth = selected ? 2.0 : 1.2
+                tile.drawSegment(ctx, tile.segmentX, tile.segmentY)
+                ctx.stroke()
+            }
+        }
+
+        Rectangle {
+            visible: selected
+            x: tile.px(tile.segmentMid, (tile.outerRadiusX + tile.innerRadiusX) * 0.5) - width / 2
+            y: tile.py(tile.segmentMid, (tile.outerRadiusY + tile.innerRadiusY) * 0.5) - height / 2
+            width: 14
+            height: 14
+            radius: 7
+            color: Qt.rgba(0.03, 0.03, 0.04, 0.50)
+            border.width: 1
+            border.color: Qt.rgba(1, 1, 1, 0.54)
+        }
+
+        MouseArea {
+            x: tile.segmentX
+            y: tile.segmentY
+            width: tile.segmentWidth
+            height: tile.segmentHeight
+            cursorShape: Qt.PointingHandCursor
+            onClicked: tile.clicked()
+        }
+    }
+
+    component ModeButton: Rectangle {
         id: chip
 
-        property string text: ""
+        property string label: ""
         property bool active: false
         property bool hovered: false
         signal clicked()
 
-        width: Math.max(76, chipText.implicitWidth + 28)
-        height: 26
-        radius: height / 2
-        color: active
-            ? root.alpha(root.pink, 0.78)
-            : (hovered ? root.alpha(root.card, root.pywalStyle ? 0.46 : 0.42) : root.alpha(root.card, root.pywalStyle ? 0.24 : 0.28))
+        width: Math.max(74, labelText.implicitWidth + 28)
+        height: 28
+        radius: 14
+        color: active ? root.alpha(root.pink, 0.66) : (hovered ? root.alpha(root.card, 0.36) : root.alpha(root.card, 0.22))
         border.width: 1
-        border.color: active ? root.alpha(root.pink, 0.40) : root.alpha(root.borderSoft, root.pywalStyle ? 0.26 : 0.34)
+        border.color: active ? root.alpha(root.borderSoft, 0.70) : root.alpha(root.borderSoft, 0.30)
         antialiasing: true
-        layer.enabled: root.pywalStyle && (active || hovered)
-        layer.effect: DropShadow {
-            transparentBorder: true
-            radius: active ? 14 : 9
-            samples: active ? 29 : 19
-            horizontalOffset: 0
-            verticalOffset: 0
-            color: root.theme ? root.theme.buttonPrimaryGlow : Qt.rgba(0, 0, 0, 0)
-        }
-
-        Behavior on color { ColorAnimation { duration: 130; easing.type: Easing.OutCubic } }
 
         Text {
-            id: chipText
+            id: labelText
 
             anchors.centerIn: parent
-            text: chip.text
-            color: chip.active ? (root.theme ? root.theme.activeText : "white") : root.inkSoft
-            font.family: root.uiFont
+            text: chip.label
+            color: active ? (root.theme ? root.theme.activeText : "white") : root.inkSoft
+            font.family: root.monoFont
             font.pixelSize: 11
             font.weight: Font.Bold
         }
@@ -1062,73 +1471,101 @@ Item {
         }
     }
 
-    component WallpaperThumb: Rectangle {
-        id: card
+    component ActionButton: Rectangle {
+        id: button
 
-        property string source: ""
-        property bool selected: false
+        property string label: ""
+        property bool primary: false
         property bool hovered: false
         signal clicked()
 
-        radius: 9
-        color: root.alpha(root.card, 0.30)
-        border.width: selected ? 2 : 1
-        border.color: selected ? root.alpha(root.pink, 0.86) : root.alpha(root.borderSoft, root.pywalStyle ? 0.30 : 0.42)
-        clip: true
+        height: 46
+        radius: 23
+        opacity: enabled ? 1 : 0.58
+        color: primary
+            ? (hovered ? root.alpha(root.pink, 0.86) : root.alpha(root.pink, 0.72))
+            : (hovered ? root.alpha(root.card, 0.54) : root.alpha(root.card, 0.36))
+        border.width: 1
+        border.color: primary ? root.alpha(root.borderSoft, 0.66) : root.alpha(root.borderSoft, 0.42)
+        scale: actionMouse.pressed && enabled ? 0.975 : (hovered && enabled ? 1.015 : 1)
         antialiasing: true
-        scale: hovered ? 1.025 : 1.0
+
+        Behavior on color { ColorAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
+        Behavior on scale { NumberAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
+        Behavior on opacity { NumberAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
+
+        Text {
+            anchors.centerIn: parent
+            text: button.label
+            color: primary ? (root.theme ? root.theme.activeText : "white") : root.ink
+            font.family: root.uiFont
+            font.pixelSize: 14
+            font.weight: Font.Bold
+            elide: Text.ElideRight
+        }
+
+        MouseArea {
+            id: actionMouse
+
+            anchors.fill: parent
+            hoverEnabled: true
+            enabled: button.enabled
+            cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+            onEntered: button.hovered = true
+            onExited: button.hovered = false
+            onClicked: button.clicked()
+        }
+    }
+
+    component RoundButton: Rectangle {
+        id: button
+
+        property string icon: "down"
+        property string label: ""
+        property bool compact: false
+        property bool hovered: false
+        signal clicked()
+
+        width: compact ? 48 : 92
+        height: compact ? 48 : 72
+        radius: height / 2
+        color: compact ? (hovered ? root.alpha(root.card, 0.56) : root.alpha(root.card, 0.38)) : (hovered ? Qt.rgba(0, 0, 0, 0.46) : Qt.rgba(0, 0, 0, 0.34))
+        border.width: 1
+        border.color: compact ? root.alpha(root.borderSoft, hovered ? 0.66 : 0.44) : Qt.rgba(1, 1, 1, hovered ? 0.32 : 0.18)
+        scale: hovered ? 1.025 : 1
+        antialiasing: true
         layer.enabled: true
         layer.effect: DropShadow {
             transparentBorder: true
-            radius: card.hovered || card.selected ? 20 : 12
-            samples: card.hovered || card.selected ? 41 : 25
+            radius: 22
+            samples: 45
             horizontalOffset: 0
-            verticalOffset: card.hovered || card.selected ? 8 : 4
-            color: root.pywalStyle && root.theme && (card.hovered || card.selected) ? root.theme.buttonPrimaryGlow : root.alpha(root.theme ? root.theme.shadowColor : Qt.rgba(0.30, 0.20, 0.34, 1), card.hovered || card.selected ? 0.14 : 0.07)
+            verticalOffset: 10
+            color: Qt.rgba(0, 0, 0, 0.22)
         }
 
-        Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
-        Behavior on border.color { ColorAnimation { duration: 150; easing.type: Easing.OutCubic } }
+        Behavior on scale { NumberAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
+        Behavior on color { ColorAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
 
-        Image {
-            anchors.fill: parent
-            anchors.margins: 1
-            source: card.source
-            fillMode: Image.PreserveAspectCrop
-            sourceSize.width: 260
-            sourceSize.height: 160
-            asynchronous: true
-            smooth: true
-            mipmap: true
-        }
+        Column {
+            anchors.centerIn: parent
+            spacing: compact ? 0 : 3
 
-        Rectangle {
-            anchors.fill: parent
-            radius: card.radius
-            color: card.hovered ? root.alpha(root.card, 0.10) : "transparent"
-        }
-
-        Rectangle {
-            visible: card.selected
-            anchors {
-                right: parent.right
-                bottom: parent.bottom
-                rightMargin: 6
-                bottomMargin: 6
+            PanelIcon {
+                anchors.horizontalCenter: parent.horizontalCenter
+                width: compact ? 18 : 20
+                height: compact ? 18 : 20
+                kind: button.icon
             }
 
-            width: 26
-            height: 26
-            radius: 13
-            color: root.pink
-            border.width: 1
-            border.color: root.alpha(root.borderSoft, 0.78)
-
-            CheckIcon {
-                anchors.centerIn: parent
-                width: 13
-                height: 13
-                colorOverride: root.theme ? root.theme.activeText : "white"
+            Text {
+                visible: !button.compact && button.label.length > 0
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: button.label
+                color: root.inkSoft
+                font.family: root.monoFont
+                font.pixelSize: 9
+                font.weight: Font.Bold
             }
         }
 
@@ -1136,173 +1573,522 @@ Item {
             anchors.fill: parent
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
-            onEntered: card.hovered = true
-            onExited: card.hovered = false
-            onClicked: card.clicked()
+            onEntered: button.hovered = true
+            onExited: button.hovered = false
+            onClicked: button.clicked()
         }
     }
 
-    component NavButton: Rectangle {
-        id: nav
+    component HubButton: Item {
+        id: hub
 
-        property int direction: 1
+        property bool hovered: false
+        property bool pressed: false
+        signal clicked()
+
+        width: 104
+        height: 78
+
+        function roundedRect(ctx, x, y, w, h, r) {
+            const radius = Math.min(r, w / 2, h / 2)
+            ctx.beginPath()
+            ctx.moveTo(x + radius, y)
+            ctx.lineTo(x + w - radius, y)
+            ctx.arcTo(x + w, y, x + w, y + radius, radius)
+            ctx.lineTo(x + w, y + h - radius)
+            ctx.arcTo(x + w, y + h, x + w - radius, y + h, radius)
+            ctx.lineTo(x + radius, y + h)
+            ctx.arcTo(x, y + h, x, y + h - radius, radius)
+            ctx.lineTo(x, y + radius)
+            ctx.arcTo(x, y, x + radius, y, radius)
+            ctx.closePath()
+        }
+
+        Canvas {
+            id: hubCanvas
+
+            anchors.fill: parent
+            antialiasing: true
+            onWidthChanged: requestPaint()
+            onHeightChanged: requestPaint()
+            onPaint: {
+                const ctx = getContext("2d")
+                const lift = hub.pressed ? 3 : (hub.hovered ? -1 : 0)
+
+                ctx.reset()
+                ctx.clearRect(0, 0, width, height)
+
+                ctx.save()
+                hub.roundedRect(ctx, 4, 8 + lift, width - 8, height + 18, 34)
+                ctx.fillStyle = hub.hovered ? "rgba(55, 55, 58, 0.74)" : "rgba(42, 42, 45, 0.66)"
+                ctx.fill()
+                ctx.strokeStyle = "rgba(255, 255, 255, 0.26)"
+                ctx.lineWidth = 1.2
+                ctx.stroke()
+
+                ctx.beginPath()
+                ctx.moveTo(22, 15 + lift)
+                ctx.quadraticCurveTo(width / 2, 2 + lift, width - 22, 15 + lift)
+                ctx.strokeStyle = "rgba(255, 255, 255, 0.20)"
+                ctx.lineWidth = 1.0
+                ctx.stroke()
+                ctx.restore()
+            }
+        }
+
+        PanelIcon {
+            anchors.horizontalCenter: parent.horizontalCenter
+            y: 25 + (hub.pressed ? 3 : 0)
+            width: 19
+            height: 19
+            kind: "down"
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onEntered: {
+                hub.hovered = true
+                hubCanvas.requestPaint()
+            }
+            onExited: {
+                hub.hovered = false
+                hub.pressed = false
+                hubCanvas.requestPaint()
+            }
+            onPressed: {
+                hub.pressed = true
+                hubCanvas.requestPaint()
+            }
+            onReleased: {
+                hub.pressed = false
+                hubCanvas.requestPaint()
+            }
+            onClicked: hub.clicked()
+        }
+    }
+
+    component VisibilityButton: Rectangle {
+        id: button
+
         property bool hovered: false
         signal clicked()
 
-        width: 32
-        height: 42
-        radius: 16
-        color: hovered ? root.alpha(root.card, 0.74) : root.alpha(root.card, root.pywalStyle ? 0.38 : 0.46)
+        width: 44
+        height: 44
+        radius: height / 2
+        z: 91
+        color: hovered ? Qt.rgba(58, 58, 62, 0.54) : Qt.rgba(42, 42, 46, 0.42)
         border.width: 1
-        border.color: hovered && root.pywalStyle ? root.alpha(root.lilac, 0.40) : root.alpha(root.borderSoft, 0.50)
+        border.color: hovered ? Qt.rgba(255, 255, 255, 0.34) : Qt.rgba(255, 255, 255, 0.20)
         antialiasing: true
-        layer.enabled: root.pywalStyle && hovered
-        layer.effect: DropShadow {
-            transparentBorder: true
-            radius: 16
-            samples: 33
-            horizontalOffset: 0
-            verticalOffset: 0
-            color: root.theme ? root.theme.iconGlow : Qt.rgba(0, 0, 0, 0)
-        }
 
-        Behavior on color { ColorAnimation { duration: 130; easing.type: Easing.OutCubic } }
+        Behavior on color { ColorAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
+        Behavior on border.color { ColorAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
 
-        ArrowIcon {
+        PanelIcon {
             anchors.centerIn: parent
-            width: 13
-            height: 18
-            direction: nav.direction
+            width: 20
+            height: 20
+            kind: "hide"
         }
 
         MouseArea {
             anchors.fill: parent
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
-            onEntered: nav.hovered = true
-            onExited: nav.hovered = false
-            onClicked: nav.clicked()
+            onEntered: button.hovered = true
+            onExited: button.hovered = false
+            onClicked: button.clicked()
         }
     }
 
-    component HeartIcon: Canvas {
-        id: heart
+    component PanelIcon: Canvas {
+        id: iconCanvas
 
-        property bool filled: false
+        property string kind: "down"
 
-        onFilledChanged: requestPaint()
+        onKindChanged: requestPaint()
         onWidthChanged: requestPaint()
         onHeightChanged: requestPaint()
 
         onPaint: {
             const ctx = getContext("2d")
-            const s = Math.min(width, height)
-
             ctx.reset()
             ctx.clearRect(0, 0, width, height)
-            ctx.strokeStyle = "rgba(214, 112, 158, 0.86)"
-            ctx.fillStyle = filled ? "rgba(214, 112, 158, 0.36)" : "transparent"
-            ctx.lineWidth = Math.max(1.6, s * 0.085)
+            ctx.strokeStyle = root.cssColor(root.ink, 0.86)
+            ctx.fillStyle = root.cssColor(root.ink, 0.86)
+            ctx.lineWidth = Math.max(1.8, Math.min(width, height) * 0.10)
             ctx.lineCap = "round"
             ctx.lineJoin = "round"
-            ctx.beginPath()
-            ctx.moveTo(width * 0.50, height * 0.78)
-            ctx.bezierCurveTo(width * 0.20, height * 0.58, width * 0.12, height * 0.36, width * 0.27, height * 0.25)
-            ctx.bezierCurveTo(width * 0.38, height * 0.17, width * 0.48, height * 0.24, width * 0.50, height * 0.33)
-            ctx.bezierCurveTo(width * 0.52, height * 0.24, width * 0.64, height * 0.17, width * 0.75, height * 0.25)
-            ctx.bezierCurveTo(width * 0.90, height * 0.36, width * 0.80, height * 0.58, width * 0.50, height * 0.78)
-            ctx.closePath()
-            ctx.fill()
-            ctx.stroke()
-        }
-    }
 
-    component CheckIcon: Canvas {
-        id: check
-
-        property color colorOverride: root.pink
-
-        onColorOverrideChanged: requestPaint()
-        onWidthChanged: requestPaint()
-        onHeightChanged: requestPaint()
-
-        onPaint: {
-            const ctx = getContext("2d")
-
-            ctx.reset()
-            ctx.clearRect(0, 0, width, height)
-            ctx.strokeStyle = colorOverride
-            ctx.lineWidth = Math.max(2.0, Math.min(width, height) * 0.14)
-            ctx.lineCap = "round"
-            ctx.lineJoin = "round"
-            ctx.beginPath()
-            ctx.moveTo(width * 0.23, height * 0.52)
-            ctx.lineTo(width * 0.43, height * 0.72)
-            ctx.lineTo(width * 0.78, height * 0.30)
-            ctx.stroke()
-        }
-    }
-
-    component ArrowIcon: Canvas {
-        id: arrow
-
-        property int direction: 1
-
-        onDirectionChanged: requestPaint()
-        onWidthChanged: requestPaint()
-        onHeightChanged: requestPaint()
-
-        onPaint: {
-            const ctx = getContext("2d")
-            const dir = direction < 0 ? -1 : 1
-
-            ctx.reset()
-            ctx.clearRect(0, 0, width, height)
-            ctx.strokeStyle = "rgba(145, 107, 166, 0.82)"
-            ctx.lineWidth = 2.0
-            ctx.lineCap = "round"
-            ctx.lineJoin = "round"
-            ctx.beginPath()
-            if (dir > 0) {
-                ctx.moveTo(width * 0.35, height * 0.24)
-                ctx.lineTo(width * 0.66, height * 0.50)
-                ctx.lineTo(width * 0.35, height * 0.76)
-            } else {
-                ctx.moveTo(width * 0.65, height * 0.24)
-                ctx.lineTo(width * 0.34, height * 0.50)
-                ctx.lineTo(width * 0.65, height * 0.76)
-            }
-            ctx.stroke()
-        }
-    }
-
-    component TuneIcon: Canvas {
-        id: tune
-
-        onWidthChanged: requestPaint()
-        onHeightChanged: requestPaint()
-
-        onPaint: {
-            const ctx = getContext("2d")
-
-            ctx.reset()
-            ctx.clearRect(0, 0, width, height)
-            ctx.strokeStyle = "rgba(145, 107, 166, 0.84)"
-            ctx.fillStyle = "rgba(145, 107, 166, 0.84)"
-            ctx.lineWidth = 1.6
-            ctx.lineCap = "round"
-
-            for (let i = 0; i < 3; i++) {
-                const y = height * (0.25 + i * 0.25)
+            if (kind === "left" || kind === "right") {
+                const flip = kind === "left" ? -1 : 1
+                ctx.translate(width / 2, height / 2)
+                ctx.scale(flip, 1)
                 ctx.beginPath()
-                ctx.moveTo(width * 0.18, y)
-                ctx.lineTo(width * 0.82, y)
+                ctx.moveTo(-width * 0.18, -height * 0.27)
+                ctx.lineTo(width * 0.16, 0)
+                ctx.lineTo(-width * 0.18, height * 0.27)
                 ctx.stroke()
+                return
+            }
 
-                const knobX = width * (i === 0 ? 0.60 : (i === 1 ? 0.38 : 0.68))
+            if (kind === "tune") {
+                for (let i = 0; i < 3; i++) {
+                    const y = height * (0.28 + i * 0.22)
+                    ctx.beginPath()
+                    ctx.moveTo(width * 0.18, y)
+                    ctx.lineTo(width * 0.82, y)
+                    ctx.stroke()
+                    ctx.beginPath()
+                    ctx.arc(width * (i === 0 ? 0.62 : (i === 1 ? 0.38 : 0.70)), y, 2.1, 0, Math.PI * 2)
+                    ctx.fill()
+                }
+                return
+            }
+
+            if (kind === "hide") {
                 ctx.beginPath()
-                ctx.arc(knobX, y, 2.1, 0, Math.PI * 2)
+                ctx.ellipse(width * 0.50, height * 0.50, width * 0.31, height * 0.22, 0, 0, Math.PI * 2)
+                ctx.stroke()
+                ctx.beginPath()
+                ctx.arc(width * 0.50, height * 0.50, Math.min(width, height) * 0.09, 0, Math.PI * 2)
                 ctx.fill()
+                ctx.beginPath()
+                ctx.moveTo(width * 0.20, height * 0.80)
+                ctx.lineTo(width * 0.80, height * 0.20)
+                ctx.stroke()
+                return
+            }
+
+            ctx.beginPath()
+            ctx.moveTo(width * 0.28, height * 0.38)
+            ctx.lineTo(width * 0.50, height * 0.62)
+            ctx.lineTo(width * 0.72, height * 0.38)
+            ctx.stroke()
+        }
+    }
+
+    component PointerNeedle: Canvas {
+        id: needle
+
+        width: 44
+        height: 48
+        antialiasing: true
+
+        onWidthChanged: requestPaint()
+        onHeightChanged: requestPaint()
+        onPaint: {
+            const ctx = getContext("2d")
+            ctx.reset()
+            ctx.clearRect(0, 0, width, height)
+
+            ctx.save()
+            ctx.shadowColor = root.cssColor(root.neon ? root.lilac : root.pink, root.neon ? 0.34 : 0.22)
+            ctx.shadowBlur = 14
+            ctx.shadowOffsetY = 5
+            ctx.beginPath()
+            ctx.moveTo(width * 0.50, height * 0.92)
+            ctx.lineTo(width * 0.20, height * 0.24)
+            ctx.quadraticCurveTo(width * 0.50, height * 0.05, width * 0.80, height * 0.24)
+            ctx.closePath()
+            ctx.fillStyle = root.cssColor(root.card, root.neon ? 0.88 : 0.94)
+            ctx.fill()
+            ctx.restore()
+
+            ctx.beginPath()
+            ctx.moveTo(width * 0.50, height * 0.86)
+            ctx.lineTo(width * 0.30, height * 0.28)
+            ctx.quadraticCurveTo(width * 0.50, height * 0.16, width * 0.70, height * 0.28)
+            ctx.closePath()
+            ctx.fillStyle = root.cssColor(root.neon ? root.lilac : root.pink, 0.90)
+            ctx.fill()
+            ctx.strokeStyle = root.cssColor(root.borderSoft, 0.58)
+            ctx.lineWidth = 1.0
+            ctx.stroke()
+
+            ctx.beginPath()
+            ctx.arc(width * 0.50, height * 0.25, 4.0, 0, Math.PI * 2)
+            ctx.fillStyle = root.cssColor(root.theme ? root.theme.activeText : root.ink, 0.82)
+            ctx.fill()
+        }
+    }
+
+    component RouletteRimCanvas: Canvas {
+        id: rim
+
+        property real centerX: width * 0.5
+        property real centerY: height * 0.5
+        property real outerRadius: Math.min(width, height) * 0.47
+        property real innerRadius: Math.min(width, height) * 0.18
+        property int slotCount: 1
+        property real phase: 0
+
+        antialiasing: true
+        onWidthChanged: requestPaint()
+        onHeightChanged: requestPaint()
+        onCenterXChanged: requestPaint()
+        onCenterYChanged: requestPaint()
+        onOuterRadiusChanged: requestPaint()
+        onInnerRadiusChanged: requestPaint()
+        onSlotCountChanged: requestPaint()
+        onPhaseChanged: requestPaint()
+
+        onPaint: {
+            const ctx = getContext("2d")
+            const count = Math.max(1, slotCount)
+            const centerSlot = Math.floor(count / 2)
+
+            ctx.reset()
+            ctx.clearRect(0, 0, width, height)
+            ctx.lineCap = "round"
+            ctx.lineJoin = "round"
+
+            ctx.beginPath()
+            ctx.arc(centerX, centerY, outerRadius, -Math.PI, 0)
+            ctx.strokeStyle = root.cssColor(root.borderSoft, root.neon ? 0.74 : 0.62)
+            ctx.lineWidth = 7
+            ctx.stroke()
+
+            ctx.beginPath()
+            ctx.arc(centerX, centerY, innerRadius, -Math.PI, 0)
+            ctx.strokeStyle = root.cssColor(root.borderSoft, root.neon ? 0.58 : 0.46)
+            ctx.lineWidth = 3
+            ctx.stroke()
+
+            for (let i = 0; i <= count; i++) {
+                const offset = i - centerSlot - 0.5 + phase
+                const degrees = root.wheelBoundaryAngle(offset, count)
+                const a = (-90 + degrees) * Math.PI / 180
+                ctx.beginPath()
+                ctx.moveTo(centerX + Math.cos(a) * innerRadius, centerY + Math.sin(a) * innerRadius)
+                ctx.lineTo(centerX + Math.cos(a) * outerRadius, centerY + Math.sin(a) * outerRadius)
+                ctx.strokeStyle = root.cssColor(root.borderSoft, i % 2 === 0 ? 0.42 : 0.28)
+                ctx.lineWidth = i === centerSlot || i === centerSlot + 1 ? 1.8 : 1.2
+                ctx.stroke()
+            }
+        }
+    }
+
+    component ReferencePetalsCanvas: Canvas {
+        id: petals
+
+        onWidthChanged: requestPaint()
+        onHeightChanged: requestPaint()
+        onPaint: {
+            const ctx = getContext("2d")
+            const cx = width * 0.50
+            const baseY = height * 0.62
+
+            ctx.reset()
+            ctx.clearRect(0, 0, width, height)
+
+            ctx.save()
+            ctx.strokeStyle = "rgba(236,236,236,0.52)"
+            ctx.fillStyle = "rgba(242,242,242,0.64)"
+            ctx.lineWidth = 1.8
+            ctx.beginPath()
+            ctx.moveTo(cx - 12, baseY)
+            ctx.bezierCurveTo(cx - 42, height * 0.48, cx - 18, height * 0.35, cx + 18, height * 0.25)
+            ctx.stroke()
+
+            function flower(x, y, s, dark) {
+                ctx.save()
+                ctx.translate(x, y)
+                ctx.fillStyle = dark ? "rgba(210,210,210,0.52)" : "rgba(250,250,250,0.74)"
+                ctx.strokeStyle = dark ? "rgba(185,185,185,0.32)" : "rgba(255,255,255,0.40)"
+                ctx.lineWidth = 0.8
+                for (let i = 0; i < 6; i++) {
+                    ctx.rotate(Math.PI / 3)
+                    ctx.beginPath()
+                    ctx.arc(0, -s * 0.78, s * 0.42, 0, Math.PI * 2)
+                    ctx.fill()
+                    ctx.stroke()
+                }
+                ctx.fillStyle = "rgba(225,225,225,0.70)"
+                ctx.beginPath()
+                ctx.arc(0, 0, s * 0.28, 0, Math.PI * 2)
+                ctx.fill()
+                ctx.restore()
+            }
+
+            flower(cx + 16, height * 0.28, 21, false)
+            flower(cx - 34, height * 0.40, 18, true)
+            flower(cx + 84, height * 0.49, 16, false)
+            flower(cx - 96, height * 0.51, 14, true)
+            flower(cx + 145, height * 0.54, 13, false)
+
+            ctx.strokeStyle = "rgba(232,232,232,0.32)"
+            ctx.lineWidth = 1.0
+            for (let b = 0; b < 6; b++) {
+                const bx = cx + [-28, 42, 76, -82, 112, -116][b]
+                const by = height * [0.36, 0.38, 0.44, 0.48, 0.52, 0.56][b]
+                ctx.beginPath()
+                ctx.moveTo(cx, height * 0.44)
+                ctx.quadraticCurveTo((cx + bx) / 2, by - 26, bx, by)
+                ctx.stroke()
+            }
+            ctx.restore()
+
+            const flecks = [
+                [0.07, 0.21, 4, 0], [0.15, 0.34, 5, 1], [0.22, 0.47, 3, 0],
+                [0.31, 0.08, 3, 1], [0.40, 0.49, 4, 0], [0.62, 0.18, 3, 1],
+                [0.74, 0.31, 5, 0], [0.83, 0.43, 4, 1], [0.93, 0.26, 5, 0],
+                [0.55, 0.06, 3, 1], [0.69, 0.51, 3, 0], [0.12, 0.55, 4, 1]
+            ]
+
+            for (let i = 0; i < flecks.length; i++) {
+                const p = flecks[i]
+                const x = width * p[0]
+                const y = height * p[1]
+                const s = p[2]
+                ctx.save()
+                ctx.translate(x, y)
+                ctx.rotate((i * 37 % 160) * Math.PI / 180)
+                ctx.fillStyle = p[3] ? "rgba(255,255,255,0.78)" : "rgba(0,0,0,0.76)"
+                ctx.beginPath()
+                ctx.moveTo(0, -s)
+                ctx.quadraticCurveTo(s * 0.72, 0, 0, s)
+                ctx.quadraticCurveTo(-s * 0.55, 0, 0, -s)
+                ctx.fill()
+                ctx.restore()
+            }
+        }
+    }
+
+    component RadialGlassCanvas: Canvas {
+        id: glass
+
+        onWidthChanged: requestPaint()
+        onHeightChanged: requestPaint()
+        onPaint: {
+            const ctx = getContext("2d")
+            const cx = width * 0.50
+            const cy = height + 34
+            const rOuterX = Math.min(width * 0.47, 390)
+            const rOuterY = Math.min(height * 0.84, 352)
+            const rInnerX = Math.min(width * 0.29, 244)
+            const rInnerY = Math.min(height * 0.53, 222)
+            const rCoreX = rInnerX * 0.42
+            const rCoreY = rInnerY * 0.44
+
+            function annularSegment(outerX, outerY, innerX, innerY, start, end) {
+                const samples = 64
+                ctx.beginPath()
+                for (let i = 0; i <= samples; i++) {
+                    const a = start + (end - start) * i / samples
+                    const x = cx + Math.cos(a) * outerX
+                    const y = cy + Math.sin(a) * outerY
+                    if (i === 0)
+                        ctx.moveTo(x, y)
+                    else
+                        ctx.lineTo(x, y)
+                }
+                for (let i = samples; i >= 0; i--) {
+                    const a = start + (end - start) * i / samples
+                    ctx.lineTo(cx + Math.cos(a) * innerX, cy + Math.sin(a) * innerY)
+                }
+                ctx.closePath()
+            }
+
+            ctx.reset()
+            ctx.clearRect(0, 0, width, height)
+
+            ctx.fillStyle = "rgba(236, 238, 242, 0.30)"
+            annularSegment(rOuterX, rOuterY, rInnerX, rInnerY, Math.PI, Math.PI * 2)
+            ctx.fill()
+
+            ctx.fillStyle = "rgba(236, 238, 242, 0.22)"
+            annularSegment(rInnerX, rInnerY, rCoreX, rCoreY, Math.PI, Math.PI * 2)
+            ctx.fill()
+
+            ctx.strokeStyle = "rgba(255, 255, 255, 0.26)"
+            ctx.lineWidth = 1.4
+            annularSegment(rOuterX, rOuterY, rInnerX, rInnerY, Math.PI, Math.PI * 2)
+            ctx.stroke()
+        }
+    }
+
+    component RadialFrameCanvas: Canvas {
+        id: frame
+
+        property int topSlots: Math.max(1, root.wheelSlotCount())
+        property int bottomSlots: Math.max(0, root.bottomWheelSlotCount())
+        property real topPhase: root.deckDirection * (1 - root.wheelProgress) * (Math.PI / topSlots)
+        readonly property real bottomSpan: 118 * Math.PI / 180
+
+        onWidthChanged: requestPaint()
+        onHeightChanged: requestPaint()
+        onTopSlotsChanged: requestPaint()
+        onBottomSlotsChanged: requestPaint()
+        onTopPhaseChanged: requestPaint()
+        onPaint: {
+            const ctx = getContext("2d")
+            const cx = width * 0.50
+            const cy = height + 34
+            const rOuterX = Math.min(width * 0.47, 390)
+            const rOuterY = Math.min(height * 0.84, 352)
+            const rInnerX = Math.min(width * 0.29, 244)
+            const rInnerY = Math.min(height * 0.53, 222)
+            const rCoreX = rInnerX * 0.42
+            const rCoreY = rInnerY * 0.44
+
+            function strokeArc(rx, ry, start, end, color, lineWidth) {
+                const samples = 96
+                ctx.beginPath()
+                for (let i = 0; i <= samples; i++) {
+                    const a = start + (end - start) * i / samples
+                    const x = cx + Math.cos(a) * rx
+                    const y = cy + Math.sin(a) * ry
+                    if (i === 0)
+                        ctx.moveTo(x, y)
+                    else
+                        ctx.lineTo(x, y)
+                }
+                ctx.strokeStyle = color
+                ctx.lineWidth = lineWidth
+                ctx.stroke()
+            }
+
+            function strokeDivider(angle, innerX, innerY, outerX, outerY, alpha, lineWidth) {
+                const sx = cx + Math.cos(angle) * innerX
+                const sy = cy + Math.sin(angle) * innerY
+                const ex = cx + Math.cos(angle) * outerX
+                const ey = cy + Math.sin(angle) * outerY
+                ctx.beginPath()
+                ctx.moveTo(sx, sy)
+                ctx.lineTo(ex, ey)
+                ctx.strokeStyle = "rgba(255,255,255," + alpha + ")"
+                ctx.lineWidth = lineWidth
+                ctx.stroke()
+            }
+
+            ctx.reset()
+            ctx.clearRect(0, 0, width, height)
+
+            ctx.lineCap = "butt"
+            ctx.lineJoin = "round"
+
+            strokeArc(rOuterX, rOuterY, Math.PI, Math.PI * 2, "rgba(255,255,255,0.54)", 9)
+            strokeArc(rInnerX, rInnerY, Math.PI, Math.PI * 2, "rgba(255,255,255,0.36)", 5)
+
+            if (bottomSlots > 0)
+                strokeArc(rCoreX, rCoreY, -Math.PI / 2 - bottomSpan / 2, -Math.PI / 2 + bottomSpan / 2, "rgba(255,255,255,0.30)", 3.2)
+
+            const topStep = Math.PI / topSlots
+            for (let i = 0; i <= topSlots; i++) {
+                const a = -Math.PI + frame.topPhase + i * topStep
+                if (a >= -Math.PI && a <= 0)
+                    strokeDivider(a, rInnerX, rInnerY, rOuterX, rOuterY, 0.24, 1.25)
+            }
+
+            if (bottomSlots > 0) {
+                const start = -Math.PI / 2 - bottomSpan / 2
+                const step = bottomSpan / bottomSlots
+                for (let i = 0; i <= bottomSlots; i++)
+                    strokeDivider(start + i * step, rCoreX, rCoreY, rInnerX, rInnerY, 0.18, 1.0)
             }
         }
     }

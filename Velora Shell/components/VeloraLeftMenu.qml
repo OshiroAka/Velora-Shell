@@ -12,6 +12,7 @@ Item {
     property alias surfaceItem: panelSurface
     property string popupType: "search"
     property bool open: visible
+    property bool preload: false
     property bool externalSurface: false
     property bool interactiveFocus: false
     property string attachSide: "left"
@@ -40,6 +41,8 @@ Item {
     property string searchMode: "apps"
     property int searchSelectedIndex: 0
     property var searchResults: []
+    property bool searchReady: false
+    readonly property bool backgroundPollingActive: open && visible
     readonly property int cornerRadius: 13
     readonly property int arrowCenterY: {
         if (popupType === "volume")
@@ -71,9 +74,23 @@ Item {
     property real revealProgress: 0
     property real entryProgress: 0
     property real arrowVisualCenterY: arrowCenterY
+    readonly property int motionFast: theme ? theme.motionFast : 120
+    readonly property int motionNormal: theme ? theme.motionNormal : 200
+    readonly property int motionSlow: theme ? theme.motionSlow : 320
+    readonly property int motionMenuIn: theme ? theme.motionMenuIn : 320
+    readonly property int motionMenuOut: theme ? theme.motionMenuOut : 180
+    readonly property int motionPanelGeometry: theme ? theme.motionPanelGeometry : 220
+    readonly property int motionHover: theme ? theme.motionHover : 120
+    readonly property int motionPanelOffset: theme ? theme.motionPanelOffset : 28
+    readonly property int motionEaseEnter: theme ? theme.motionEaseEnter : Easing.OutCubic
+    readonly property int motionEaseExit: theme ? theme.motionEaseExit : Easing.InCubic
+    readonly property int motionEaseHover: theme ? theme.motionEaseHover : Easing.OutCubic
+    readonly property int motionEaseEmphasized: theme ? theme.motionEaseEmphasized : Easing.BezierSpline
+    readonly property var motionEmphasizedCurve: theme ? theme.motionEmphasizedCurve : [0.05, 0, 0.133, 0.06, 0.166, 0.4, 0.208, 0.82, 0.25, 1, 1, 1]
 
     signal closeRequested()
     signal pointerInsideChanged(bool inside)
+    signal mediaWindowRequested(real centerY)
 
     function alpha(colorValue, opacity) {
         return root.theme ? root.theme.alpha(colorValue, opacity) : Qt.rgba(colorValue.r, colorValue.g, colorValue.b, opacity)
@@ -84,7 +101,7 @@ Item {
     }
 
     function staged(delay, duration) {
-        return clamp01((entryProgress * 360 - delay * 0.16) / Math.max(1, duration * 0.58))
+        return clamp01((entryProgress * motionSlow - delay * 0.16) / Math.max(1, duration * 0.58))
     }
 
     function stageOpacity(delay, duration) {
@@ -128,6 +145,10 @@ Item {
 
     function restartEntryAnimation() {
         entryAnimation.stop()
+        if (externalSurface) {
+            entryProgress = 1
+            return
+        }
         entryProgress = 0
         entryAnimation.restart()
     }
@@ -136,8 +157,26 @@ Item {
         revealAnimation.stop()
         revealAnimation.from = revealProgress
         revealAnimation.to = open ? 1 : 0
-        revealAnimation.duration = open ? 620 : 260
+        revealAnimation.duration = open ? motionMenuIn : motionMenuOut
         revealAnimation.restart()
+    }
+
+    function refreshStatusQueries() {
+        if (!backgroundPollingActive || typeof volumeQuery === "undefined")
+            return
+
+        if (!volumeQuery.running)
+            volumeQuery.running = true
+        if (!brightnessQuery.running)
+            brightnessQuery.running = true
+        if (!wifiQuery.running)
+            wifiQuery.running = true
+        if (!notificationQuery.running)
+            notificationQuery.running = true
+        if (!bluetoothQuery.running)
+            bluetoothQuery.running = true
+        if (!mediaQuery.running)
+            mediaQuery.running = true
     }
 
     HoverHandler {
@@ -146,24 +185,33 @@ Item {
 
     onOpenChanged: {
         animateReveal()
-        if (open)
+        if (open) {
+            ensureSearchReady()
+            refreshStatusQueries()
             restartEntryAnimation()
-        else {
+        } else {
             entryAnimation.stop()
-            entryProgress = 0
         }
+    }
+
+    onPreloadChanged: {
+        if (preload)
+            ensureSearchReady()
     }
 
     onVisibleChanged: {
         if (visible && open) {
             if (revealProgress <= 0.001)
                 animateReveal()
-            restartEntryAnimation()
+            ensureSearchReady()
+            refreshStatusQueries()
+            if (!entryAnimation.running && entryProgress <= 0.001)
+                restartEntryAnimation()
         }
     }
 
     onPopupTypeChanged: {
-        if (visible)
+        if (visible && open)
             restartEntryAnimation()
     }
 
@@ -240,12 +288,19 @@ Item {
 
         searchResults = out.slice(0, 4)
         searchSelectedIndex = Math.max(0, Math.min(searchSelectedIndex, Math.max(0, searchResults.length - 1)))
+        searchReady = true
+    }
+
+    function ensureSearchReady() {
+        if (!searchReady)
+            rebuildSearch()
     }
 
     function setSearchMode(mode) {
         searchMode = mode
         searchSelectedIndex = 0
-        rebuildSearch()
+        if (!open)
+            searchReady = false
     }
 
     function stepSearch(delta) {
@@ -303,7 +358,8 @@ Item {
         if (!ssid || ssid.length <= 0)
             return
 
-        runCommand("nmcli dev wifi connect " + shellQuote(ssid) + " >/dev/null 2>&1 || true")
+        const quotedSsid = shellQuote(ssid)
+        runCommand("if nmcli -t -f NAME connection show | grep -Fx -- " + quotedSsid + " >/dev/null 2>&1; then nmcli connection up id " + quotedSsid + " >/dev/null 2>&1 || nmcli dev wifi connect " + quotedSsid + " >/dev/null 2>&1 || true; else nmcli dev wifi connect " + quotedSsid + " >/dev/null 2>&1 || (command -v nm-connection-editor >/dev/null 2>&1 && nm-connection-editor >/dev/null 2>&1 &); fi")
         wifiRefresh.restart()
     }
 
@@ -332,11 +388,18 @@ Item {
             return
 
         removeNotificationById(notificationId)
-        runCommand("makoctl dismiss -n " + String(notificationId) + " >/dev/null 2>&1 || true")
+        if (!dismissTrackedNotification(notificationId))
+            runCommand("makoctl dismiss -n " + String(notificationId) + " >/dev/null 2>&1 || true")
         notificationRefresh.restart()
     }
 
     function clearNotifications() {
+        var values = trackedNotificationValues()
+        for (var i = values.length - 1; i >= 0; --i) {
+            if (values[i])
+                values[i].dismiss()
+        }
+
         notificationModel.clear()
         runCommand("makoctl dismiss --all >/dev/null 2>&1 || true")
     }
@@ -350,7 +413,7 @@ Item {
     }
 
     function notificationApp(notification) {
-        return (notification && (notification.appName || notification.app || notification.application || notification.desktopEntry || notification["app-name"])) || "System"
+        return (notification && (notification.appName || notification.app || notification.app_name || notification.application || notification.desktopEntry || notification.desktop_entry || notification["app-name"])) || "System"
     }
 
     function notificationTime(notification) {
@@ -405,6 +468,35 @@ Item {
         notificationModel.insert(0, item)
         while (notificationModel.count > 8)
             notificationModel.remove(notificationModel.count - 1)
+    }
+
+    function dismissTrackedNotification(notificationId) {
+        const id = textOf(notificationId)
+        if (id.length <= 0)
+            return false
+
+        var values = trackedNotificationValues()
+        for (var i = 0; i < values.length; ++i) {
+            if (values[i] && textOf(values[i].id) === id) {
+                values[i].dismiss()
+                return true
+            }
+        }
+
+        return false
+    }
+
+    function trackedNotificationValues() {
+        const tracked = NotificationServer.trackedNotifications
+        return tracked && tracked.values ? tracked.values : []
+    }
+
+    function syncTrackedNotifications() {
+        var values = trackedNotificationValues()
+        notificationModel.clear()
+
+        for (var i = values.length - 1; i >= 0; --i)
+            upsertNotification(values[i])
     }
 
     function removeNotificationById(notificationId) {
@@ -482,36 +574,71 @@ Item {
             return "⌨"
         if (lower.indexOf("mouse") >= 0 || lower.indexOf("mx master") >= 0)
             return "▯"
+        return ""
+    }
+
+    function deviceIconName(name) {
+        const lower = textOf(name).toLowerCase()
         if (lower.indexOf("airpods") >= 0 || lower.indexOf("buds") >= 0 || lower.indexOf("head") >= 0 || lower.indexOf("speaker") >= 0)
-            return "♪"
-        return "B"
+            return "volume"
+        return "bluetooth"
+    }
+
+    function setBluetoothPower(enabled) {
+        if (!bluetoothAvailable)
+            return
+
+        bluetoothPowered = enabled
+        root.runCommand("bluetoothctl power " + (enabled ? "on" : "off") + " >/dev/null 2>&1 || true")
+        bluetoothRefresh.restart()
+    }
+
+    function toggleBluetoothPower() {
+        setBluetoothPower(!bluetoothPowered)
+    }
+
+    function setBluetoothDeviceConnection(address, active) {
+        const addr = textOf(address)
+        if (!bluetoothAvailable || addr.length <= 0)
+            return
+
+        root.runCommand("bluetoothctl " + (active ? "disconnect " : "connect ") + root.shellQuote(addr) + " >/dev/null 2>&1 || true")
+        bluetoothRefresh.restart()
     }
 
     Component.onCompleted: {
-        rebuildSearch()
-        volumeQuery.running = true
-        brightnessQuery.running = true
-        wifiQuery.running = true
-        notificationQuery.running = true
-        mediaQuery.running = true
-        bluetoothQuery.running = true
+        syncTrackedNotifications()
+        if (open || preload)
+            ensureSearchReady()
+        if (open) {
+            refreshStatusQueries()
+        }
     }
 
     onSearchQueryChanged: {
         searchSelectedIndex = 0
-        rebuildSearch()
+        if (open)
+            rebuildSearch()
+        else
+            searchReady = false
     }
 
     onSearchModeChanged: {
         searchSelectedIndex = 0
-        rebuildSearch()
+        if (open)
+            rebuildSearch()
+        else
+            searchReady = false
     }
 
     Connections {
         target: DesktopEntries.applications
 
         function onValuesChanged() {
-            root.rebuildSearch()
+            if (root.open)
+                root.rebuildSearch()
+            else
+                root.searchReady = false
         }
     }
 
@@ -528,29 +655,23 @@ Item {
                 root.removeNotificationById(notification.id)
             })
         }
-    }
 
-    Timer {
-        interval: 7000
-        running: true
-        repeat: true
-        onTriggered: {
-            if (!volumeQuery.running)
-                volumeQuery.running = true
-            if (!brightnessQuery.running)
-                brightnessQuery.running = true
-            if (!wifiQuery.running)
-                wifiQuery.running = true
-            if (!notificationQuery.running)
-                notificationQuery.running = true
-            if (!bluetoothQuery.running)
-                bluetoothQuery.running = true
+        function onTrackedNotificationsChanged() {
+            root.syncTrackedNotifications()
         }
     }
 
     Timer {
-        interval: 2000
-        running: true
+        interval: 7000
+        running: root.backgroundPollingActive
+        repeat: true
+        triggeredOnStart: true
+        onTriggered: root.refreshStatusQueries()
+    }
+
+    Timer {
+        interval: 3500
+        running: root.backgroundPollingActive
         repeat: true
         onTriggered: {
             if (!mediaQuery.running)
@@ -560,7 +681,7 @@ Item {
 
     Timer {
         interval: 1000
-        running: true
+        running: root.backgroundPollingActive && root.mediaPlaying
         repeat: true
         onTriggered: root.updateMediaClock()
     }
@@ -570,6 +691,8 @@ Item {
         interval: 800
         repeat: false
         onTriggered: {
+            if (!root.backgroundPollingActive)
+                return
             if (!wifiQuery.running)
                 wifiQuery.running = true
             if (!notificationQuery.running)
@@ -578,10 +701,24 @@ Item {
     }
 
     Timer {
+        id: bluetoothRefresh
+        interval: 900
+        repeat: false
+        onTriggered: {
+            if (!root.backgroundPollingActive)
+                return
+            if (!bluetoothQuery.running)
+                bluetoothQuery.running = true
+        }
+    }
+
+    Timer {
         id: notificationRefresh
         interval: 1200
         repeat: false
         onTriggered: {
+            if (!root.backgroundPollingActive)
+                return
             if (!notificationQuery.running)
                 notificationQuery.running = true
         }
@@ -610,11 +747,14 @@ Item {
             running = false
             if (root.pendingCommand !== root.activeCommand)
                 commandDebounce.restart()
-            if (!volumeQuery.running)
-                volumeQuery.running = true
-            if (!brightnessQuery.running)
-                brightnessQuery.running = true
-            wifiRefresh.restart()
+            if (root.backgroundPollingActive) {
+                if (!volumeQuery.running)
+                    volumeQuery.running = true
+                if (!brightnessQuery.running)
+                    brightnessQuery.running = true
+                wifiRefresh.restart()
+                bluetoothRefresh.restart()
+            }
         }
     }
 
@@ -714,7 +854,7 @@ Item {
         id: notificationQuery
 
         running: false
-        command: ["bash", "-lc", "if command -v makoctl >/dev/null 2>&1; then out=$(makoctl list -j 2>/dev/null) && printf '%s\\n' \"${out:-[]}\" || printf 'MAKO_UNAVAILABLE\\n'; else printf 'MAKO_UNAVAILABLE\\n'; fi"]
+        command: ["bash", "-lc", "if command -v makoctl >/dev/null 2>&1; then makoctl list -j 2>/dev/null | python3 -c 'import sys,json; raw=sys.stdin.read().strip() or \"[]\"; print(json.dumps(json.loads(raw)))' 2>/dev/null || printf '[]\\n'; else printf '[]\\n'; fi"]
 
         stdout: SplitParser {
             onRead: function(lineRaw) {
@@ -727,6 +867,11 @@ Item {
                 try {
                     var parsed = JSON.parse(line)
                     var items = Array.isArray(parsed) ? parsed : (parsed.data || parsed.notifications || [])
+
+                    if (trackedNotificationValues().length > 0) {
+                        root.syncTrackedNotifications()
+                        return
+                    }
 
                     notificationModel.clear()
                     for (var i = 0; i < items.length; ++i) {
@@ -778,7 +923,7 @@ Item {
         command: ["bash", "-lc", root.mediaActionCommand]
         onExited: {
             running = false
-            if (!mediaQuery.running)
+            if (root.backgroundPollingActive && !mediaQuery.running)
                 mediaQuery.running = true
         }
     }
@@ -817,6 +962,7 @@ Item {
                 deviceModel.append({
                     address: address,
                     iconLabel: root.deviceIconLabel(name),
+                    iconName: root.deviceIconName(name),
                     name: name,
                     detail: kind === "CONNECTED" ? "接続済み" : (kind === "PAIRED" ? "ペアリング済み" : "未接続"),
                     active: kind === "CONNECTED"
@@ -827,14 +973,14 @@ Item {
         onExited: running = false
     }
 
-    opacity: revealProgress
-    scale: 0.99 + revealProgress * 0.01
+    opacity: root.externalSurface ? 1 : revealProgress
+    scale: root.externalSurface ? 1 : 0.99 + revealProgress * 0.01
     transformOrigin: attachedRight ? Item.Right : Item.Left
     activeFocusOnTab: true
 
     transform: Translate {
-        x: Math.round((1 - root.revealProgress) * (root.attachedRight ? 30 : -30))
-        y: 0
+        x: Math.round((1 - root.revealProgress) * (root.externalSurface ? 0 : (root.attachedRight ? root.motionPanelOffset : -root.motionPanelOffset)))
+        y: Math.round((1 - root.revealProgress) * (root.externalSurface ? 0 : 3))
     }
 
     NumberAnimation {
@@ -844,9 +990,8 @@ Item {
         property: "revealProgress"
         from: root.revealProgress
         to: root.open ? 1 : 0
-        duration: root.open ? 620 : 260
-        easing.type: Easing.BezierSpline
-        easing.bezierCurve: [0.05, 0, 0.133, 0.06, 0.166, 0.4, 0.208, 0.82, 0.25, 1, 1, 1]
+        duration: root.open ? root.motionMenuIn : root.motionMenuOut
+        easing.type: root.open ? root.motionEaseEnter : root.motionEaseExit
     }
 
     NumberAnimation {
@@ -856,9 +1001,9 @@ Item {
         property: "entryProgress"
         from: 0
         to: 1
-        duration: 520
-        easing.type: Easing.BezierSpline
-        easing.bezierCurve: [0.05, 0, 0.133, 0.06, 0.166, 0.4, 0.208, 0.82, 0.25, 1, 1, 1]
+        duration: root.motionSlow
+        easing.type: root.motionEaseEmphasized
+        easing.bezierCurve: root.motionEmphasizedCurve
     }
 
     Rectangle {
@@ -886,9 +1031,9 @@ Item {
 
         Behavior on y {
             NumberAnimation {
-                duration: 420
-                easing.type: Easing.BezierSpline
-                easing.bezierCurve: [0.05, 0, 0.133, 0.06, 0.166, 0.4, 0.208, 0.82, 0.25, 1, 1, 1]
+                duration: root.motionPanelGeometry
+                easing.type: root.motionEaseEmphasized
+                easing.bezierCurve: root.motionEmphasizedCurve
             }
         }
     }
@@ -1336,7 +1481,7 @@ Item {
                     entryDelay: 110
                     entryRotate: -12
                     entryStartScale: 0.85
-                    entryPeakScale: 1.05
+                    entryPeakScale: 1.025
                 }
 
                 TitleText {
@@ -1627,18 +1772,49 @@ Item {
 
         property int entryDelay: 80
         property int innerMargin: 12
+        property int depthIndex: 0
+        property bool hovered: false
+        readonly property color depthAccent: depthIndex % 3 === 0
+            ? root.pink
+            : (depthIndex % 3 === 1 ? root.lilac : (root.theme ? root.theme.accentTertiary : Qt.rgba(0.55, 0.76, 0.88, 0.86)))
         default property alias content: controlCardBody.data
 
         radius: 10
         opacity: root.stageOpacity(entryDelay, 220)
-        scale: root.stageScale(entryDelay, 0.985, 1.0)
+        scale: root.stageScale(entryDelay, 0.985, 1.0) + (hovered ? 0.004 : 0)
         transform: Translate {
             y: root.stageTranslateY(controlCard.entryDelay, 12)
         }
-        color: root.alpha(root.card, root.neon ? 0.24 : 0.30)
+        color: root.alpha(root.card, hovered ? (root.neon ? 0.32 : 0.40) : (root.neon ? 0.26 : 0.32))
         border.width: 1
-        border.color: root.alpha(root.borderSoft, root.neon ? 0.18 : 0.24)
+        border.color: hovered ? root.alpha(controlCard.depthAccent, 0.24) : root.alpha(root.borderSoft, root.neon ? 0.18 : 0.24)
         antialiasing: true
+        layer.enabled: hovered && root.neon
+        layer.effect: DropShadow {
+            transparentBorder: true
+            radius: 18
+            samples: 37
+            horizontalOffset: 0
+            verticalOffset: 3
+            color: root.alpha(controlCard.depthAccent, 0.12)
+        }
+
+        Behavior on scale {
+            NumberAnimation { duration: root.motionHover; easing.type: root.motionEaseHover }
+        }
+
+        Behavior on color {
+            ColorAnimation { duration: root.motionHover; easing.type: root.motionEaseHover }
+        }
+
+        Behavior on border.color {
+            ColorAnimation { duration: root.motionHover; easing.type: root.motionEaseHover }
+        }
+
+        HoverHandler {
+            cursorShape: Qt.PointingHandCursor
+            onHoveredChanged: controlCard.hovered = hovered
+        }
 
         ColumnLayout {
             id: controlCardBody
@@ -1686,6 +1862,8 @@ Item {
     }
 
     component WeatherPanelCard: ControlCard {
+        depthIndex: 0
+
         CardHeader {
             iconName: "weather"
             title: "天気"
@@ -1767,6 +1945,18 @@ Item {
     }
 
     component MediaPanelCard: ControlCard {
+        id: mediaCard
+
+        depthIndex: 1
+
+        TapHandler {
+            acceptedButtons: Qt.LeftButton
+            onTapped: {
+                const centerPoint = mediaCard.mapToItem(root, mediaCard.width / 2, mediaCard.height / 2)
+                root.mediaWindowRequested(centerPoint.y)
+            }
+        }
+
         RowLayout {
             Layout.fillWidth: true
             spacing: 12
@@ -1868,6 +2058,8 @@ Item {
     }
 
     component AudioPanelCard: ControlCard {
+        depthIndex: 2
+
         CardHeader {
             iconName: "volume"
             title: "音量"
@@ -1891,6 +2083,8 @@ Item {
     }
 
     component MemoPanelCard: ControlCard {
+        depthIndex: 3
+
         CardHeader {
             iconName: "memo"
             title: "メモ / リマインダー"
@@ -1903,6 +2097,8 @@ Item {
     }
 
     component NoticePanelCard: ControlCard {
+        depthIndex: 4
+
         CardHeader {
             iconName: "bell"
             title: "通知"
@@ -1935,20 +2131,38 @@ Item {
     }
 
     component DevicesPanelCard: ControlCard {
-        CardHeader {
-            iconName: "bluetooth"
-            title: root.bluetoothPowered ? "Bluetooth / デバイス" : "Bluetooth オフ"
-            actionText: deviceModel.count > 0 ? String(deviceModel.count) : ""
+        depthIndex: 5
+
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 8
+
+            CardHeader {
+                Layout.fillWidth: true
+                iconName: "bluetooth"
+                title: root.bluetoothPowered ? "Bluetooth / デバイス" : "Bluetooth オフ"
+                actionText: deviceModel.count > 0 ? String(deviceModel.count) : ""
+            }
+
+            SoftToggle {
+                visible: root.bluetoothAvailable
+                checked: root.bluetoothPowered
+                entryDelay: 80
+                onClicked: root.toggleBluetoothPower()
+            }
         }
 
         Repeater {
             model: Math.min(deviceModel.count, 3)
 
             DeviceRow {
+                address: deviceModel.get(index).address
                 iconLabel: deviceModel.get(index).iconLabel
+                iconName: deviceModel.get(index).iconName
                 name: deviceModel.get(index).name
                 detail: deviceModel.get(index).detail
                 active: deviceModel.get(index).active
+                onClicked: root.setBluetoothDeviceConnection(address, active)
             }
         }
 
@@ -2192,67 +2406,123 @@ Item {
         }
     }
 
-    component DeviceRow: RowLayout {
+    component DeviceRow: Item {
+        id: row
+
+        property string address: ""
         property string iconLabel: ""
+        property string iconName: ""
         property string name: ""
         property string detail: ""
         property bool active: false
+        property bool hovered: false
+        signal clicked()
 
         Layout.fillWidth: true
-        spacing: 10
+        Layout.preferredHeight: 34
+        scale: hovered ? 1.008 : 1.0
+        z: hovered ? 2 : 0
+        layer.enabled: false
+        layer.effect: DropShadow {
+            transparentBorder: true
+            radius: 22
+            samples: 45
+            horizontalOffset: 0
+            verticalOffset: 5
+            color: root.alpha(root.pink, 0.20)
+        }
 
         Rectangle {
-            Layout.preferredWidth: 30
-            Layout.preferredHeight: 30
-            radius: 7
-            color: root.alpha(root.card, 0.42)
+            anchors.fill: parent
+            radius: 8
+            color: row.hovered ? root.alpha(root.card, 0.24) : "transparent"
             border.width: 1
-            border.color: root.alpha(root.borderSoft, 0.26)
+            border.color: row.hovered ? root.alpha(root.pink, 0.18) : "transparent"
+        }
+
+        RowLayout {
+            anchors.fill: parent
+            spacing: 10
+
+            Rectangle {
+                Layout.preferredWidth: 30
+                Layout.preferredHeight: 30
+                radius: 7
+                color: row.hovered ? root.alpha(root.card, 0.56) : root.alpha(root.card, 0.42)
+                border.width: 1
+                border.color: row.active ? root.alpha(root.pink, 0.36) : root.alpha(root.borderSoft, 0.24)
+
+                PopupIcon {
+                    anchors.centerIn: parent
+                    width: 18
+                    height: 18
+                    visible: row.iconName.length > 0
+                    iconName: row.iconName.length > 0 ? row.iconName : "bluetooth"
+                    lineColor: row.hovered || row.active ? root.pink : root.ink
+                    entryDelay: 60
+                }
+
+                Text {
+                    anchors.centerIn: parent
+                    visible: row.iconName.length <= 0
+                    text: row.iconLabel
+                    color: row.hovered || row.active ? root.pink : root.ink
+                    font.family: root.uiFont
+                    font.pixelSize: 13
+                    font.weight: Font.Bold
+                }
+            }
+
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 1
+
+                Text {
+                    Layout.fillWidth: true
+                    text: row.name
+                    color: row.hovered ? root.pink : root.ink
+                    font.family: root.uiFont
+                    font.pixelSize: 11
+                    font.weight: Font.Bold
+                    elide: Text.ElideRight
+                }
+
+                SmallText {
+                    Layout.fillWidth: true
+                    text: row.detail
+                    color: row.active ? root.alpha(root.pink, 0.90) : root.inkSoft
+                    elide: Text.ElideRight
+                }
+            }
+
+            Rectangle {
+                Layout.preferredWidth: 8
+                Layout.preferredHeight: 8
+                radius: 4
+                color: row.active ? "#4bd18b" : root.alpha(root.inkSoft, 0.44)
+            }
 
             Text {
-                anchors.centerIn: parent
-                text: parent.parent.iconLabel
-                color: root.ink
+                text: row.hovered ? (row.active ? "切" : "接") : "⋮"
+                color: row.hovered ? root.pink : root.inkSoft
                 font.family: root.uiFont
-                font.pixelSize: 13
+                font.pixelSize: 14
                 font.weight: Font.Bold
             }
         }
 
-        ColumnLayout {
-            Layout.fillWidth: true
-            spacing: 1
-
-            Text {
-                Layout.fillWidth: true
-                text: parent.parent.name
-                color: root.ink
-                font.family: root.uiFont
-                font.pixelSize: 11
-                font.weight: Font.Bold
-                elide: Text.ElideRight
-            }
-
-            SmallText {
-                Layout.fillWidth: true
-                text: parent.parent.detail
-                elide: Text.ElideRight
-            }
+        Behavior on scale {
+            NumberAnimation { duration: root.motionHover; easing.type: root.motionEaseHover }
         }
 
-        Rectangle {
-            Layout.preferredWidth: 8
-            Layout.preferredHeight: 8
-            radius: 4
-            color: parent.active ? "#4bd18b" : root.alpha(root.inkSoft, 0.44)
+        HoverHandler {
+            cursorShape: Qt.PointingHandCursor
+            onHoveredChanged: row.hovered = hovered
         }
 
-        Text {
-            text: "⋮"
-            color: root.inkSoft
-            font.family: root.uiFont
-            font.pixelSize: 16
-            font.weight: Font.Bold
+        TapHandler {
+            acceptedButtons: Qt.LeftButton
+            onTapped: row.clicked()
         }
     }
 
@@ -2623,19 +2893,36 @@ Item {
         property int bars: 4
         property bool secure: true
         property bool active: false
+        property bool hovered: false
         property int entryDelay: 130
         signal clicked()
 
         implicitHeight: 38
+        scale: hovered ? 1.012 : 1
         opacity: root.stageOpacity(entryDelay, 180)
         transform: Translate {
             y: root.stageTranslateY(wifiRow.entryDelay, 7)
+        }
+        Behavior on scale {
+            NumberAnimation {
+                duration: root.motionHover
+                easing.type: root.motionEaseHover
+            }
         }
 
         Rectangle {
             anchors.fill: parent
             radius: 8
-            color: parent.active ? root.alpha(root.pink, 0.16) : "transparent"
+            color: parent.active ? root.alpha(root.pink, 0.16) : (parent.hovered ? root.alpha(root.card, 0.30) : "transparent")
+            border.width: 1
+            border.color: parent.hovered ? root.alpha(root.pink, 0.22) : "transparent"
+
+            Behavior on color {
+                ColorAnimation {
+                    duration: root.motionHover
+                    easing.type: root.motionEaseHover
+                }
+            }
         }
 
         RowLayout {
@@ -2678,8 +2965,17 @@ Item {
 
         MouseArea {
             anchors.fill: parent
+            acceptedButtons: Qt.LeftButton
             cursorShape: Qt.PointingHandCursor
-            onClicked: parent.clicked()
+            hoverEnabled: true
+            preventStealing: true
+            onEntered: wifiRow.hovered = true
+            onExited: wifiRow.hovered = false
+            onCanceled: wifiRow.hovered = false
+            onClicked: function(mouse) {
+                mouse.accepted = true
+                wifiRow.clicked()
+            }
         }
     }
 
@@ -2882,7 +3178,7 @@ Item {
             width: 20
             height: 20
             radius: 10
-            scale: root.stagePopScale(slider.entryDelay, 0.8, 1.15, 1.0)
+            scale: root.stagePopScale(slider.entryDelay, 0.92, 1.06, 1.0)
             color: root.alpha(root.card, 0.92)
             border.width: 1
             border.color: root.alpha(root.pink, 0.22)
@@ -2918,7 +3214,7 @@ Item {
         Layout.preferredHeight: 24
         radius: height / 2
         opacity: root.stageOpacity(entryDelay, 160)
-        scale: root.stagePopScale(entryDelay, 0.9, 1.04, 1.0)
+        scale: root.stagePopScale(entryDelay, 0.96, 1.018, 1.0)
         color: checked ? root.pink : root.alpha(root.lilac, 0.20)
 
         Rectangle {
@@ -2931,8 +3227,8 @@ Item {
 
             Behavior on x {
                 NumberAnimation {
-                    duration: 130
-                    easing.type: Easing.OutCubic
+                    duration: root.motionHover
+                    easing.type: root.motionEaseHover
                 }
             }
         }
@@ -3033,7 +3329,7 @@ Item {
         property int entryDelay: 40
         property real entryRotate: 0
         property real entryStartScale: 0.88
-        property real entryPeakScale: 1.06
+        property real entryPeakScale: 1.025
 
         opacity: root.stageOpacity(entryDelay, 180)
         rotation: root.stageRotation(entryDelay, entryRotate)

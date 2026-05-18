@@ -4,10 +4,12 @@ set -euo pipefail
 state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/velora-shell"
 state_file="${state_dir}/theme"
 opacity_file="${state_dir}/opacity"
+bar_opacity_file="${state_dir}/bar-opacity"
 glow_file="${state_dir}/glow"
 border_file="${state_dir}/border"
 layout_file="${state_dir}/layout"
 language_file="${state_dir}/language"
+visualizer_file="${state_dir}/visualizer"
 command="${1:-get}"
 
 case "$command" in
@@ -17,6 +19,34 @@ case "$command" in
     else
       printf 'default\n'
     fi
+    ;;
+  dump)
+    theme="default"
+    opacity="auto"
+    bar_opacity="auto"
+    glow="auto"
+    border="auto"
+    layout="left|1"
+    language="ja"
+    visualizer="0.46"
+
+    [[ -s "$state_file" ]] && theme="$(cat "$state_file")"
+    [[ -s "$opacity_file" ]] && opacity="$(cat "$opacity_file")"
+    [[ -s "$bar_opacity_file" ]] && bar_opacity="$(cat "$bar_opacity_file")"
+    [[ -s "$glow_file" ]] && glow="$(cat "$glow_file")"
+    [[ -s "$border_file" ]] && border="$(cat "$border_file")"
+    [[ -s "$layout_file" ]] && layout="$(cat "$layout_file")"
+    [[ -s "$language_file" ]] && language="$(cat "$language_file")"
+    [[ -s "$visualizer_file" ]] && visualizer="$(cat "$visualizer_file")"
+
+    printf 'theme|%s\n' "$theme"
+    printf 'opacity|%s\n' "$opacity"
+    printf 'barOpacity|%s\n' "$bar_opacity"
+    printf 'glow|%s\n' "$glow"
+    printf 'border|%s\n' "$border"
+    printf 'layout|%s\n' "$layout"
+    printf 'language|%s\n' "$language"
+    printf 'visualizer|%s\n' "$visualizer"
     ;;
   set)
     theme="${2:-default}"
@@ -45,10 +75,34 @@ case "$command" in
         printf '%s|%s|%s\n' "$sidebar" "$popup" "$card" > "$opacity_file"
         ;;
       reset)
-        rm -f "$opacity_file"
+        rm -f "$opacity_file" "$bar_opacity_file"
         ;;
       *)
         printf 'usage: %s opacity get|set|reset [sidebar popup card]\n' "$0" >&2
+        exit 2
+        ;;
+    esac
+    ;;
+  bar-opacity)
+    subcommand="${2:-get}"
+    case "$subcommand" in
+      get)
+        if [[ -s "$bar_opacity_file" ]]; then
+          cat "$bar_opacity_file"
+        else
+          printf 'auto\n'
+        fi
+        ;;
+      set)
+        opacity="${3:-auto}"
+        mkdir -p "$state_dir"
+        printf '%s\n' "$opacity" > "$bar_opacity_file"
+        ;;
+      reset)
+        rm -f "$bar_opacity_file"
+        ;;
+      *)
+        printf 'usage: %s bar-opacity get|set|reset [opacity]\n' "$0" >&2
         exit 2
         ;;
     esac
@@ -173,8 +227,32 @@ case "$command" in
         ;;
     esac
     ;;
+  visualizer)
+    subcommand="${2:-get}"
+    case "$subcommand" in
+      get)
+        if [[ -s "$visualizer_file" ]]; then
+          cat "$visualizer_file"
+        else
+          printf '0.46\n'
+        fi
+        ;;
+      set)
+        strength="${3:-0.46}"
+        mkdir -p "$state_dir"
+        printf '%s\n' "$strength" > "$visualizer_file"
+        ;;
+      reset)
+        rm -f "$visualizer_file"
+        ;;
+      *)
+        printf 'usage: %s visualizer get|set|reset [strength]\n' "$0" >&2
+        exit 2
+        ;;
+    esac
+    ;;
   *)
-    printf 'usage: %s get|set [theme] | opacity get|set|reset [sidebar popup card] | glow get|set|reset [general sidebar_border popup_border icon text] | border get|set|reset [adapt|manual hue] | layout get|set|reset [left|right] [0|1] | language get|set|reset [ja|en|pt-BR]\n' "$0" >&2
+    printf 'usage: %s get|dump|set [theme] | opacity get|set|reset [sidebar popup card] | bar-opacity get|set|reset [opacity] | glow get|set|reset [general sidebar_border popup_border icon text] | border get|set|reset [adapt|manual hue] | layout get|set|reset [left|right] [0|1] | language get|set|reset [ja|en|pt-BR] | visualizer get|set|reset [strength]\n' "$0" >&2
     exit 2
     ;;
 esac

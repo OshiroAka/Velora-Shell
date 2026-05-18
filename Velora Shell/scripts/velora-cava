@@ -47,9 +47,9 @@ write_config() {
     cat > "$config_path" <<EOF
 [general]
 bars = ${bars}
-framerate = 26
+framerate = 60
 autosens = 1
-sensitivity = 140
+sensitivity = 155
 
 [input]
 method = ${method}

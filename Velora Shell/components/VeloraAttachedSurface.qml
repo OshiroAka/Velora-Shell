@@ -16,14 +16,14 @@ Item {
     readonly property bool attachedRight: attachSide === "right"
     readonly property color glass: theme ? (sidebarMaterial && darkSoft ? theme.withAlpha(theme.surfaceSidebar, Math.min(theme.surfaceSidebar.a, 0.72)) : theme.surfaceSidebar) : Qt.rgba(1.0, 0.986, 1.0, 0.84)
     readonly property color borderSoft: theme ? (neon ? theme.popupBorderGlow : theme.borderSoft) : Qt.rgba(1, 1, 1, 0.74)
-    readonly property int slideOffset: 34
+    readonly property int slideOffset: sidebarMaterial ? 0 : 34
 
     opacity: revealProgress
-    scale: 0.982 + revealProgress * 0.018
+    scale: sidebarMaterial ? 1 : 0.982 + revealProgress * 0.018
     transformOrigin: attachedRight ? Item.Right : Item.Left
     transform: Translate {
         x: Math.round((1 - root.revealProgress) * (root.attachedRight ? root.slideOffset : -root.slideOffset))
-        y: Math.round((1 - root.revealProgress) * 5)
+        y: Math.round((1 - root.revealProgress) * (root.sidebarMaterial ? 0 : 5))
     }
     layer.enabled: false
 

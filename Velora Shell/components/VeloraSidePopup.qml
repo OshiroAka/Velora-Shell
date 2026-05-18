@@ -26,6 +26,7 @@ Item {
     property string searchMode: "apps"
     property int searchSelectedIndex: 0
     property var searchResults: []
+    property bool searchReady: false
     readonly property int cornerRadius: 13
     readonly property int arrowCenterY: {
         if (popupType === "volume")
@@ -36,6 +37,8 @@ Item {
             return 248
         if (popupType === "notifications")
             return 414
+        if (popupType === "wallpaperVisibility")
+            return 132
         return 38
     }
     readonly property bool pywalStyle: theme && theme.themeId === "pywal16"
@@ -51,9 +54,34 @@ Item {
     readonly property color borderSoft: theme ? theme.borderSoft : Qt.rgba(1, 1, 1, 0.78)
     readonly property string uiFont: "Noto Sans CJK JP"
     readonly property string monoFont: "JetBrainsMono Nerd Font"
+    readonly property string homeDir: Quickshell.env("HOME") || ""
+    readonly property string wallpaperDir: homeDir + "/Pictures/Wallpapers"
+    readonly property string scanScript: Quickshell.shellDir + "/scripts/velora-wallpaper-scan"
+    readonly property string visibilityScript: Quickshell.shellDir + "/scripts/velora-wallpaper-visibility"
+    readonly property var fallbackWallpapers: [
+        { kind: "static", label: "wp15708544", title: "wp15708544", category: "Static", path: wallpaperDir + "/static/wp15708544.jpg", preview: wallpaperDir + "/static/wp15708544.jpg" }
+    ]
+    property var wallpaperItems: []
+    property var hiddenWallpapers: []
+    property bool wallpaperVisibilityLoaded: false
+    property bool wallpaperVisibilitySaveQueued: false
     property real revealProgress: 0
     property real entryProgress: 0
     property real arrowVisualCenterY: arrowCenterY
+    readonly property bool backgroundPollingActive: open && visible
+    readonly property int motionFast: theme ? theme.motionFast : 120
+    readonly property int motionNormal: theme ? theme.motionNormal : 200
+    readonly property int motionSlow: theme ? theme.motionSlow : 320
+    readonly property int motionPanelIn: theme ? theme.motionPanelIn : 220
+    readonly property int motionPanelOut: theme ? theme.motionPanelOut : 140
+    readonly property int motionPanelGeometry: theme ? theme.motionPanelGeometry : 220
+    readonly property int motionHover: theme ? theme.motionHover : 120
+    readonly property int motionPanelOffset: theme ? Math.max(theme.motionPanelOffset, 46) : 46
+    readonly property int motionEaseEnter: theme ? theme.motionEaseEnter : Easing.OutCubic
+    readonly property int motionEaseExit: theme ? theme.motionEaseExit : Easing.InCubic
+    readonly property int motionEaseHover: theme ? theme.motionEaseHover : Easing.OutCubic
+    readonly property int motionEaseEmphasized: theme ? theme.motionEaseEmphasized : Easing.BezierSpline
+    readonly property var motionEmphasizedCurve: theme ? theme.motionEmphasizedCurve : [0.05, 0, 0.133, 0.06, 0.166, 0.4, 0.208, 0.82, 0.25, 1, 1, 1]
 
     signal closeRequested()
     signal pointerInsideChanged(bool inside)
@@ -67,7 +95,7 @@ Item {
     }
 
     function staged(delay, duration) {
-        return clamp01((entryProgress * 360 - delay * 0.16) / Math.max(1, duration * 0.58))
+        return clamp01((entryProgress * motionSlow - delay * 0.16) / Math.max(1, duration * 0.58))
     }
 
     function stageOpacity(delay, duration) {
@@ -112,6 +140,17 @@ Item {
     function restartEntryAnimation() {
         entryAnimation.stop()
         entryProgress = 0
+        entryAnimation.from = 0
+        entryAnimation.to = 1
+        entryAnimation.duration = motionSlow
+        entryAnimation.restart()
+    }
+
+    function exitEntryAnimation() {
+        entryAnimation.stop()
+        entryAnimation.from = entryProgress
+        entryAnimation.to = 0
+        entryAnimation.duration = motionPanelOut
         entryAnimation.restart()
     }
 
@@ -119,8 +158,22 @@ Item {
         revealAnimation.stop()
         revealAnimation.from = revealProgress
         revealAnimation.to = open ? 1 : 0
-        revealAnimation.duration = open ? 380 : 170
+        revealAnimation.duration = open ? motionPanelIn : motionPanelOut
         revealAnimation.restart()
+    }
+
+    function refreshStatusQueries() {
+        if (!backgroundPollingActive || typeof volumeQuery === "undefined")
+            return
+
+        if (!volumeQuery.running)
+            volumeQuery.running = true
+        if (!brightnessQuery.running)
+            brightnessQuery.running = true
+        if (!wifiQuery.running)
+            wifiQuery.running = true
+        if (!notificationQuery.running)
+            notificationQuery.running = true
     }
 
     HoverHandler {
@@ -129,11 +182,15 @@ Item {
 
     onOpenChanged: {
         animateReveal()
-        if (open)
+        if (open) {
             restartEntryAnimation()
-        else {
-            entryAnimation.stop()
-            entryProgress = 0
+            if (popupType === "search")
+                ensureSearchReady()
+            refreshStatusQueries()
+            if (popupType === "wallpaperVisibility")
+                ensureWallpaperVisibilityLoaded()
+        } else {
+            exitEntryAnimation()
         }
     }
 
@@ -142,12 +199,19 @@ Item {
             if (revealProgress <= 0.001)
                 animateReveal()
             restartEntryAnimation()
+            refreshStatusQueries()
         }
     }
 
     onPopupTypeChanged: {
         if (visible)
             restartEntryAnimation()
+        if (open)
+            refreshStatusQueries()
+        if (popupType === "search" && open)
+            ensureSearchReady()
+        if (popupType === "wallpaperVisibility" && open)
+            ensureWallpaperVisibilityLoaded()
     }
 
     function shellQuote(text) {
@@ -223,12 +287,19 @@ Item {
 
         searchResults = out.slice(0, 4)
         searchSelectedIndex = Math.max(0, Math.min(searchSelectedIndex, Math.max(0, searchResults.length - 1)))
+        searchReady = true
+    }
+
+    function ensureSearchReady() {
+        if (!searchReady)
+            rebuildSearch()
     }
 
     function setSearchMode(mode) {
         searchMode = mode
         searchSelectedIndex = 0
-        rebuildSearch()
+        if (!open || popupType !== "search")
+            searchReady = false
     }
 
     function stepSearch(delta) {
@@ -286,7 +357,8 @@ Item {
         if (!ssid || ssid.length <= 0)
             return
 
-        runCommand("nmcli dev wifi connect " + shellQuote(ssid) + " >/dev/null 2>&1 || true")
+        const quotedSsid = shellQuote(ssid)
+        runCommand("if nmcli -t -f NAME connection show | grep -Fx -- " + quotedSsid + " >/dev/null 2>&1; then nmcli connection up id " + quotedSsid + " >/dev/null 2>&1 || nmcli dev wifi connect " + quotedSsid + " >/dev/null 2>&1 || true; else nmcli dev wifi connect " + quotedSsid + " >/dev/null 2>&1 || (command -v nm-connection-editor >/dev/null 2>&1 && nm-connection-editor >/dev/null 2>&1 &); fi")
         wifiRefresh.restart()
     }
 
@@ -310,15 +382,134 @@ Item {
         return 1
     }
 
+    function wallpaperKey(entry) {
+        if (!entry)
+            return ""
+        return String(entry.path || "")
+    }
+
+    function wallpaperTitle(entry) {
+        if (!entry)
+            return "Wallpaper"
+        return entry.title || entry.label || basename(entry.path)
+    }
+
+    function displaySource(entry) {
+        if (!entry)
+            return ""
+        if (entry.preview && String(entry.preview).length > 0)
+            return entry.preview
+        if ((entry.kind || "static") !== "engine")
+            return entry.path || ""
+        return ""
+    }
+
+    function basename(path) {
+        var name = String(path || "").split("/").pop()
+        var dot = name.lastIndexOf(".")
+        if (dot > 0)
+            name = name.slice(0, dot)
+        return name.replace(/[-_]+/g, " ")
+    }
+
+    function kindCategory(kind) {
+        if (kind === "live")
+            return "MPV"
+        if (kind === "engine")
+            return "Engine"
+        return "Static"
+    }
+
+    function isWallpaperHidden(entry) {
+        const key = wallpaperKey(entry)
+        return key.length > 0 && hiddenWallpapers.indexOf(key) >= 0
+    }
+
+    function visibleWallpaperCount() {
+        var count = 0
+        for (var i = 0; i < wallpaperItems.length; ++i) {
+            if (!isWallpaperHidden(wallpaperItems[i]))
+                count += 1
+        }
+        return count
+    }
+
+    function ensureWallpaperVisibilityLoaded() {
+        if (!wallpaperVisibilityLoaded && !wallpaperScanProcess.running) {
+            wallpaperScanProcess.running = true
+            wallpaperVisibilityLoaded = true
+        }
+        if (!wallpaperVisibilityLoadProcess.running)
+            wallpaperVisibilityLoadProcess.running = true
+    }
+
+    function toggleWallpaperHidden(entry) {
+        const key = wallpaperKey(entry)
+        if (key.length <= 0)
+            return
+
+        var next = hiddenWallpapers.slice()
+        const idx = next.indexOf(key)
+        if (idx >= 0)
+            next.splice(idx, 1)
+        else
+            next.push(key)
+
+        hiddenWallpapers = next
+        queueWallpaperVisibilitySave()
+    }
+
+    function hideAllWallpapers() {
+        var next = []
+        var seen = {}
+        for (var i = 0; i < wallpaperItems.length; ++i) {
+            const key = wallpaperKey(wallpaperItems[i])
+            if (key.length > 0 && !seen[key]) {
+                seen[key] = true
+                next.push(key)
+            }
+        }
+
+        hiddenWallpapers = next
+        queueWallpaperVisibilitySave()
+    }
+
+    function showAllWallpapers() {
+        hiddenWallpapers = []
+        queueWallpaperVisibilitySave()
+    }
+
+    function queueWallpaperVisibilitySave() {
+        wallpaperVisibilitySaveQueued = true
+        wallpaperVisibilitySaveDebounce.restart()
+    }
+
+    function flushWallpaperVisibilitySave() {
+        if (wallpaperVisibilitySaveProcess.running)
+            return
+
+        wallpaperVisibilitySaveQueued = false
+        wallpaperVisibilitySaveProcess.command = [visibilityScript, "set", JSON.stringify(hiddenWallpapers)]
+        wallpaperVisibilitySaveProcess.running = true
+    }
+
     function dismissNotification(notificationId) {
         if (notificationId === undefined || notificationId === null || String(notificationId).length <= 0)
             return
 
-        runCommand("makoctl dismiss -n " + String(notificationId) + " >/dev/null 2>&1 || true")
+        removeNotificationById(notificationId)
+        if (!dismissTrackedNotification(notificationId))
+            runCommand("makoctl dismiss -n " + String(notificationId) + " >/dev/null 2>&1 || true")
         notificationRefresh.restart()
     }
 
     function clearNotifications() {
+        var values = trackedNotificationValues()
+        for (var i = values.length - 1; i >= 0; --i) {
+            if (values[i])
+                values[i].dismiss()
+        }
+
         notificationModel.clear()
         runCommand("makoctl dismiss --all >/dev/null 2>&1 || true")
     }
@@ -332,7 +523,7 @@ Item {
     }
 
     function notificationApp(notification) {
-        return (notification && (notification.appName || notification.app || notification.application || notification.desktopEntry || notification["app-name"])) || "System"
+        return (notification && (notification.appName || notification.app || notification.app_name || notification.application || notification.desktopEntry || notification.desktop_entry || notification["app-name"])) || "System"
     }
 
     function notificationTime(notification) {
@@ -359,45 +550,132 @@ Item {
         }
     }
 
+    function upsertNotification(raw) {
+        if (!raw)
+            return
+
+        var item = root.normalizeNotification(raw)
+        item.id = String(item.id || "")
+        if (item.summary.length <= 0 && item.body.length <= 0)
+            return
+        if (item.timeText === "now")
+            item.timeText = Qt.formatTime(new Date(), "HH:mm")
+
+        for (var i = 0; i < notificationModel.count; ++i) {
+            var current = notificationModel.get(i)
+            if ((item.id.length > 0 && current.id === item.id)
+                    || (current.app === item.app && current.summary === item.summary)) {
+                notificationModel.set(i, item)
+                return
+            }
+        }
+
+        notificationModel.insert(0, item)
+        while (notificationModel.count > 8)
+            notificationModel.remove(notificationModel.count - 1)
+    }
+
+    function dismissTrackedNotification(notificationId) {
+        const id = String(notificationId || "")
+        if (id.length <= 0)
+            return false
+
+        var values = trackedNotificationValues()
+        for (var i = 0; i < values.length; ++i) {
+            if (values[i] && String(values[i].id || "") === id) {
+                values[i].dismiss()
+                return true
+            }
+        }
+
+        return false
+    }
+
+    function removeNotificationById(notificationId) {
+        const id = String(notificationId || "")
+        if (id.length <= 0)
+            return
+
+        for (var i = notificationModel.count - 1; i >= 0; --i) {
+            if (notificationModel.get(i).id === id)
+                notificationModel.remove(i)
+        }
+    }
+
+    function trackedNotificationValues() {
+        const tracked = NotificationServer.trackedNotifications
+        return tracked && tracked.values ? tracked.values : []
+    }
+
+    function syncTrackedNotifications() {
+        var values = trackedNotificationValues()
+        notificationModel.clear()
+
+        for (var i = values.length - 1; i >= 0; --i)
+            upsertNotification(values[i])
+    }
+
     Component.onCompleted: {
-        rebuildSearch()
-        volumeQuery.running = true
-        brightnessQuery.running = true
-        wifiQuery.running = true
+        syncTrackedNotifications()
+        if (open && popupType === "search")
+            ensureSearchReady()
+        refreshStatusQueries()
     }
 
     onSearchQueryChanged: {
         searchSelectedIndex = 0
-        rebuildSearch()
+        if (open && popupType === "search")
+            rebuildSearch()
+        else
+            searchReady = false
     }
 
     onSearchModeChanged: {
         searchSelectedIndex = 0
-        rebuildSearch()
+        if (open && popupType === "search")
+            rebuildSearch()
+        else
+            searchReady = false
     }
 
     Connections {
         target: DesktopEntries.applications
 
         function onValuesChanged() {
-            root.rebuildSearch()
+            if (root.open && root.popupType === "search")
+                root.rebuildSearch()
+            else
+                root.searchReady = false
+        }
+    }
+
+    Connections {
+        target: NotificationServer
+
+        function onNotification(notification) {
+            if (!notification)
+                return
+
+            notification.tracked = true
+            root.upsertNotification(notification)
+            notification.closed.connect(function() {
+                root.removeNotificationById(notification.id)
+            })
+        }
+
+        function onTrackedNotificationsChanged() {
+            root.syncTrackedNotifications()
         }
     }
 
     Timer {
         interval: 7000
-        running: true
+        running: root.backgroundPollingActive
         repeat: true
+        triggeredOnStart: true
         onTriggered: {
-            if (!volumeQuery.running)
-                volumeQuery.running = true
-            if (!brightnessQuery.running)
-                brightnessQuery.running = true
-        if (!wifiQuery.running)
-            wifiQuery.running = true
-        if (!notificationQuery.running)
-            notificationQuery.running = true
-    }
+            root.refreshStatusQueries()
+        }
     }
 
     Timer {
@@ -405,6 +683,8 @@ Item {
         interval: 800
         repeat: false
         onTriggered: {
+            if (!root.backgroundPollingActive)
+                return
             if (!wifiQuery.running)
                 wifiQuery.running = true
             if (!notificationQuery.running)
@@ -417,6 +697,8 @@ Item {
         interval: 1200
         repeat: false
         onTriggered: {
+            if (!root.backgroundPollingActive)
+                return
             if (!notificationQuery.running)
                 notificationQuery.running = true
         }
@@ -445,11 +727,13 @@ Item {
             running = false
             if (root.pendingCommand !== root.activeCommand)
                 commandDebounce.restart()
-            if (!volumeQuery.running)
-                volumeQuery.running = true
-            if (!brightnessQuery.running)
-                brightnessQuery.running = true
-            wifiRefresh.restart()
+            if (root.backgroundPollingActive) {
+                if (!volumeQuery.running)
+                    volumeQuery.running = true
+                if (!brightnessQuery.running)
+                    brightnessQuery.running = true
+                wifiRefresh.restart()
+            }
         }
     }
 
@@ -545,7 +829,7 @@ Item {
         id: notificationQuery
 
         running: false
-        command: ["bash", "-lc", "out=$(makoctl list -j 2>/dev/null); if [ -n \"$out\" ]; then printf '%s\\n' \"$out\"; else printf '[]\\n'; fi"]
+        command: ["bash", "-lc", "if command -v makoctl >/dev/null 2>&1; then makoctl list -j 2>/dev/null | python3 -c 'import sys,json; raw=sys.stdin.read().strip() or \"[]\"; print(json.dumps(json.loads(raw)))' 2>/dev/null || printf '[]\\n'; else printf '[]\\n'; fi"]
 
         stdout: SplitParser {
             onRead: function(lineRaw) {
@@ -556,6 +840,11 @@ Item {
                 try {
                     var parsed = JSON.parse(line)
                     var items = Array.isArray(parsed) ? parsed : (parsed.data || parsed.notifications || [])
+
+                    if (trackedNotificationValues().length > 0) {
+                        root.syncTrackedNotifications()
+                        return
+                    }
 
                     notificationModel.clear()
                     for (var i = 0; i < items.length; ++i) {
@@ -571,13 +860,104 @@ Item {
         onExited: running = false
     }
 
+    Process {
+        id: wallpaperScanProcess
+
+        running: false
+        property var tmp: []
+        command: [root.scanScript]
+
+        onStarted: tmp = []
+
+        stdout: SplitParser {
+            onRead: function(data) {
+                const line = String(data).trim()
+                if (!line || line === "BEGIN")
+                    return
+
+                if (line === "END") {
+                    root.wallpaperItems = wallpaperScanProcess.tmp.length > 0 ? wallpaperScanProcess.tmp.slice() : root.fallbackWallpapers
+                    return
+                }
+
+                const parts = line.split("|")
+                if (parts.length < 3)
+                    return
+
+                const kind = parts[0].toLowerCase()
+                const path = parts[1]
+                const preview = parts[2]
+                const title = parts.length > 3 && parts.slice(3).join("|").length > 0
+                    ? parts.slice(3).join("|")
+                    : root.basename(path)
+
+                wallpaperScanProcess.tmp.push({
+                    kind: kind,
+                    path: path,
+                    preview: preview,
+                    title: title,
+                    label: title,
+                    category: root.kindCategory(kind)
+                })
+            }
+        }
+
+        onExited: {
+            running = false
+            if (tmp.length > 0)
+                root.wallpaperItems = tmp.slice()
+            else if (root.wallpaperItems.length <= 0)
+                root.wallpaperItems = root.fallbackWallpapers
+        }
+    }
+
+    Process {
+        id: wallpaperVisibilityLoadProcess
+
+        running: false
+        command: [root.visibilityScript, "list"]
+
+        stdout: SplitParser {
+            onRead: function(data) {
+                try {
+                    const parsed = JSON.parse(String(data).trim() || "[]")
+                    root.hiddenWallpapers = Array.isArray(parsed) ? parsed : []
+                } catch(e) {
+                    root.hiddenWallpapers = []
+                }
+            }
+        }
+
+        onExited: running = false
+    }
+
+    Timer {
+        id: wallpaperVisibilitySaveDebounce
+
+        interval: 180
+        repeat: false
+        onTriggered: root.flushWallpaperVisibilitySave()
+    }
+
+    Process {
+        id: wallpaperVisibilitySaveProcess
+
+        running: false
+        command: [root.visibilityScript, "set", "[]"]
+        onExited: {
+            running = false
+            if (root.wallpaperVisibilitySaveQueued)
+                wallpaperVisibilitySaveDebounce.restart()
+        }
+    }
+
     opacity: revealProgress
-    scale: 0.99 + revealProgress * 0.01
+    scale: 0.972 + revealProgress * 0.028
     transformOrigin: attachedRight ? Item.Right : Item.Left
     activeFocusOnTab: true
 
     transform: Translate {
-        x: Math.round((1 - root.revealProgress) * (root.attachedRight ? 30 : -30))
+        x: Math.round((1 - root.revealProgress) * (root.attachedRight ? root.motionPanelOffset : -root.motionPanelOffset))
         y: 0
     }
 
@@ -588,9 +968,8 @@ Item {
         property: "revealProgress"
         from: root.revealProgress
         to: root.open ? 1 : 0
-        duration: root.open ? 380 : 170
-        easing.type: Easing.BezierSpline
-        easing.bezierCurve: [0.05, 0, 0.133, 0.06, 0.166, 0.4, 0.208, 0.82, 0.25, 1, 1, 1]
+        duration: root.open ? root.motionPanelIn : root.motionPanelOut
+        easing.type: root.open ? root.motionEaseEnter : root.motionEaseExit
     }
 
     NumberAnimation {
@@ -600,9 +979,9 @@ Item {
         property: "entryProgress"
         from: 0
         to: 1
-        duration: 300
-        easing.type: Easing.BezierSpline
-        easing.bezierCurve: [0.05, 0, 0.133, 0.06, 0.166, 0.4, 0.208, 0.82, 0.25, 1, 1, 1]
+        duration: root.motionSlow
+        easing.type: root.motionEaseEmphasized
+        easing.bezierCurve: root.motionEmphasizedCurve
     }
 
     Rectangle {
@@ -630,9 +1009,9 @@ Item {
 
         Behavior on y {
             NumberAnimation {
-                duration: 250
-                easing.type: Easing.BezierSpline
-                easing.bezierCurve: [0.05, 0, 0.133, 0.06, 0.166, 0.4, 0.208, 0.82, 0.25, 1, 1, 1]
+                duration: root.motionPanelGeometry
+                easing.type: root.motionEaseEmphasized
+                easing.bezierCurve: root.motionEmphasizedCurve
             }
         }
     }
@@ -718,6 +1097,231 @@ Item {
             anchors.fill: parent
             anchors.margins: 16
             visible: root.popupType === "notifications"
+        }
+
+        WallpaperVisibilityView {
+            anchors.fill: parent
+            anchors.margins: 15
+            visible: root.popupType === "wallpaperVisibility"
+        }
+    }
+
+    component WallpaperVisibilityView: Item {
+        id: visibilityView
+
+        opacity: root.stageOpacity(35, 220)
+        scale: root.stageScale(35, 0.985, 1)
+        transformOrigin: Item.TopRight
+
+        transform: Translate {
+            y: root.stageTranslateY(35, 10)
+        }
+
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 10
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 8
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 2
+
+                    HeaderText {
+                        Layout.fillWidth: true
+                        text: "表示する壁紙"
+                    }
+
+                    SmallText {
+                        Layout.fillWidth: true
+                        text: root.visibleWallpaperCount() + "/" + root.wallpaperItems.length + " visible"
+                    }
+                }
+
+                MiniButton {
+                    label: "全部隠す"
+                    onClicked: root.hideAllWallpapers()
+                }
+
+                MiniButton {
+                    label: "全部戻す"
+                    onClicked: root.showAllWallpapers()
+                }
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 1
+                color: root.line
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                radius: 11
+                color: root.alpha(root.card, 0.24)
+                border.width: 1
+                border.color: root.alpha(root.borderSoft, 0.34)
+                clip: true
+
+                ListView {
+                    id: wallpaperVisibilityList
+
+                    anchors.fill: parent
+                    anchors.margins: 7
+                    clip: true
+                    boundsBehavior: Flickable.StopAtBounds
+                    spacing: 7
+                    model: root.wallpaperItems.length
+
+                    delegate: VisibilityWallpaperRow {
+                        required property int index
+
+                        width: wallpaperVisibilityList.width
+                        entry: root.wallpaperItems[index]
+                        hidden: root.isWallpaperHidden(root.wallpaperItems[index])
+                        onClicked: root.toggleWallpaperHidden(entry)
+                    }
+                }
+
+                Text {
+                    anchors.centerIn: parent
+                    visible: root.wallpaperItems.length <= 0
+                    text: wallpaperScanProcess.running ? "読み込み中..." : "壁紙が見つかりません"
+                    color: root.inkSoft
+                    font.family: root.uiFont
+                    font.pixelSize: 12
+                    font.weight: Font.DemiBold
+                }
+            }
+        }
+    }
+
+    component VisibilityWallpaperRow: Rectangle {
+        id: row
+
+        property var entry: null
+        property bool hidden: false
+        property bool hovered: false
+        signal clicked()
+
+        height: 58
+        radius: 11
+        color: hidden
+            ? root.alpha(root.card, hovered ? 0.25 : 0.17)
+            : (hovered ? root.alpha(root.card, 0.54) : root.alpha(root.card, 0.34))
+        border.width: 1
+        border.color: hidden ? root.alpha(root.inkSoft, 0.18) : (hovered ? root.alpha(root.pink, 0.30) : root.alpha(root.borderSoft, 0.34))
+        antialiasing: true
+        opacity: hidden ? 0.72 : 1
+
+        Behavior on color { ColorAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
+        Behavior on border.color { ColorAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
+        Behavior on opacity { NumberAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
+
+        Image {
+            id: preview
+
+            x: 7
+            y: 7
+            width: 58
+            height: 44
+            source: root.displaySource(row.entry)
+            fillMode: Image.PreserveAspectCrop
+            sourceSize.width: 160
+            sourceSize.height: 110
+            asynchronous: true
+            smooth: true
+            mipmap: true
+            opacity: row.hidden ? 0.42 : 1
+        }
+
+        Rectangle {
+            x: preview.x
+            y: preview.y
+            width: preview.width
+            height: preview.height
+            radius: 8
+            color: row.hidden ? Qt.rgba(0.08, 0.07, 0.10, 0.30) : "transparent"
+            border.width: 1
+            border.color: root.alpha(root.borderSoft, 0.28)
+
+            Text {
+                anchors.centerIn: parent
+                visible: row.hidden
+                text: "非表示"
+                color: "white"
+                font.family: root.uiFont
+                font.pixelSize: 9
+                font.weight: Font.Bold
+            }
+        }
+
+        Column {
+            x: 76
+            y: 10
+            width: Math.max(72, parent.width - 132)
+            spacing: 4
+
+            Text {
+                width: parent.width
+                text: row.entry ? root.wallpaperTitle(row.entry) : ""
+                color: row.hidden ? root.inkSoft : root.ink
+                font.family: root.uiFont
+                font.pixelSize: 12
+                font.weight: Font.Bold
+                elide: Text.ElideRight
+            }
+
+            Text {
+                width: parent.width
+                text: row.entry ? (root.kindCategory(row.entry.kind || "static") + " / " + (row.entry.kind || "static")) : ""
+                color: root.inkSoft
+                font.family: root.uiFont
+                font.pixelSize: 10
+                font.weight: Font.Medium
+                elide: Text.ElideRight
+            }
+        }
+
+        Rectangle {
+            anchors {
+                right: parent.right
+                rightMargin: 8
+                verticalCenter: parent.verticalCenter
+            }
+
+            width: 42
+            height: 23
+            radius: 12
+            color: row.hidden ? root.alpha(root.pink, 0.22) : root.alpha(root.inkSoft, 0.13)
+            border.width: 1
+            border.color: row.hidden ? root.alpha(root.pink, 0.34) : root.alpha(root.inkSoft, 0.18)
+
+            Text {
+                anchors.centerIn: parent
+                text: row.hidden ? "表示" : "隠す"
+                color: row.hidden ? root.pink : root.inkSoft
+                font.family: root.uiFont
+                font.pixelSize: 9
+                font.weight: Font.Bold
+            }
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            hoverEnabled: true
+            acceptedButtons: Qt.LeftButton
+            preventStealing: true
+            cursorShape: Qt.PointingHandCursor
+            onEntered: row.hovered = true
+            onExited: row.hovered = false
+            onClicked: function(mouse) {
+                mouse.accepted = true
+                row.clicked()
+            }
         }
     }
 
@@ -1081,7 +1685,7 @@ Item {
                     entryDelay: 110
                     entryRotate: -12
                     entryStartScale: 0.85
-                    entryPeakScale: 1.05
+                    entryPeakScale: 1.025
                 }
 
                 TitleText {
@@ -1644,19 +2248,36 @@ Item {
         property int bars: 4
         property bool secure: true
         property bool active: false
+        property bool hovered: false
         property int entryDelay: 130
         signal clicked()
 
         implicitHeight: 38
+        scale: hovered ? 1.012 : 1
         opacity: root.stageOpacity(entryDelay, 180)
         transform: Translate {
             y: root.stageTranslateY(wifiRow.entryDelay, 7)
+        }
+        Behavior on scale {
+            NumberAnimation {
+                duration: root.motionHover
+                easing.type: root.motionEaseHover
+            }
         }
 
         Rectangle {
             anchors.fill: parent
             radius: 8
-            color: parent.active ? root.alpha(root.pink, 0.16) : "transparent"
+            color: parent.active ? root.alpha(root.pink, 0.16) : (parent.hovered ? root.alpha(root.card, 0.30) : "transparent")
+            border.width: 1
+            border.color: parent.hovered ? root.alpha(root.pink, 0.22) : "transparent"
+
+            Behavior on color {
+                ColorAnimation {
+                    duration: root.motionHover
+                    easing.type: root.motionEaseHover
+                }
+            }
         }
 
         RowLayout {
@@ -1699,8 +2320,17 @@ Item {
 
         MouseArea {
             anchors.fill: parent
+            acceptedButtons: Qt.LeftButton
             cursorShape: Qt.PointingHandCursor
-            onClicked: parent.clicked()
+            hoverEnabled: true
+            preventStealing: true
+            onEntered: wifiRow.hovered = true
+            onExited: wifiRow.hovered = false
+            onCanceled: wifiRow.hovered = false
+            onClicked: function(mouse) {
+                mouse.accepted = true
+                wifiRow.clicked()
+            }
         }
     }
 
@@ -1853,6 +2483,49 @@ Item {
         }
     }
 
+    component MiniButton: Rectangle {
+        id: miniButton
+
+        property string label: ""
+        property bool hovered: false
+        signal clicked()
+
+        Layout.preferredWidth: Math.max(68, miniLabel.implicitWidth + 22)
+        Layout.preferredHeight: 28
+        radius: 14
+        color: hovered ? root.alpha(root.pink, 0.20) : root.alpha(root.card, 0.32)
+        border.width: 1
+        border.color: hovered ? root.alpha(root.pink, 0.34) : root.alpha(root.borderSoft, 0.34)
+        antialiasing: true
+
+        Behavior on color { ColorAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
+        Behavior on border.color { ColorAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
+
+        Text {
+            id: miniLabel
+
+            anchors.centerIn: parent
+            text: miniButton.label
+            color: miniButton.hovered ? root.pink : root.inkSoft
+            font.family: root.uiFont
+            font.pixelSize: 10
+            font.weight: Font.Bold
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            hoverEnabled: true
+            acceptedButtons: Qt.LeftButton
+            cursorShape: Qt.PointingHandCursor
+            onEntered: miniButton.hovered = true
+            onExited: miniButton.hovered = false
+            onClicked: function(mouse) {
+                mouse.accepted = true
+                miniButton.clicked()
+            }
+        }
+    }
+
     component SliderBar: Item {
         id: slider
 
@@ -1903,7 +2576,7 @@ Item {
             width: 20
             height: 20
             radius: 10
-            scale: root.stagePopScale(slider.entryDelay, 0.8, 1.15, 1.0)
+            scale: root.stagePopScale(slider.entryDelay, 0.92, 1.06, 1.0)
             color: root.alpha(root.card, 0.92)
             border.width: 1
             border.color: root.alpha(root.pink, 0.22)
@@ -1939,7 +2612,7 @@ Item {
         Layout.preferredHeight: 24
         radius: height / 2
         opacity: root.stageOpacity(entryDelay, 160)
-        scale: root.stagePopScale(entryDelay, 0.9, 1.04, 1.0)
+        scale: root.stagePopScale(entryDelay, 0.96, 1.018, 1.0)
         color: checked ? root.pink : root.alpha(root.lilac, 0.20)
 
         Rectangle {
@@ -1952,8 +2625,8 @@ Item {
 
             Behavior on x {
                 NumberAnimation {
-                    duration: 130
-                    easing.type: Easing.OutCubic
+                    duration: root.motionHover
+                    easing.type: root.motionEaseHover
                 }
             }
         }
@@ -2054,7 +2727,7 @@ Item {
         property int entryDelay: 40
         property real entryRotate: 0
         property real entryStartScale: 0.88
-        property real entryPeakScale: 1.06
+        property real entryPeakScale: 1.025
 
         opacity: root.stageOpacity(entryDelay, 180)
         rotation: root.stageRotation(entryDelay, entryRotate)

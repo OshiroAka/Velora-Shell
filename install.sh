@@ -169,10 +169,14 @@ pkg_for_command() {
         qs) printf 'quickshell' ;;
         hyprctl) printf 'hyprland' ;;
         python3) printf 'python' ;;
+        rsync) printf 'rsync' ;;
+        playerctl) printf 'playerctl' ;;
         wpctl) printf 'wireplumber' ;;
         nmcli) printf 'networkmanager' ;;
         makoctl) printf 'mako' ;;
+        cava) printf 'cava' ;;
         wal) printf 'python-pywal16' ;;
+        easyeffects) printf 'easyeffects calf lsp-plugins-lv2 zam-plugins-lv2' ;;
         xdg-open) printf 'xdg-utils' ;;
         awww) printf 'awww' ;;
         linux-wallpaperengine) printf 'linux-wallpaperengine' ;;
@@ -184,10 +188,14 @@ pkg_for_command() {
         qs) printf 'quickshell' ;;
         hyprctl) printf 'hyprland' ;;
         python3) printf 'python3' ;;
+        rsync) printf 'rsync' ;;
+        playerctl) printf 'playerctl' ;;
         wpctl) printf 'wireplumber' ;;
         nmcli) printf 'network-manager' ;;
         makoctl) printf 'mako-notifier' ;;
+        cava) printf 'cava' ;;
         wal) printf 'python3-pywal' ;;
+        easyeffects) printf 'easyeffects calf lsp-plugins-lv2 zam-plugins-lv2' ;;
         xdg-open) printf 'xdg-utils' ;;
         awww|linux-wallpaperengine) printf '' ;;
         *) printf '%s' "$cmd" ;;
@@ -198,10 +206,14 @@ pkg_for_command() {
         qs) printf 'quickshell' ;;
         hyprctl) printf 'hyprland' ;;
         python3) printf 'python3' ;;
+        rsync) printf 'rsync' ;;
+        playerctl) printf 'playerctl' ;;
         wpctl) printf 'wireplumber' ;;
         nmcli) printf 'NetworkManager' ;;
         makoctl) printf 'mako' ;;
+        cava) printf 'cava' ;;
         wal) printf 'python3-pywal' ;;
+        easyeffects) printf 'easyeffects calf lsp-plugins-lv2 zam-plugins-lv2' ;;
         xdg-open) printf 'xdg-utils' ;;
         awww|linux-wallpaperengine) printf '' ;;
         *) printf '%s' "$cmd" ;;
@@ -212,10 +224,14 @@ pkg_for_command() {
         qs) printf 'quickshell' ;;
         hyprctl) printf 'hyprland' ;;
         python3) printf 'python3' ;;
+        rsync) printf 'rsync' ;;
+        playerctl) printf 'playerctl' ;;
         wpctl) printf 'wireplumber' ;;
         nmcli) printf 'NetworkManager' ;;
         makoctl) printf 'mako' ;;
+        cava) printf 'cava' ;;
         wal) printf 'python3-pywal' ;;
+        easyeffects) printf 'easyeffects calf lsp-plugins-lv2 zam-plugins-lv2' ;;
         xdg-open) printf 'xdg-utils' ;;
         awww|linux-wallpaperengine) printf '' ;;
         *) printf '%s' "$cmd" ;;
@@ -229,7 +245,12 @@ pkg_for_command() {
 
 dependency_commands() {
   printf '%s\n' \
+    rsync \
+    playerctl \
+    wpctl \
+    cava \
     wal \
+    easyeffects \
     awww \
     mpvpaper \
     linux-wallpaperengine
@@ -349,9 +370,23 @@ install_runtime() {
       --exclude='.git' \
       --exclude='.gitignore' \
       --exclude='install.sh' \
+      --exclude='backups' \
+      --exclude='backups/***' \
       --exclude='*.bak*' \
+      --exclude='*.backup' \
+      --exclude='*.orig' \
+      --exclude='*.rej' \
+      --exclude='*~' \
+      --exclude='.#*' \
       --exclude='__pycache__' \
+      --exclude='__pycache__/***' \
       --exclude='*.pyc' \
+      --exclude='*.pyo' \
+      --exclude='.pytest_cache' \
+      --exclude='.mypy_cache' \
+      --exclude='.ruff_cache' \
+      --exclude='.qmlcache' \
+      --exclude='qmlcache' \
       --exclude='themes/pywal16.json' \
       --exclude='velora-shell-pngs' \
       "$SOURCE_DIR/" "$INSTALL_DIR/"
@@ -388,6 +423,7 @@ patch_hyprland() {
 layerrule = blur on, match:namespace ^velora-shell($|-.*)
 layerrule = blur_popups on, match:namespace ^velora-shell($|-.*)
 layerrule = ignore_alpha 0.02, match:namespace ^velora-shell($|-.*)
+bind = SUPER, K, exec, qs -c velora-shell ipc call velora wallpaper
 EOF
   log "Hyprland snippet written: $HYPR_INCLUDE"
 

@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Layouts
 import Qt5Compat.GraphicalEffects
+import Quickshell
 import Quickshell.Io
 
 Item {
@@ -8,20 +9,26 @@ Item {
 
     property var theme: null
     property alias panelMaskItem: panelSurface
+    property bool externalSurface: false
+    property real entryProgress: visible ? 1 : 0
     readonly property int cornerRadius: 22
     readonly property bool pywalStyle: theme && theme.themeId === "pywal16"
     readonly property bool neon: pywalStyle && theme.themeMode === "dark"
+    readonly property bool darkSoft: theme && theme.themeMode === "dark"
     readonly property color ink: theme ? theme.textPrimary : Qt.rgba(0.43, 0.35, 0.52, 0.88)
     readonly property color inkSoft: theme ? theme.textSecondary : Qt.rgba(0.56, 0.47, 0.63, 0.66)
     readonly property color inkFaint: theme ? theme.textMuted : Qt.rgba(0.58, 0.50, 0.66, 0.42)
     readonly property color pink: theme ? (pywalStyle ? theme.accentSecondary : theme.accentPrimary) : Qt.rgba(0.86, 0.45, 0.66, 0.86)
     readonly property color pinkSoft: theme ? theme.activeBg : Qt.rgba(0.94, 0.67, 0.80, 0.44)
     readonly property color lilac: theme ? (pywalStyle ? theme.accentPrimary : theme.accentSecondary) : Qt.rgba(0.62, 0.49, 0.74, 0.82)
-    readonly property color glass: theme ? theme.surfacePopup : Qt.rgba(1.0, 0.988, 0.998, 0.90)
-    readonly property color cardGlass: theme ? theme.surfaceCard : Qt.rgba(1, 1, 1, 0.78)
+    readonly property color glass: theme ? (externalSurface ? (darkSoft ? theme.withAlpha(theme.surfaceSidebar, Math.min(theme.surfaceSidebar.a, 0.72)) : theme.surfaceSidebar) : theme.surfacePopup) : Qt.rgba(1.0, 0.988, 0.998, externalSurface ? 0.66 : 0.90)
+    readonly property color cardGlass: theme ? (externalSurface && darkSoft ? theme.withAlpha(theme.surfaceCard, Math.min(theme.surfaceCard.a, 0.62)) : theme.surfaceCard) : Qt.rgba(1, 1, 1, externalSurface ? 0.70 : 0.78)
     readonly property color borderSoft: theme ? theme.borderSoft : Qt.rgba(1, 1, 1, 0.82)
     readonly property string uiFont: "Noto Sans CJK JP"
     readonly property string monoFont: "JetBrainsMono Nerd Font"
+    readonly property int motionHover: theme ? theme.motionHover : 120
+    readonly property int motionPanelGeometry: theme ? theme.motionPanelGeometry : 220
+    readonly property int motionEaseHover: theme ? theme.motionEaseHover : Easing.OutCubic
     readonly property var forecastDays: [
         { day: "火", icon: "suncloud", high: "22°", low: "14°" },
         { day: "水", icon: "cloud", high: "23°", low: "15°" },
@@ -57,18 +64,74 @@ Item {
     property real mediaProgress: 0.42
     property bool mediaPlaying: true
     property string mediaPlayer: ""
+    property bool mediaShuffle: false
+    property string mediaLoop: "None"
     property string mediaActionCommand: ""
+    readonly property string audioControlScript: Quickshell.shellDir + "/scripts/velora-audio-control"
+    property string audioActionCommand: ""
+    property real audioVolumePercent: 0.60
+    property bool audioMuted: false
+    property bool audioFxEnabled: false
+    property bool audioBassEnabled: false
+    property bool audioTrebleEnabled: false
+    property bool audioSurroundEnabled: false
+    property bool audioBoostEnabled: false
+    property string audioPreset: "Custom"
+    property string audioEngineState: "missing"
+    property string audioQueuedCommand: ""
+    property string audioGuardCommand: ""
+    property real audioStatusHoldUntil: 0
+    property bool audioEqDragging: false
+    property bool audioVolumeDragging: false
+    property real audioBand0: 0
+    property real audioBand1: 0
+    property real audioBand2: 0
+    property real audioBand3: 0
+    property real audioBand4: 0
+    property real audioBand5: 0
+    property real audioBand6: 0
     property bool compact: false
     property string activeSection: "weather"
     signal themeRequested()
+
+    function refreshActiveSection() {
+        if (!visible || typeof statsQuery === "undefined")
+            return
+
+        if (activeSection === "system" && !statsQuery.running)
+            statsQuery.running = true
+        if (activeSection === "weather" && !weatherQuery.running)
+            weatherQuery.running = true
+        if (activeSection === "media" && !mediaQuery.running)
+            mediaQuery.running = true
+        if (activeSection === "media" && !audioStatusQuery.running)
+            audioStatusQuery.running = true
+    }
+
+    onVisibleChanged: refreshActiveSection()
+    onActiveSectionChanged: refreshActiveSection()
 
     function alpha(colorValue, opacity) {
         return root.theme ? root.theme.alpha(colorValue, opacity) : Qt.rgba(colorValue.r, colorValue.g, colorValue.b, opacity)
     }
 
+    function clamp01(value) {
+        return Math.max(0, Math.min(1, Number(value) || 0))
+    }
+
+    function stage(delay, duration) {
+        if (!externalSurface)
+            return 1
+        return clamp01((entryProgress * 340 - delay) / Math.max(1, duration))
+    }
+
+    function stageY(delay, distance) {
+        return Math.round((1 - stage(delay, 210)) * distance)
+    }
+
     readonly property string statsCommand: "read -r up _ < /proc/uptime; up=${up%.*}; d=$((up/86400)); h=$(((up%86400)/3600)); m=$(((up%3600)/60)); if [ \"$d\" -gt 0 ]; then uptime=\"${d}d ${h}h\"; elif [ \"$h\" -gt 0 ]; then uptime=\"${h}h ${m}m\"; else uptime=\"${m}m\"; fi; read -r _ u1 n1 s1 i1 w1 irq1 sirq1 st1 _ < /proc/stat; t1=$((u1+n1+s1+i1+w1+irq1+sirq1+st1)); idle1=$((i1+w1)); sleep 0.2; read -r _ u2 n2 s2 i2 w2 irq2 sirq2 st2 _ < /proc/stat; t2=$((u2+n2+s2+i2+w2+irq2+sirq2+st2)); idle2=$((i2+w2)); dt=$((t2-t1)); di=$((idle2-idle1)); cpu=$((dt>0 ? (100*(dt-di)/dt) : 0)); ram=$(awk '/MemTotal/ {total=$2} /MemAvailable/ {avail=$2} END {printf \"%d|%.1f GB / %.0f GB\", (total-avail)*100/total, (total-avail)/1048576, total/1048576}' /proc/meminfo); disk=$(df -hP / 2>/dev/null | awk 'NR==2 {gsub(\"%\",\"\",$5); printf \"%s|%s / %s\", $5, $3, $2; exit}'); clock=$(awk -F: '/cpu MHz/ {printf \"%.1f GHz\", $2/1000; exit}' /proc/cpuinfo); net=$(awk 'NR>2 {rx+=$2; tx+=$10} END {printf \"%.0f Mbps\", (rx+tx)/1024/1024}' /proc/net/dev); batt=$(upower -i $(upower -e 2>/dev/null | grep BAT | head -1) 2>/dev/null | awk '/percentage/ {print $2; exit}'); printf '%s|%s|%s|%s|%s|%s|%s|%s\\n' \"$uptime\" \"${cpu:-0}\" \"$ram\" \"$disk\" \"${clock:-2.4 GHz}\" \"${net:-98 Mbps}\" \"${batt:-100%}\""
     readonly property string weatherCommand: "if command -v curl >/dev/null 2>&1; then curl -fsS --max-time 3 'https://wttr.in/?format=%l|%t|%C|%h|%w|%f&lang=ja' 2>/dev/null || true; fi"
-    readonly property string mediaCommand: "players=$(playerctl -l 2>/dev/null || true); pick=\"\"; for p in $players; do state=$(playerctl -p \"$p\" status 2>/dev/null || true); if [ \"$state\" = \"Playing\" ]; then pick=\"$p\"; break; fi; done; if [ -z \"$pick\" ]; then pick=$(printf '%s\\n' \"$players\" | sed -n '1p'); fi; [ -z \"$pick\" ] && exit 0; title=$(playerctl -p \"$pick\" metadata title 2>/dev/null || true); artist=$(playerctl -p \"$pick\" metadata artist 2>/dev/null || true); length=$(playerctl -p \"$pick\" metadata mpris:length 2>/dev/null || true); art=$(playerctl -p \"$pick\" metadata mpris:artUrl 2>/dev/null || true); pos=$(playerctl -p \"$pick\" position 2>/dev/null || true); status=$(playerctl -p \"$pick\" status 2>/dev/null || true); printf '%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n' \"$title\" \"$artist\" \"$length\" \"$art\" \"$pos\" \"$status\""
+    readonly property string mediaCommand: "players=$(playerctl -l 2>/dev/null || true); pick=\"\"; for p in $players; do state=$(playerctl -p \"$p\" status 2>/dev/null || true); if [ \"$state\" = \"Playing\" ]; then pick=\"$p\"; break; fi; done; if [ -z \"$pick\" ]; then pick=$(printf '%s\\n' \"$players\" | sed -n '1p'); fi; [ -z \"$pick\" ] && exit 0; title=$(playerctl -p \"$pick\" metadata title 2>/dev/null || true); artist=$(playerctl -p \"$pick\" metadata artist 2>/dev/null || true); length=$(playerctl -p \"$pick\" metadata mpris:length 2>/dev/null || true); art=$(playerctl -p \"$pick\" metadata mpris:artUrl 2>/dev/null || true); pos=$(playerctl -p \"$pick\" position 2>/dev/null || true); status=$(playerctl -p \"$pick\" status 2>/dev/null || true); shuffle=$(playerctl -p \"$pick\" shuffle 2>/dev/null || true); loop=$(playerctl -p \"$pick\" loop 2>/dev/null || true); printf '%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n' \"$title\" \"$artist\" \"$length\" \"$art\" \"$pos\" \"$status\" \"$pick\" \"$shuffle\" \"$loop\""
 
     function clampPercent(value) {
         return Math.max(0, Math.min(100, Number(value) || 0))
@@ -105,6 +168,10 @@ Item {
         return minutes + ":" + String(seconds).padStart(2, "0")
     }
 
+    function shellQuote(value) {
+        return "'" + String(value).replace(/'/g, "'\\''") + "'"
+    }
+
     function updateMediaClock() {
         let position = mediaPositionSeconds
 
@@ -119,12 +186,222 @@ Item {
         mediaProgress = mediaDurationSeconds > 0 ? Math.max(0, Math.min(1, position / mediaDurationSeconds)) : 0
     }
 
+    function mediaPlayerPrefix() {
+        return mediaPlayer.length > 0 ? "-p " + shellQuote(mediaPlayer) + " " : ""
+    }
+
+    function runMediaCommand(command) {
+        if (command.length === 0 || mediaAction.running)
+            return
+
+        mediaActionCommand = command
+        mediaAction.running = true
+    }
+
     function runMediaAction(action) {
         if (action.length === 0 || mediaAction.running)
             return
 
-        mediaActionCommand = mediaPlayer.length > 0 ? "playerctl -p " + mediaPlayer + " " + action + " 2>/dev/null || true" : "playerctl " + action + " 2>/dev/null || true"
-        mediaAction.running = true
+        if (action === "shuffle") {
+            runMediaCommand("playerctl " + mediaPlayerPrefix() + "shuffle Toggle 2>/dev/null || true")
+            return
+        }
+
+        if (action === "repeat") {
+            const nextLoop = mediaLoop === "None" || mediaLoop.length === 0 ? "Playlist" : "None"
+            runMediaCommand("playerctl " + mediaPlayerPrefix() + "loop " + nextLoop + " 2>/dev/null || true")
+            return
+        }
+
+        runMediaCommand("playerctl " + mediaPlayerPrefix() + action + " 2>/dev/null || true")
+    }
+
+    function seekMedia(progress) {
+        if (mediaDurationSeconds <= 0)
+            return
+
+        const seconds = Math.round(Math.max(0, Math.min(1, progress)) * mediaDurationSeconds)
+        mediaPositionSeconds = seconds
+        mediaSampleMs = Date.now()
+        updateMediaClock()
+        runMediaCommand("playerctl " + mediaPlayerPrefix() + "position " + seconds + " 2>/dev/null || true")
+    }
+
+    function audioBandValue(index) {
+        if (index === 0) return audioBand0
+        if (index === 1) return audioBand1
+        if (index === 2) return audioBand2
+        if (index === 3) return audioBand3
+        if (index === 4) return audioBand4
+        if (index === 5) return audioBand5
+        return audioBand6
+    }
+
+    function setAudioBandLocal(index, value) {
+        const next = Math.max(-12, Math.min(12, Number(value) || 0))
+        if (index === 0) audioBand0 = next
+        else if (index === 1) audioBand1 = next
+        else if (index === 2) audioBand2 = next
+        else if (index === 3) audioBand3 = next
+        else if (index === 4) audioBand4 = next
+        else if (index === 5) audioBand5 = next
+        else audioBand6 = next
+    }
+
+    function runAudioCommand(args) {
+        audioStatusHoldUntil = Date.now() + 6500
+
+        const command = shellQuote(audioControlScript) + " " + args
+        if (audioAction.running) {
+            audioQueuedCommand = audioQueuedCommand.length > 0 ? audioQueuedCommand + "; " + command : command
+            return
+        }
+
+        audioActionCommand = command
+        audioAction.running = true
+    }
+
+    function runAudioGuard() {
+        if (!audioFxEnabled || audioEngineState === "missing")
+            return
+        if (audioAction.running || audioGuardAction.running || audioQueuedCommand.length > 0)
+            return
+        if (audioEqDragging || audioVolumeDragging)
+            return
+
+        audioStatusHoldUntil = Date.now() + 900
+        audioGuardCommand = shellQuote(audioControlScript) + " guard"
+        audioGuardAction.running = true
+    }
+
+    function setAudioVolume(value) {
+        audioVolumePercent = Math.max(0, Math.min(1.5, value))
+        runAudioCommand("volume set " + Math.round(audioVolumePercent * 100))
+    }
+
+    function toggleAudioMute() {
+        audioMuted = !audioMuted
+        runAudioCommand("volume mute-toggle")
+    }
+
+    function setAudioEffect(key, enabled) {
+        if (key === "fx") {
+            audioFxEnabled = enabled
+            if (!enabled) {
+                audioBassEnabled = false
+                audioTrebleEnabled = false
+                audioSurroundEnabled = false
+                audioBoostEnabled = false
+            }
+        }
+        else if (key === "bass") audioBassEnabled = enabled
+        else if (key === "treble") audioTrebleEnabled = enabled
+        else if (key === "surround") audioSurroundEnabled = enabled
+        else if (key === "boost") audioBoostEnabled = enabled
+        if (enabled && key !== "fx")
+            audioFxEnabled = true
+        audioPreset = "Custom"
+        runAudioCommand("effect " + key + " " + (enabled ? "1" : "0"))
+    }
+
+    function applyPresetLocal(name) {
+        audioPreset = name
+
+        if (name === "Flat") {
+            audioFxEnabled = false
+            audioBassEnabled = false
+            audioTrebleEnabled = false
+            audioSurroundEnabled = false
+            audioBoostEnabled = false
+            for (let i = 0; i < 7; i += 1)
+                setAudioBandLocal(i, 0)
+            return
+        }
+
+        if (name === "Bass") {
+            audioFxEnabled = true
+            audioBassEnabled = true
+            audioTrebleEnabled = false
+            audioSurroundEnabled = true
+            audioBoostEnabled = true
+            const bassBands = [5, 4, 1.5, -1.5, 0.8, 1.2, 1.5]
+            for (let j = 0; j < bassBands.length; j += 1)
+                setAudioBandLocal(j, bassBands[j])
+            return
+        }
+
+        if (name === "Bass+") {
+            audioFxEnabled = true
+            audioBassEnabled = true
+            audioTrebleEnabled = false
+            audioSurroundEnabled = false
+            audioBoostEnabled = false
+            const bassPlusBands = [12, 3.07, -2.08, -12, -12, -12, -12]
+            for (let b = 0; b < bassPlusBands.length; b += 1)
+                setAudioBandLocal(b, bassPlusBands[b])
+            return
+        }
+
+        audioFxEnabled = true
+        audioBassEnabled = true
+        audioTrebleEnabled = true
+        audioSurroundEnabled = false
+        audioBoostEnabled = false
+        const musicBands = [3, 2, 0.5, -1, 1.5, 2.2, 2.8]
+        for (let k = 0; k < musicBands.length; k += 1)
+            setAudioBandLocal(k, musicBands[k])
+    }
+
+    function setAudioPreset(name) {
+        applyPresetLocal(name)
+        runAudioCommand("preset " + shellQuote(name))
+    }
+
+    function commitAudioBand(index) {
+        runAudioCommand("band " + index + " " + audioBandValue(index).toFixed(2))
+    }
+
+    function parseAudioStatus(data) {
+        const holdLocal = Date.now() < audioStatusHoldUntil || audioAction.running || audioGuardAction.running || audioQueuedCommand.length > 0
+        const parts = data.trim().split("|")
+        for (let i = 0; i < parts.length; i += 1) {
+            const split = parts[i].indexOf("=")
+            if (split <= 0)
+                continue
+            const key = parts[i].slice(0, split)
+            const value = parts[i].slice(split + 1)
+            if (key === "volume" && !holdLocal && !audioVolumeDragging)
+                audioVolumePercent = Math.max(0, Math.min(1.5, (Number(value) || 0) / 100))
+            else if (key === "muted" && !holdLocal)
+                audioMuted = value === "1"
+            else if (key === "fx" && !holdLocal)
+                audioFxEnabled = value === "1"
+            else if (key === "bass" && !holdLocal)
+                audioBassEnabled = value === "1"
+            else if (key === "treble" && !holdLocal)
+                audioTrebleEnabled = value === "1"
+            else if (key === "surround" && !holdLocal)
+                audioSurroundEnabled = value === "1"
+            else if (key === "boost" && !holdLocal)
+                audioBoostEnabled = value === "1"
+            else if (key === "preset" && !holdLocal)
+                audioPreset = value
+            else if (key === "ee")
+                audioEngineState = value
+            else if (key === "bands" && !holdLocal && !audioEqDragging) {
+                const bands = value.split(",")
+                for (let j = 0; j < Math.min(7, bands.length); j += 1)
+                    setAudioBandLocal(j, Number(bands[j]) || 0)
+            }
+        }
+    }
+
+    function audioEngineLabel() {
+        if (audioEngineState === "ready")
+            return "EasyEffects"
+        if (audioEngineState === "installed")
+            return "EasyEffects待機"
+        return "wpctl"
     }
 
     function sectionTitle(section) {
@@ -161,14 +438,14 @@ Item {
 
     Timer {
         interval: 60000
-        running: true
+        running: root.visible
         repeat: true
         onTriggered: root.now = new Date()
     }
 
     Timer {
         interval: 5000
-        running: true
+        running: root.visible && root.activeSection === "system"
         repeat: true
         triggeredOnStart: true
         onTriggered: {
@@ -179,7 +456,7 @@ Item {
 
     Timer {
         interval: 900000
-        running: true
+        running: root.visible && root.activeSection === "weather"
         repeat: true
         triggeredOnStart: true
         onTriggered: {
@@ -190,7 +467,7 @@ Item {
 
     Timer {
         interval: 2000
-        running: true
+        running: root.visible && root.activeSection === "media"
         repeat: true
         triggeredOnStart: true
         onTriggered: {
@@ -200,8 +477,35 @@ Item {
     }
 
     Timer {
+        interval: 3000
+        running: root.visible && root.activeSection === "media"
+        repeat: true
+        triggeredOnStart: true
+        onTriggered: {
+            if (!audioStatusQuery.running)
+                audioStatusQuery.running = true
+        }
+    }
+
+    Timer {
+        id: audioGuardDelay
+
+        interval: 1800
+        repeat: false
+        onTriggered: root.runAudioGuard()
+    }
+
+    Timer {
+        interval: 11000
+        running: root.visible && root.activeSection === "media" && root.audioFxEnabled
+        repeat: true
+        triggeredOnStart: false
+        onTriggered: root.runAudioGuard()
+    }
+
+    Timer {
         interval: 1000
-        running: true
+        running: root.visible && root.activeSection === "media"
         repeat: true
         onTriggered: root.updateMediaClock()
     }
@@ -275,6 +579,9 @@ Item {
                 root.mediaArt = fields[3] || ""
                 root.mediaPositionSeconds = Math.max(0, Number(fields[4]) || 0)
                 root.mediaPlaying = fields[5] === "Playing"
+                root.mediaPlayer = fields[6] || ""
+                root.mediaShuffle = fields[7] === "On"
+                root.mediaLoop = fields[8] || "None"
                 root.mediaSampleMs = Date.now()
                 root.updateMediaClock()
             }
@@ -295,12 +602,67 @@ Item {
         }
     }
 
+    Process {
+        id: audioStatusQuery
+
+        running: false
+        command: ["bash", "-lc", root.shellQuote(root.audioControlScript) + " status"]
+
+        stdout: SplitParser {
+            onRead: function(data) {
+                root.parseAudioStatus(data)
+            }
+        }
+
+        onExited: running = false
+    }
+
+    Process {
+        id: audioGuardAction
+
+        running: false
+        command: ["bash", "-lc", root.audioGuardCommand]
+
+        onExited: {
+            running = false
+            root.audioGuardCommand = ""
+            if (!audioStatusQuery.running) {
+                root.audioStatusHoldUntil = Date.now() + 500
+                audioStatusQuery.running = true
+            }
+        }
+    }
+
+    Process {
+        id: audioAction
+
+        running: false
+        command: ["bash", "-lc", root.audioActionCommand]
+        onExited: {
+            running = false
+            if (root.audioQueuedCommand.length > 0) {
+                root.audioActionCommand = root.audioQueuedCommand
+                root.audioQueuedCommand = ""
+                root.audioStatusHoldUntil = Date.now() + 6500
+                running = true
+            } else {
+                if (!audioStatusQuery.running) {
+                    root.audioStatusHoldUntil = Date.now() + 500
+                    audioStatusQuery.running = true
+                }
+                if (root.audioFxEnabled)
+                    audioGuardDelay.restart()
+            }
+        }
+    }
+
     Rectangle {
         x: panelSurface.x + 9
         y: panelSurface.y + 14
         width: panelSurface.width - 8
         height: panelSurface.height - 8
         radius: root.cornerRadius + 2
+        visible: !root.externalSurface
         color: root.alpha(root.theme ? root.theme.shadowColor : Qt.rgba(0.60, 0.36, 0.52, 1), 0.075)
         layer.enabled: true
         layer.effect: FastBlur { radius: 14 }
@@ -311,12 +673,12 @@ Item {
 
         anchors.fill: parent
         radius: root.cornerRadius
-        color: root.glass
-        border.width: 1
+        color: root.externalSurface ? "transparent" : root.glass
+        border.width: root.externalSurface ? 0 : 1
         border.color: root.neon && root.theme ? root.theme.popupBorderGlow : root.borderSoft
         clip: true
         antialiasing: true
-        layer.enabled: true
+        layer.enabled: !root.externalSurface
         layer.effect: DropShadow {
             transparentBorder: true
             radius: root.neon ? 46 : 50
@@ -329,6 +691,7 @@ Item {
         Rectangle {
             anchors.fill: parent
             radius: parent.radius
+            visible: !root.externalSurface
             gradient: Gradient {
                 GradientStop { position: 0.00; color: root.alpha(root.cardGlass, root.neon ? 0.28 : 0.58) }
                 GradientStop { position: 0.55; color: root.alpha(root.cardGlass, root.neon ? 0.16 : 0.34) }
@@ -449,7 +812,7 @@ Item {
                 Loader {
                     z: 3
                     anchors.fill: parent
-                    sourceComponent: root.sectionComponent(root.activeSection)
+                    sourceComponent: root.compact && root.activeSection === "media" ? mediaExpandedSectionComponent : root.sectionComponent(root.activeSection)
                 }
             }
         }
@@ -459,6 +822,7 @@ Item {
     Component { id: systemSectionComponent; SystemContent {} }
     Component { id: calendarSectionComponent; CalendarContent {} }
     Component { id: mediaSectionComponent; MediaContent {} }
+    Component { id: mediaExpandedSectionComponent; MediaExpandedContent {} }
     Component { id: memoSectionComponent; MemoContent {} }
     Component { id: todoSectionComponent; TodoContent {} }
 
@@ -501,13 +865,13 @@ Item {
         property bool hovered: cardHover.containsMouse
 
         radius: 14
-        color: hovered ? root.alpha(root.cardGlass, root.neon ? 0.62 : 0.86) : root.cardGlass
-        border.width: 1
-        border.color: root.neon && root.theme ? root.alpha(root.theme.popupBorderGlow, root.theme.popupBorderGlow.a * (hovered ? 0.52 : 0.34)) : (hovered ? root.alpha(root.borderSoft, 0.92) : root.alpha(root.borderSoft, 0.70))
+        color: root.externalSurface ? "transparent" : (hovered ? root.alpha(root.cardGlass, root.neon ? 0.62 : 0.86) : root.cardGlass)
+        border.width: root.externalSurface ? 0 : 1
+        border.color: root.externalSurface ? "transparent" : (root.neon && root.theme ? root.alpha(root.theme.popupBorderGlow, root.theme.popupBorderGlow.a * (hovered ? 0.52 : 0.34)) : (hovered ? root.alpha(root.borderSoft, 0.92) : root.alpha(root.borderSoft, 0.70)))
         clip: true
         antialiasing: true
         scale: hovered ? 1.006 : 1.0
-        layer.enabled: true
+        layer.enabled: !root.externalSurface
         layer.effect: DropShadow {
             transparentBorder: true
             radius: card.hovered ? 24 : 18
@@ -517,8 +881,8 @@ Item {
             color: root.neon && root.theme ? root.theme.popupGlow : root.alpha(root.theme ? root.theme.shadowColor : Qt.rgba(0.36, 0.20, 0.34, 1), card.hovered ? 0.12 : 0.065)
         }
 
-        Behavior on color { ColorAnimation { duration: 160; easing.type: Easing.OutCubic } }
-        Behavior on scale { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+        Behavior on color { ColorAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
+        Behavior on scale { NumberAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
 
         Rectangle {
             anchors {
@@ -1050,21 +1414,298 @@ Item {
         }
     }
 
+    component MediaExpandedContent: Item {
+        anchors.fill: parent
+        opacity: root.stage(10, 230)
+        scale: 0.974 + root.stage(0, 260) * 0.026
+        transformOrigin: Item.Left
+        transform: Translate {
+            x: Math.round((1 - root.stage(0, 260)) * -24)
+            y: root.stageY(40, 12)
+        }
+
+        ColumnLayout {
+            anchors {
+                fill: parent
+                leftMargin: 12
+                rightMargin: 12
+                topMargin: 11
+                bottomMargin: 12
+            }
+
+            spacing: 10
+
+            AudioInnerPanel {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 232
+
+                ColumnLayout {
+                    anchors {
+                        fill: parent
+                        margins: 14
+                    }
+
+                    spacing: 12
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 118
+                        spacing: 18
+
+                        Rectangle {
+                            Layout.preferredWidth: 118
+                            Layout.preferredHeight: 118
+                            radius: 9
+                            color: root.alpha(root.lilac, 0.18)
+                            clip: true
+
+                            Image {
+                                anchors.fill: parent
+                                source: root.mediaArt.length > 0 ? root.mediaArt : Qt.resolvedUrl("../assets/dashboard-cover.png")
+                                fillMode: Image.PreserveAspectCrop
+                                sourceSize.width: 260
+                                sourceSize.height: 260
+                                smooth: true
+                                mipmap: true
+                            }
+                        }
+
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            spacing: 8
+
+                            Item { Layout.fillHeight: true }
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: root.mediaTitle.length > 0 ? root.mediaTitle : "再生中のメディアなし"
+                                color: root.ink
+                                font.family: root.uiFont
+                                font.pixelSize: 20
+                                font.weight: Font.Bold
+                                elide: Text.ElideRight
+                                maximumLineCount: 1
+                            }
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: root.mediaArtist.length > 0 ? root.mediaArtist : "playerctl / MPRIS"
+                                color: root.inkSoft
+                                font.family: root.uiFont
+                                font.pixelSize: 14
+                                font.weight: Font.DemiBold
+                                elide: Text.ElideRight
+                                maximumLineCount: 1
+                            }
+
+                            Rectangle {
+                                Layout.preferredWidth: 72
+                                Layout.preferredHeight: 24
+                                radius: 10
+                                color: root.alpha(root.lilac, 0.13)
+                                border.width: 1
+                                border.color: root.alpha(root.borderSoft, 0.34)
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "320 kbps"
+                                    color: root.inkSoft
+                                    font.family: root.monoFont
+                                    font.pixelSize: 10
+                                    font.weight: Font.DemiBold
+                                }
+                            }
+
+                            Item { Layout.fillHeight: true }
+                        }
+
+                        VisualizerBars {
+                            Layout.preferredWidth: 154
+                            Layout.fillHeight: true
+                            progress: root.mediaProgress
+                            active: root.mediaPlaying
+                        }
+                    }
+
+                    ClickableProgressLine {
+                        Layout.fillWidth: true
+                        value: root.mediaProgress
+                        onCommitted: function(nextValue) { root.seekMedia(nextValue) }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 18
+                        spacing: 6
+
+                        SmallMediaText { text: root.mediaPositionText }
+                        Item { Layout.fillWidth: true }
+                        SmallMediaText { text: root.mediaDurationText }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        spacing: 22
+
+                        Item { Layout.fillWidth: true }
+                        MediaButton { label: "⤨"; action: "shuffle"; active: root.mediaShuffle }
+                        MediaButton { label: "◀"; action: "previous" }
+                        MediaButton { label: root.mediaPlaying ? "Ⅱ" : "▶"; action: "play-pause"; emphasized: true }
+                        MediaButton { label: "▶"; action: "next" }
+                        MediaButton { label: "↻"; action: "repeat"; active: root.mediaLoop !== "None" && root.mediaLoop.length > 0 }
+                        Item { Layout.fillWidth: true }
+                    }
+                }
+            }
+
+            AudioInnerPanel {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+
+                ColumnLayout {
+                    anchors {
+                        fill: parent
+                        leftMargin: 14
+                        rightMargin: 14
+                        topMargin: 12
+                        bottomMargin: 12
+                    }
+
+                    spacing: 11
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 26
+                        spacing: 10
+
+                        Text {
+                            Layout.fillWidth: true
+                            text: "サウンド設定"
+                            color: root.ink
+                            font.family: root.uiFont
+                            font.pixelSize: 13
+                            font.weight: Font.Bold
+                            elide: Text.ElideRight
+                        }
+
+                        Text {
+                            text: "プリセット"
+                            color: root.inkSoft
+                            font.family: root.uiFont
+                            font.pixelSize: 11
+                            font.weight: Font.DemiBold
+                        }
+
+                        PresetButton { label: "Flat"; selected: root.audioPreset === "Flat"; onClicked: root.setAudioPreset("Flat") }
+                        PresetButton { label: "Music"; selected: root.audioPreset === "Music"; onClicked: root.setAudioPreset("Music") }
+                        PresetButton { label: "Bass"; selected: root.audioPreset === "Bass"; onClicked: root.setAudioPreset("Bass") }
+                        PresetButton { label: "Bass+"; selected: root.audioPreset === "Bass+"; onClicked: root.setAudioPreset("Bass+") }
+                    }
+
+                    AudioHorizontalSlider {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 28
+                        value: root.audioVolumePercent
+                        valueText: Math.round(root.audioVolumePercent * 100) + "%"
+                        muted: root.audioMuted
+                        onCommitted: function(nextValue) { root.setAudioVolume(nextValue) }
+                        onMuteClicked: root.toggleAudioMute()
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        spacing: 11
+
+                        ColumnLayout {
+                            Layout.preferredWidth: 178
+                            Layout.fillHeight: true
+                            spacing: 7
+
+                            AudioEffectRow { icon: "⌁"; title: "FX"; subtitle: "音響効果"; active: root.audioFxEnabled; onClicked: root.setAudioEffect("fx", !root.audioFxEnabled) }
+                            AudioEffectRow { icon: "◉"; title: "Bass"; subtitle: "低音強調"; active: root.audioBassEnabled; onClicked: root.setAudioEffect("bass", !root.audioBassEnabled) }
+                            AudioEffectRow { icon: "♯"; title: "Treble"; subtitle: "高音強調"; active: root.audioTrebleEnabled; onClicked: root.setAudioEffect("treble", !root.audioTrebleEnabled) }
+                            AudioEffectRow { icon: "◎"; title: "Surround"; subtitle: "空間オーディオ"; active: root.audioSurroundEnabled; onClicked: root.setAudioEffect("surround", !root.audioSurroundEnabled) }
+                            AudioEffectRow { icon: "♨"; title: "Boost"; subtitle: "音量ブースト"; active: root.audioBoostEnabled; onClicked: root.setAudioEffect("boost", !root.audioBoostEnabled) }
+                        }
+
+                        Rectangle {
+                            Layout.preferredWidth: 1
+                            Layout.fillHeight: true
+                            color: root.alpha(root.lilac, 0.16)
+                        }
+
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            spacing: 9
+
+                            AudioCurve {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 88
+                            }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                spacing: 12
+
+                                Repeater {
+                                    model: [
+                                        { label: "60", band: 0 },
+                                        { label: "150", band: 1 },
+                                        { label: "400", band: 2 },
+                                        { label: "1K", band: 3 },
+                                        { label: "2.5K", band: 4 },
+                                        { label: "6K", band: 5 },
+                                        { label: "12K", band: 6 }
+                                    ]
+
+                                    EqualizerSlider {
+                                        Layout.fillWidth: true
+                                        Layout.fillHeight: true
+                                        label: modelData.label
+                                        bandIndex: modelData.band
+                                        dbValue: root.audioBandValue(modelData.band)
+                                    }
+                                }
+                            }
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: root.audioEngineLabel()
+                                color: root.inkFaint
+                                horizontalAlignment: Text.AlignRight
+                                font.family: root.uiFont
+                                font.pixelSize: 10
+                                font.weight: Font.DemiBold
+                                elide: Text.ElideRight
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     component MediaButton: Rectangle {
         id: button
 
         property string label: ""
         property string action: ""
         property bool emphasized: false
+        property bool active: false
         property bool hovered: mouse.containsMouse
 
         Layout.preferredWidth: emphasized ? 52 : 31
         Layout.preferredHeight: emphasized ? 52 : 31
         radius: height / 2
-        color: emphasized ? root.alpha(root.pink, 0.56) : root.alpha(root.lilac, hovered ? 0.13 : 0.04)
-        scale: hovered ? 1.05 : 1.0
-        border.width: emphasized ? 1 : 0
-        border.color: root.alpha(root.borderSoft, 0.68)
+        color: emphasized ? root.alpha(root.pink, 0.56) : (active ? root.alpha(root.pink, 0.32) : root.alpha(root.lilac, hovered ? 0.13 : 0.04))
+        scale: hovered ? 1.018 : 1.0
+        border.width: emphasized || active ? 1 : 0
+        border.color: active ? root.alpha(root.pink, 0.50) : root.alpha(root.borderSoft, 0.68)
         layer.enabled: emphasized
         layer.effect: DropShadow {
             transparentBorder: true
@@ -1075,12 +1716,12 @@ Item {
             color: root.alpha(root.theme ? root.theme.shadowColor : Qt.rgba(0.56, 0.30, 0.50, 1), 0.11)
         }
 
-        Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+        Behavior on scale { NumberAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
 
         Text {
             anchors.centerIn: parent
             text: button.label
-            color: button.emphasized ? (root.theme ? root.theme.activeText : "white") : root.lilac
+            color: button.emphasized ? (root.theme ? root.theme.activeText : "white") : (button.active ? root.pink : root.lilac)
             font.family: root.uiFont
             font.pixelSize: button.emphasized ? 21 : 18
             font.weight: Font.Bold
@@ -1093,6 +1734,491 @@ Item {
             hoverEnabled: true
             cursorShape: button.action.length > 0 ? Qt.PointingHandCursor : Qt.ArrowCursor
             onClicked: root.runMediaAction(button.action)
+        }
+    }
+
+    component AudioInnerPanel: Rectangle {
+        id: panel
+
+        property bool hovered: hover.containsMouse
+
+        radius: 16
+        color: root.alpha(root.cardGlass, root.neon ? 0.22 : 0.38)
+        border.width: 1
+        border.color: root.alpha(root.borderSoft, hovered ? 0.42 : 0.25)
+        clip: true
+
+        Behavior on border.color { ColorAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
+
+        MouseArea {
+            id: hover
+            anchors.fill: parent
+            hoverEnabled: true
+            acceptedButtons: Qt.NoButton
+        }
+    }
+
+    component SmallMediaText: Text {
+        color: root.inkSoft
+        font.family: root.monoFont
+        font.pixelSize: 10
+        font.weight: Font.DemiBold
+    }
+
+    component ClickableProgressLine: Rectangle {
+        id: progress
+
+        property real value: 0
+        property real dragValue: 0
+        property bool dragging: false
+        readonly property real displayValue: dragging ? dragValue : value
+        signal committed(real nextValue)
+
+        Layout.preferredHeight: 7
+        radius: 4
+        color: root.alpha(root.lilac, 0.15)
+
+        function valueFromX(px) {
+            return Math.max(0, Math.min(1, px / Math.max(1, width)))
+        }
+
+        Rectangle {
+            width: parent.width * Math.max(0, Math.min(1, progress.displayValue))
+            height: parent.height
+            radius: parent.radius
+            color: root.alpha(root.borderSoft, 0.86)
+
+            Behavior on width { NumberAnimation { duration: root.motionPanelGeometry; easing.type: root.motionEaseHover } }
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            acceptedButtons: Qt.LeftButton
+            cursorShape: Qt.PointingHandCursor
+            onPressed: function(mouse) {
+                progress.dragging = true
+                progress.dragValue = progress.valueFromX(mouse.x)
+            }
+            onPositionChanged: function(mouse) { if (pressed) progress.dragValue = progress.valueFromX(mouse.x) }
+            onReleased: function(mouse) {
+                const next = progress.valueFromX(mouse.x)
+                progress.dragging = false
+                progress.committed(next)
+            }
+            onCanceled: progress.dragging = false
+        }
+    }
+
+    component VisualizerBars: Row {
+        id: bars
+
+        property real progress: 0
+        property bool active: false
+
+        spacing: 4
+        layoutDirection: Qt.LeftToRight
+
+        Repeater {
+            model: 20
+
+            Rectangle {
+                width: 4
+                height: Math.max(6, bars.height * (0.16 + (((index * 37) % 71) / 100) * 0.36 + (bars.active ? Math.abs(Math.sin((Date.now() / 460) + index)) * 0.24 : 0) + bars.progress * 0.12))
+                y: bars.height - height - 12
+                radius: 2
+                color: root.alpha(root.borderSoft, index % 3 === 0 ? 0.42 : 0.30)
+            }
+        }
+    }
+
+    component PresetButton: Rectangle {
+        id: preset
+
+        property string label: ""
+        property bool selected: false
+        property bool hovered: mouse.containsMouse
+        signal clicked()
+
+        Layout.preferredWidth: 58
+        Layout.preferredHeight: 25
+        radius: 8
+        color: selected ? root.alpha(root.pink, 0.30) : root.alpha(root.lilac, hovered ? 0.14 : 0.06)
+        border.width: 1
+        border.color: selected ? root.alpha(root.pink, 0.50) : root.alpha(root.borderSoft, 0.30)
+
+        Behavior on color { ColorAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
+        Behavior on border.color { ColorAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
+
+        Text {
+            anchors.centerIn: parent
+            text: preset.label
+            color: preset.selected ? root.pink : root.inkSoft
+            font.family: root.uiFont
+            font.pixelSize: 10
+            font.weight: Font.Bold
+        }
+
+        MouseArea {
+            id: mouse
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: preset.clicked()
+        }
+    }
+
+    component AudioHorizontalSlider: Item {
+        id: slider
+
+        property real value: 0
+        property real dragValue: 0
+        property bool dragging: false
+        readonly property real displayValue: dragging ? dragValue : value
+        property string valueText: ""
+        property bool muted: false
+        signal committed(real nextValue)
+        signal muteClicked()
+
+        function valueFromX(px) {
+            return Math.max(0, Math.min(1.5, (px / Math.max(1, track.width)) * 1.5))
+        }
+
+        RowLayout {
+            anchors.fill: parent
+            spacing: 10
+
+            Rectangle {
+                Layout.preferredWidth: 30
+                Layout.preferredHeight: 24
+                radius: 8
+                color: root.alpha(slider.muted ? root.pink : root.lilac, slider.muted ? 0.28 : 0.11)
+                border.width: 1
+                border.color: root.alpha(root.borderSoft, 0.28)
+
+                Text {
+                    anchors.centerIn: parent
+                    text: slider.muted ? "×" : "♪"
+                    color: slider.muted ? root.pink : root.inkSoft
+                    font.family: root.uiFont
+                    font.pixelSize: 12
+                    font.weight: Font.Bold
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: slider.muteClicked()
+                }
+            }
+
+            Rectangle {
+                id: track
+
+                Layout.fillWidth: true
+                Layout.preferredHeight: 6
+                radius: 3
+                color: root.alpha(root.lilac, 0.15)
+
+                Rectangle {
+                    width: parent.width * Math.max(0, Math.min(1, slider.displayValue / 1.5))
+                    height: parent.height
+                    radius: parent.radius
+                    color: root.alpha(root.borderSoft, 0.80)
+                }
+
+                Rectangle {
+                    width: 16
+                    height: 16
+                    radius: 8
+                    x: Math.max(0, Math.min(parent.width - width, parent.width * Math.max(0, Math.min(1, slider.displayValue / 1.5)) - width / 2))
+                    anchors.verticalCenter: parent.verticalCenter
+                    color: root.alpha(root.borderSoft, 0.92)
+                    border.width: 1
+                    border.color: root.alpha(root.inkSoft, 0.26)
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    acceptedButtons: Qt.LeftButton
+                    cursorShape: Qt.PointingHandCursor
+                    onPressed: function(mouse) {
+                        root.audioVolumeDragging = true
+                        slider.dragging = true
+                        slider.dragValue = slider.valueFromX(mouse.x)
+                    }
+                    onPositionChanged: function(mouse) { if (pressed) slider.dragValue = slider.valueFromX(mouse.x) }
+                    onReleased: function(mouse) {
+                        const next = slider.valueFromX(mouse.x)
+                        slider.dragging = false
+                        root.audioVolumeDragging = false
+                        slider.committed(next)
+                    }
+                    onCanceled: {
+                        slider.dragging = false
+                        root.audioVolumeDragging = false
+                    }
+                }
+            }
+
+            Text {
+                Layout.preferredWidth: 40
+                text: slider.valueText
+                color: root.ink
+                horizontalAlignment: Text.AlignRight
+                font.family: root.monoFont
+                font.pixelSize: 10
+                font.weight: Font.Bold
+            }
+        }
+    }
+
+    component AudioEffectRow: Rectangle {
+        id: row
+
+        property string icon: ""
+        property string title: ""
+        property string subtitle: ""
+        property bool active: false
+        property bool hovered: mouse.containsMouse
+        signal clicked()
+
+        Layout.fillWidth: true
+        Layout.preferredHeight: 41
+        radius: 10
+        color: active ? root.alpha(root.pink, 0.16) : root.alpha(root.cardGlass, hovered ? 0.32 : 0.18)
+        border.width: 1
+        border.color: active ? root.alpha(root.pink, 0.38) : root.alpha(root.borderSoft, 0.22)
+
+        Behavior on color { ColorAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
+        Behavior on border.color { ColorAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
+
+        RowLayout {
+            anchors {
+                fill: parent
+                leftMargin: 10
+                rightMargin: 9
+            }
+
+            spacing: 9
+
+            Text {
+                Layout.preferredWidth: 18
+                text: row.icon
+                color: row.active ? root.pink : root.inkSoft
+                horizontalAlignment: Text.AlignHCenter
+                font.family: root.uiFont
+                font.pixelSize: 13
+                font.weight: Font.Bold
+            }
+
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 0
+
+                Text {
+                    Layout.fillWidth: true
+                    text: row.title
+                    color: root.ink
+                    font.family: root.uiFont
+                    font.pixelSize: 12
+                    font.weight: Font.Bold
+                    elide: Text.ElideRight
+                }
+
+                Text {
+                    Layout.fillWidth: true
+                    text: row.subtitle
+                    color: root.inkSoft
+                    font.family: root.uiFont
+                    font.pixelSize: 9
+                    font.weight: Font.DemiBold
+                    elide: Text.ElideRight
+                }
+            }
+
+            ToggleSwitch {
+                checked: row.active
+            }
+        }
+
+        MouseArea {
+            id: mouse
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: row.clicked()
+        }
+    }
+
+    component ToggleSwitch: Rectangle {
+        id: toggle
+
+        property bool checked: false
+
+        Layout.preferredWidth: 28
+        Layout.preferredHeight: 16
+        radius: 8
+        color: checked ? root.alpha(root.pink, 0.55) : root.alpha(root.lilac, 0.14)
+        border.width: 1
+        border.color: root.alpha(root.borderSoft, 0.30)
+
+        Rectangle {
+            width: 12
+            height: 12
+            radius: 6
+            x: checked ? parent.width - width - 2 : 2
+            anchors.verticalCenter: parent.verticalCenter
+            color: root.alpha(root.borderSoft, 0.94)
+
+            Behavior on x { NumberAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
+        }
+    }
+
+    component AudioCurve: Canvas {
+        id: curve
+
+        property real b0: root.audioBand0
+        property real b1: root.audioBand1
+        property real b2: root.audioBand2
+        property real b3: root.audioBand3
+        property real b4: root.audioBand4
+        property real b5: root.audioBand5
+        property real b6: root.audioBand6
+
+        onB0Changed: requestPaint()
+        onB1Changed: requestPaint()
+        onB2Changed: requestPaint()
+        onB3Changed: requestPaint()
+        onB4Changed: requestPaint()
+        onB5Changed: requestPaint()
+        onB6Changed: requestPaint()
+        onWidthChanged: requestPaint()
+        onHeightChanged: requestPaint()
+
+        onPaint: {
+            const ctx = getContext("2d")
+            const bands = [b0, b1, b2, b3, b4, b5, b6]
+            const padX = 18
+            const padY = 12
+            const w = Math.max(1, width - padX * 2)
+            const h = Math.max(1, height - padY * 2)
+
+            ctx.reset()
+            ctx.clearRect(0, 0, width, height)
+            ctx.lineCap = "round"
+            ctx.lineJoin = "round"
+
+            ctx.strokeStyle = root.alpha(root.lilac, 0.13)
+            ctx.lineWidth = 1
+            for (let i = 0; i < 3; i += 1) {
+                const y = padY + h * (i / 2)
+                ctx.beginPath()
+                ctx.moveTo(padX, y)
+                ctx.lineTo(width - padX, y)
+                ctx.stroke()
+            }
+
+            ctx.strokeStyle = root.alpha(root.borderSoft, 0.76)
+            ctx.lineWidth = 2
+            ctx.beginPath()
+            for (let j = 0; j < bands.length; j += 1) {
+                const x = padX + (w / (bands.length - 1)) * j
+                const y = padY + h * (1 - ((bands[j] + 12) / 24))
+                if (j === 0)
+                    ctx.moveTo(x, y)
+                else {
+                    const prevX = padX + (w / (bands.length - 1)) * (j - 1)
+                    const prevY = padY + h * (1 - ((bands[j - 1] + 12) / 24))
+                    ctx.bezierCurveTo(prevX + (x - prevX) * 0.48, prevY, prevX + (x - prevX) * 0.52, y, x, y)
+                }
+            }
+            ctx.stroke()
+
+            ctx.fillStyle = root.alpha(root.borderSoft, 0.94)
+            for (let k = 0; k < bands.length; k += 1) {
+                const px = padX + (w / (bands.length - 1)) * k
+                const py = padY + h * (1 - ((bands[k] + 12) / 24))
+                ctx.beginPath()
+                ctx.arc(px, py, 3.2, 0, Math.PI * 2, false)
+                ctx.fill()
+            }
+        }
+    }
+
+    component EqualizerSlider: Item {
+        id: slider
+
+        property string label: ""
+        property int bandIndex: 0
+        property real dbValue: 0
+
+        function dbFromY(py) {
+            return Math.max(-12, Math.min(12, 12 - (py / Math.max(1, rail.height)) * 24))
+        }
+
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 5
+
+            Text {
+                Layout.fillWidth: true
+                text: slider.label
+                color: root.inkSoft
+                horizontalAlignment: Text.AlignHCenter
+                font.family: root.monoFont
+                font.pixelSize: 9
+                font.weight: Font.Bold
+            }
+
+            Item {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+
+                Rectangle {
+                    id: rail
+
+                    anchors {
+                        top: parent.top
+                        bottom: parent.bottom
+                        horizontalCenter: parent.horizontalCenter
+                    }
+
+                    width: 4
+                    radius: 2
+                    color: root.alpha(root.lilac, 0.22)
+
+                    Rectangle {
+                        width: 14
+                        height: 14
+                        radius: 7
+                        x: Math.round((rail.width - width) / 2)
+                        y: Math.max(0, Math.min(rail.height - height, rail.height * (1 - ((slider.dbValue + 12) / 24)) - height / 2))
+                        color: root.alpha(root.borderSoft, 0.92)
+                        border.width: 1
+                        border.color: root.alpha(root.inkSoft, 0.28)
+                    }
+
+                    MouseArea {
+                        anchors {
+                            fill: parent
+                            leftMargin: -12
+                            rightMargin: -12
+                        }
+                        acceptedButtons: Qt.LeftButton
+                        cursorShape: Qt.PointingHandCursor
+                        onPressed: function(mouse) {
+                            root.audioEqDragging = true
+                            root.setAudioBandLocal(slider.bandIndex, slider.dbFromY(mouse.y))
+                        }
+                        onPositionChanged: function(mouse) { if (pressed) root.setAudioBandLocal(slider.bandIndex, slider.dbFromY(mouse.y)) }
+                        onReleased: {
+                            root.audioEqDragging = false
+                            root.commitAudioBand(slider.bandIndex)
+                        }
+                        onCanceled: root.audioEqDragging = false
+                    }
+                }
+            }
         }
     }
 
@@ -1125,9 +2251,9 @@ Item {
                 color: root.alpha(root.theme ? root.theme.shadowColor : Qt.rgba(0.48, 0.24, 0.42, 1), themeCard.hovered ? 0.16 : 0.09)
             }
 
-            Behavior on color { ColorAnimation { duration: 150; easing.type: Easing.OutCubic } }
-            Behavior on border.color { ColorAnimation { duration: 150; easing.type: Easing.OutCubic } }
-            Behavior on scale { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
+            Behavior on color { ColorAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
+            Behavior on border.color { ColorAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
+            Behavior on scale { NumberAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
 
             Image {
                 anchors.fill: parent
@@ -1456,7 +2582,7 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                     color: root.alpha(root.borderSoft, 0.92)
 
-                    Behavior on x { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+                    Behavior on x { NumberAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
                 }
             }
         }
@@ -1518,7 +2644,7 @@ Item {
             radius: parent.radius
             color: root.alpha(root.pink, 0.56)
 
-            Behavior on width { NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
+            Behavior on width { NumberAnimation { duration: root.motionPanelGeometry; easing.type: root.motionEaseHover } }
         }
     }
 

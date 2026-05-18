@@ -4,12 +4,29 @@ Velora Shell/themes/pywal16.json
 *.log
 *.tmp
 
+# Direct copies from a live ~/.config/quickshell tree
+Velora Shell/.git/
+Velora Shell/.git
+.git/
+
 # Backups and generated files
+backups/
+**/backups/
 *.bak
 *.bak-*
 *.backup
+*.orig
+*.rej
+*~
+.#*
 __pycache__/
+**/__pycache__/
 *.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.qmlcache/
+qmlcache/
 
 # Local agent/editor folders
 .agents/

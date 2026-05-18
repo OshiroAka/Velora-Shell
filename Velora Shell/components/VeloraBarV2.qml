@@ -25,18 +25,28 @@ Item {
     readonly property color pink: theme ? (pywalStyle ? theme.accentSecondary : theme.accentPrimary) : Qt.rgba(0.88, 0.45, 0.66, 0.86)
     readonly property color lilac: theme ? (pywalStyle ? theme.accentPrimary : theme.accentSecondary) : Qt.rgba(0.58, 0.47, 0.76, 0.78)
     readonly property bool popupAttached: activePopupType.length > 0
+    readonly property real barGlassAlpha: theme
+        ? Math.max(theme.minOpacityForRole("sidebar"), Math.min(theme.barOpacity, 0.98))
+        : 0.66
     readonly property color glass: theme
-        ? (darkSoft ? theme.withAlpha(theme.surfaceSidebar, Math.min(theme.surfaceSidebar.a, 0.72)) : theme.surfaceSidebar)
+        ? theme.withAlpha(theme.surfaceSidebar, barGlassAlpha)
         : Qt.rgba(1, 0.988, 0.997, 0.66)
     readonly property color card: theme
         ? (darkSoft ? theme.withAlpha(theme.surfaceCard, Math.min(theme.surfaceCard.a, 0.62)) : theme.surfaceCard)
         : Qt.rgba(1, 1, 1, 0.70)
-    readonly property color borderSoft: theme ? (pywalStyle ? theme.withAlpha(theme.sidebarBorderGlow, Math.min(0.30, Math.max(0.16, theme.sidebarBorderGlow.a))) : theme.borderSoft) : Qt.rgba(1, 1, 1, 0.82)
+    readonly property color borderSoft: theme ? (pywalStyle ? theme.withAlpha(theme.sidebarBorderGlow, Math.min(0.18, Math.max(0.08, theme.sidebarBorderGlow.a * 0.50))) : theme.withAlpha(theme.borderSoft, theme.themeMode === "dark" ? 0.11 : 0.26)) : Qt.rgba(1, 1, 1, 0.26)
     readonly property string uiFont: "Noto Sans CJK JP"
     readonly property string monoFont: "JetBrainsMono Nerd Font"
-    readonly property int notificationCount: Number(NotificationServer.trackedCount || 0)
+    readonly property int motionFast: theme ? theme.motionFast : 120
+    readonly property int motionNormal: theme ? theme.motionNormal : 200
+    readonly property int motionHover: theme ? theme.motionHover : 120
+    readonly property int motionEaseHover: theme ? theme.motionEaseHover : Easing.OutCubic
+    readonly property int notificationCount: Math.max(trackedNotificationValues().length, makoNotificationCount)
     readonly property real uiScale: softStyle ? Math.min(1.08, Math.max(1.0, height / 1080)) : Math.min(1.12, Math.max(1.0, height / 1032))
     readonly property int stretchGap: Math.round(Math.min(softStyle ? 10 : 14, Math.max(0, (height - (softStyle ? 1080 : 1032)) / 7)))
+    property int makoNotificationCount: 0
+    property int lastNotificationCount: 0
+    property real notificationRingAngle: 0
     property string clockText: Qt.formatDateTime(new Date(), "HH:mm")
     property string dateText: formatLocalizedDate(new Date())
     property var batteryDevice: null
@@ -50,6 +60,32 @@ Item {
     property real focusY: 0
     property real focusW: 42
     property real focusH: 34
+    property bool visualizerActive: true
+    property bool shellDrawsPanelSurface: false
+    property var cavaValues: []
+    property int cavaSettledFrames: 0
+    property int cavaSkippedFrames: 0
+    readonly property int cavaBandCount: 40
+    readonly property real cavaSettledDelta: 0.006
+    readonly property int cavaSettleFrameThreshold: 8
+    readonly property int cavaMaxSkippedFrames: 10
+    readonly property bool cavaWanted: visualizerActive && visible && width > 0 && height > 0
+    readonly property string cavaScript: Quickshell.shellDir + "/scripts/velora-cava"
+
+    function trackedNotificationValues() {
+        const tracked = NotificationServer.trackedNotifications
+        return tracked && tracked.values ? tracked.values : []
+    }
+
+    onNotificationCountChanged: {
+        if (notificationCount > lastNotificationCount) {
+            notificationRingAnimation.stop()
+            notificationRingAnimation.restart()
+        }
+
+        lastNotificationCount = notificationCount
+    }
+
     property var trailSegments: []
     property string focusActionCommand: ""
     property string hoverProbeType: ""
@@ -140,6 +176,107 @@ Item {
             hoverProbeType = ""
             root.quickPopupHoverEnded(previous)
         }
+    }
+
+    function notificationBadgeText() {
+        if (notificationCount <= 0)
+            return ""
+
+        return notificationCount > 99 ? "99+" : String(notificationCount)
+    }
+
+    function normalizedBatteryLevel() {
+        if (!batteryDevice || !batteryDevice.ready)
+            return 0
+
+        const value = Number(batteryDevice.percentage)
+        if (isNaN(value))
+            return 0
+
+        return Math.max(0, Math.min(1, value > 1 ? value / 100 : value))
+    }
+
+    function visualizerValue(index) {
+        if (!cavaValues || cavaValues.length <= 0)
+            return 0.06
+
+        const value = Number(cavaValues[Math.max(0, Math.min(index, cavaValues.length - 1))])
+        return Math.max(0.06, Math.min(1, isNaN(value) ? 0.06 : value))
+    }
+
+    function syncCavaProcess() {
+        if (typeof cavaProcess === "undefined" || typeof cavaRestartTimer === "undefined")
+            return
+
+        if (root.cavaWanted) {
+            if (!cavaProcess.running)
+                cavaProcess.running = true
+            return
+        }
+
+        cavaRestartTimer.stop()
+        if (cavaProcess.running)
+            cavaProcess.running = false
+    }
+
+    function parseCavaLine(data) {
+        var text = String(data || "")
+        text = text.replace(/\x1b\][^\x07]*\x07/g, "")
+        const parts = text.split(";")
+        var next = []
+
+        for (var i = 0; i < parts.length; ++i) {
+            const raw = parts[i].trim()
+            if (raw.length <= 0)
+                continue
+
+            const parsed = parseInt(raw)
+            if (!isNaN(parsed))
+                next.push(Math.max(0, Math.min(1, parsed / 1000)))
+        }
+
+        if (next.length <= 0)
+            return
+
+        while (next.length > root.cavaBandCount)
+            next.shift()
+
+        while (next.length < root.cavaBandCount)
+            next.push(0.06)
+
+        const previous = root.cavaValues || []
+        if (previous.length === next.length) {
+            var maxDelta = 0
+            for (var j = 0; j < next.length; ++j)
+                maxDelta = Math.max(maxDelta, Math.abs(Number(previous[j]) - next[j]))
+
+            if (maxDelta < root.cavaSettledDelta) {
+                root.cavaSettledFrames += 1
+                if (root.cavaSettledFrames >= root.cavaSettleFrameThreshold
+                        && root.cavaSkippedFrames < root.cavaMaxSkippedFrames) {
+                    root.cavaSkippedFrames += 1
+                    return
+                }
+            } else {
+                root.cavaSettledFrames = 0
+            }
+        } else {
+            root.cavaSettledFrames = 0
+        }
+
+        root.cavaSkippedFrames = 0
+        root.cavaValues = next
+    }
+
+    onCavaWantedChanged: syncCavaProcess()
+    onVisualizerActiveChanged: {
+        if (!visualizerActive) {
+            cavaValues = []
+            cavaSettledFrames = 0
+            cavaSkippedFrames = 0
+        }
+
+        syncCavaProcess()
     }
 
     readonly property string themeCommand: "if command -v nwg-look >/dev/null 2>&1; then nwg-look >/dev/null 2>&1 & elif command -v qt6ct >/dev/null 2>&1; then qt6ct >/dev/null 2>&1 & fi"
@@ -393,6 +530,14 @@ Item {
         return (date.getMonth() + 1) + "月" + date.getDate() + "日 (" + weekdays[date.getDay()] + ")"
     }
 
+    function updateClockText() {
+        const now = new Date()
+        root.clockText = Qt.formatDateTime(now, "HH:mm")
+        root.dateText = root.formatLocalizedDate(now)
+        clockMinuteTimer.interval = Math.max(1000, 60050 - now.getSeconds() * 1000 - now.getMilliseconds())
+        clockMinuteTimer.restart()
+    }
+
     function pickBattery() {
         batteryDevice = null
         for (let i = 0; i < UPower.devices.count; i += 1) {
@@ -404,19 +549,38 @@ Item {
         }
     }
 
+    SequentialAnimation {
+        id: notificationRingAnimation
+
+        NumberAnimation { target: root; property: "notificationRingAngle"; to: -14; duration: 45; easing.type: Easing.OutQuad }
+        NumberAnimation { target: root; property: "notificationRingAngle"; to: 12; duration: 55; easing.type: Easing.InOutQuad }
+        NumberAnimation { target: root; property: "notificationRingAngle"; to: -9; duration: 55; easing.type: Easing.InOutQuad }
+        NumberAnimation { target: root; property: "notificationRingAngle"; to: 6; duration: 55; easing.type: Easing.InOutQuad }
+        NumberAnimation { target: root; property: "notificationRingAngle"; to: 0; duration: 90; easing.type: Easing.OutCubic }
+    }
+
     Timer {
-        interval: 1000
+        id: clockMinuteTimer
+
+        interval: 60000
+        running: false
+        repeat: false
+        onTriggered: root.updateClockText()
+    }
+
+    Timer {
+        interval: 15000
         running: true
         repeat: true
+        triggeredOnStart: true
         onTriggered: {
-            const now = new Date()
-            root.clockText = Qt.formatDateTime(now, "HH:mm")
-            root.dateText = root.formatLocalizedDate(now)
+            if (!notificationCountQuery.running)
+                notificationCountQuery.running = true
         }
     }
 
     Timer {
-        interval: 5000
+        interval: 15000
         running: true
         repeat: true
         triggeredOnStart: true
@@ -448,11 +612,57 @@ Item {
     }
 
     Process {
+        id: notificationCountQuery
+
+        running: false
+        command: ["bash", "-lc", "if command -v makoctl >/dev/null 2>&1; then makoctl list -j 2>/dev/null | python3 -c 'import sys,json; raw=sys.stdin.read().strip() or \"[]\"; print(len(json.loads(raw)))' 2>/dev/null || printf '0\\n'; else printf '0\\n'; fi"]
+
+        stdout: SplitParser {
+            onRead: function(data) {
+                const value = parseInt(data.trim())
+                root.makoNotificationCount = isNaN(value) ? 0 : Math.max(0, value)
+            }
+        }
+
+        onExited: running = false
+    }
+
+    Process {
         id: focusActionProcess
 
         running: false
         command: ["bash", "-lc", root.focusActionCommand]
         onExited: running = false
+    }
+
+    Process {
+        id: cavaProcess
+
+        running: false
+        command: [root.cavaScript, String(root.cavaBandCount)]
+
+        stdout: SplitParser {
+            onRead: function(data) {
+                root.parseCavaLine(data)
+            }
+        }
+
+        onExited: {
+            running = false
+            if (root.cavaWanted)
+                cavaRestartTimer.restart()
+        }
+    }
+
+    Timer {
+        id: cavaRestartTimer
+
+        interval: 1600
+        repeat: false
+        onTriggered: {
+            if (root.cavaWanted && !cavaProcess.running)
+                cavaProcess.running = true
+        }
     }
 
     Timer {
@@ -528,6 +738,8 @@ Item {
     })
     Component.onCompleted: Qt.callLater(function() {
         root.setFocusRectFromCurrent()
+        root.syncCavaProcess()
+        root.updateClockText()
     })
 
     Keys.onEscapePressed: root.exitFocusRequested()
@@ -550,6 +762,7 @@ Item {
         width: panelSurface.width
         height: panelSurface.height - 8
         radius: root.cornerRadius + 2
+        visible: !root.shellDrawsPanelSurface
         color: root.softStyle
             ? root.alpha(root.theme ? root.theme.shadowColor : Qt.rgba(0, 0, 0, 1), root.popupAttached ? 0 : (root.darkSoft ? 0.16 : 0.08))
             : root.alpha(root.theme ? root.theme.shadowColor : Qt.rgba(0.56, 0.36, 0.52, 1), root.popupAttached ? 0 : (root.pywalStyle && root.theme ? 0.035 + root.theme.generalGlow * 0.02 : 0.07))
@@ -560,8 +773,8 @@ Item {
 
         anchors.fill: parent
         radius: root.cornerRadius
-        color: root.glass
-        border.width: root.popupAttached ? 0 : 1
+        color: root.shellDrawsPanelSurface ? "transparent" : root.glass
+        border.width: root.shellDrawsPanelSurface || root.popupAttached ? 0 : 1
         border.color: root.softStyle
             ? root.borderSoft
             : root.pywalStyle && root.theme
@@ -569,7 +782,7 @@ Item {
             : root.alpha(root.borderSoft, root.popupAttached ? 0.34 : root.borderSoft.a)
         clip: true
         antialiasing: true
-        layer.enabled: !root.popupAttached && (!root.pywalStyle || (root.theme && root.theme.sidebarBorderGlow.a > 0.001))
+        layer.enabled: !root.shellDrawsPanelSurface && !root.popupAttached && (!root.pywalStyle || (root.theme && root.theme.sidebarBorderGlow.a > 0.001))
         layer.effect: DropShadow {
             transparentBorder: true
             radius: root.pywalStyle ? 34 : 34
@@ -586,7 +799,7 @@ Item {
         Rectangle {
             anchors.fill: parent
             radius: parent.radius
-            visible: !root.popupAttached
+            visible: !root.shellDrawsPanelSurface && !root.popupAttached
             color: root.alpha(root.card, 0.18)
         }
 
@@ -598,7 +811,7 @@ Item {
 
             radius: parent.radius - 1
             color: "transparent"
-            visible: !root.popupAttached
+            visible: !root.shellDrawsPanelSurface && !root.popupAttached
             border.width: 1
             border.color: root.softStyle
                 ? (root.darkSoft ? Qt.rgba(1, 1, 1, 0.055) : root.alpha(root.borderSoft, 0.30))
@@ -805,7 +1018,8 @@ Item {
                 id: slotNotifications
 
                 iconName: "bell"
-                badge: root.notificationCount > 0 ? String(root.notificationCount) : ""
+                badge: root.notificationBadgeText()
+                iconRotation: root.notificationRingAngle
                 hoverPopupType: "notifications"
                 selected: root.activePopupType === "notifications"
                 onTriggered: root.quickPopupRequested("notifications", root.itemCenterY(slotNotifications))
@@ -818,6 +1032,13 @@ Item {
                 hoverPopupType: "settings"
                 selected: root.activePopupType === "settings"
                 onTriggered: root.settingsRequested(root.itemCenterY(slotSettings))
+            }
+
+            UtilityButton {
+                id: slotBattery
+
+                passive: true
+                iconName: "battery"
             }
         }
 
@@ -888,10 +1109,10 @@ Item {
         border.color: root.alpha(root.pink, 0.95)
         antialiasing: true
 
-        Behavior on x { NumberAnimation { duration: 165; easing.type: Easing.OutCubic } }
-        Behavior on y { NumberAnimation { duration: 165; easing.type: Easing.OutCubic } }
-        Behavior on width { NumberAnimation { duration: 165; easing.type: Easing.OutCubic } }
-        Behavior on height { NumberAnimation { duration: 165; easing.type: Easing.OutCubic } }
+        Behavior on x { NumberAnimation { duration: root.motionNormal; easing.type: root.motionEaseHover } }
+        Behavior on y { NumberAnimation { duration: root.motionNormal; easing.type: root.motionEaseHover } }
+        Behavior on width { NumberAnimation { duration: root.motionNormal; easing.type: root.motionEaseHover } }
+        Behavior on height { NumberAnimation { duration: root.motionNormal; easing.type: root.motionEaseHover } }
     }
 
     Timer {
@@ -902,6 +1123,78 @@ Item {
         onTriggered: {
             if (!volumeQuery.running)
                 volumeQuery.running = true
+        }
+    }
+
+    component AudioVisualizer: Rectangle {
+        id: visualizer
+
+        radius: Math.round(14 * root.uiScale)
+        color: root.alpha(root.card, root.darkSoft ? 0.20 : 0.28)
+        border.width: 1
+        border.color: root.alpha(root.borderSoft, root.darkSoft ? 0.16 : 0.34)
+        clip: true
+        antialiasing: true
+
+        Rectangle {
+            anchors {
+                fill: parent
+                margins: 1
+            }
+
+            radius: parent.radius - 1
+            color: root.alpha(root.theme ? root.theme.surfaceBase : root.card, root.darkSoft ? 0.05 : 0.12)
+        }
+
+        Column {
+            id: bandColumn
+
+            anchors {
+                fill: parent
+                margins: Math.round(8 * root.uiScale)
+            }
+
+            spacing: Math.max(1, Math.round(2 * root.uiScale))
+
+            Repeater {
+                model: root.cavaBandCount
+
+                Item {
+                    width: bandColumn.width
+                    height: Math.max(2, (bandColumn.height - bandColumn.spacing * (root.cavaBandCount - 1)) / root.cavaBandCount)
+
+                    Rectangle {
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        width: Math.max(Math.round(7 * root.uiScale), Math.round(parent.width * root.visualizerValue(index)))
+                        height: Math.max(2, Math.min(Math.round(4 * root.uiScale), parent.height))
+                        radius: height / 2
+                        color: index % 3 === 0
+                            ? root.alpha(root.lilac, root.darkSoft ? 0.72 : 0.62)
+                            : root.alpha(root.pink, root.darkSoft ? 0.82 : 0.70)
+
+                        Behavior on width {
+                            NumberAnimation {
+                                duration: Math.max(1, Math.round(root.motionFast * 0.6))
+                                easing.type: root.motionEaseHover
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            anchors {
+                left: parent.left
+                right: parent.right
+                top: parent.top
+                margins: 1
+            }
+
+            height: Math.round(18 * root.uiScale)
+            radius: parent.radius - 1
+            color: root.alpha(root.theme ? root.theme.activeText : Qt.rgba(1, 1, 1, 1), root.darkSoft ? 0.025 : 0.08)
         }
     }
 
@@ -980,7 +1273,7 @@ Item {
             color: root.alpha(root.theme ? root.theme.shadowColor : Qt.rgba(0.45, 0.28, 0.42, 1), button.active ? 0.12 : 0.07)
         }
 
-        Behavior on color { ColorAnimation { duration: 130; easing.type: Easing.OutCubic } }
+        Behavior on color { ColorAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
 
         Text {
             anchors.centerIn: parent
@@ -1174,6 +1467,8 @@ Item {
         property string badge: ""
         property bool hovered: false
         property bool selected: false
+        property bool passive: false
+        property real iconRotation: 0
         property string hoverPopupType: ""
         signal triggered()
 
@@ -1202,7 +1497,9 @@ Item {
             height: Math.round(26 * root.uiScale)
             iconName: button.iconName
             lineColor: button.selected ? (root.softStyle ? root.pink : root.lilac) : (button.hovered ? root.pink : root.inkSoft)
-            value: button.iconName === "battery" && root.batteryDevice && root.batteryDevice.ready ? root.batteryDevice.percentage : Math.max(0.08, Math.min(1, root.volume / 100))
+            value: button.iconName === "battery" ? root.normalizedBatteryLevel() : Math.max(0.08, Math.min(1, root.volume / 100))
+            rotation: button.iconRotation
+            transformOrigin: Item.Center
             layer.enabled: root.pywalStyle && (button.selected || button.hovered)
             layer.effect: DropShadow {
                 transparentBorder: true
@@ -1217,18 +1514,30 @@ Item {
         Rectangle {
             visible: button.badge.length > 0
             anchors {
-                right: parent.right
                 top: parent.top
-                rightMargin: -5
-                topMargin: -5
+                horizontalCenter: parent.horizontalCenter
+                topMargin: -8
             }
 
-            width: Math.round(15 * root.uiScale)
+            width: Math.max(Math.round(16 * root.uiScale), badgeText.implicitWidth + Math.round(8 * root.uiScale))
             height: Math.round(15 * root.uiScale)
             radius: width / 2
             color: root.pink
+            border.width: 1
+            border.color: root.alpha(root.theme ? root.theme.activeText : Qt.rgba(1, 1, 1, 1), 0.38)
+            layer.enabled: true
+            layer.effect: DropShadow {
+                transparentBorder: true
+                radius: 8
+                samples: 17
+                horizontalOffset: 0
+                verticalOffset: 2
+                color: root.alpha(root.theme ? root.theme.shadowColor : Qt.rgba(0, 0, 0, 1), 0.18)
+            }
 
             Text {
+                id: badgeText
+
                 anchors.centerIn: parent
                 text: button.badge
                 color: root.theme ? root.theme.activeText : "white"
@@ -1240,6 +1549,7 @@ Item {
 
         MouseArea {
             anchors.fill: parent
+            enabled: !button.passive
             hoverEnabled: true
             acceptedButtons: Qt.LeftButton
             preventStealing: true
@@ -1621,6 +1931,33 @@ Item {
                 ctx.beginPath()
                 ctx.arc(cx, cy, s * 0.13, 0, Math.PI * 2, false)
                 ctx.stroke()
+            } else if (iconName === "battery") {
+                const level = Math.max(0, Math.min(1, value))
+                const bodyX = s * 0.19
+                const bodyY = s * 0.34
+                const bodyW = s * 0.56
+                const bodyH = s * 0.32
+                const capW = s * 0.07
+                const capH = s * 0.14
+                const pad = s * 0.055
+                const fillW = Math.max(0, (bodyW - pad * 2) * level)
+
+                ctx.lineWidth = Math.max(1.4, s * 0.060)
+                roundedRect(ctx, bodyX, bodyY, bodyW, bodyH, s * 0.070)
+                ctx.stroke()
+
+                ctx.beginPath()
+                ctx.moveTo(bodyX + bodyW, cy - capH / 2)
+                ctx.lineTo(bodyX + bodyW + capW, cy - capH / 2)
+                ctx.lineTo(bodyX + bodyW + capW, cy + capH / 2)
+                ctx.lineTo(bodyX + bodyW, cy + capH / 2)
+                ctx.stroke()
+
+                if (fillW > 0) {
+                    ctx.fillStyle = colorString(lineColor, level <= 0.18 ? 0.52 : 0.74)
+                    roundedRect(ctx, bodyX + pad, bodyY + pad, fillW, bodyH - pad * 2, s * 0.042)
+                    ctx.fill()
+                }
             } else {
                 ctx.beginPath()
                 ctx.arc(cx, cy, s * 0.28, 0, Math.PI * 2, false)
