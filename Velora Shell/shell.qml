@@ -99,7 +99,6 @@ ShellRoot {
     readonly property string visibleQuickPopupType: quickPopupVisible ? activeQuickPopupType : renderedQuickPopupType
     readonly property var focusItems: [
         "clock",
-        "theme",
         "search",
         "workspace1",
         "workspace2",

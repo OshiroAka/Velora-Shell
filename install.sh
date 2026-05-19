@@ -29,7 +29,7 @@ usage() {
     "  --deps-only          Only check/install dependencies, then exit" \
     "  --deps-dry-run       Print dependency install plan without installing" \
     "  --no-deps-check      Do not warn about missing dependencies" \
-    "  --skip-hypr          Do not edit Hyprland config" \
+    "  --skip-hypr          Do not edit Hyprland config or add SUPER+K" \
     "  --start              Start Velora Shell after install" \
     "  --validate           Run a short Quickshell load check after install" \
     "  -h, --help           Show this help"
@@ -139,6 +139,11 @@ dedupe_words() {
   done
 
   printf '%s\n' "$out"
+}
+
+shell_quote() {
+  local value="$1"
+  printf "'%s'" "$(printf '%s' "$value" | sed "s/'/'\\\\''/g")"
 }
 
 detect_pkg_manager() {
@@ -400,7 +405,7 @@ install_runtime() {
 }
 
 patch_hyprland() {
-  local tmp_file backup_file include_dir
+  local tmp_file backup_file include_dir install_dir_quoted
 
   if [ "$SKIP_HYPR" = "1" ]; then
     log "Hyprland config skipped"
@@ -416,14 +421,15 @@ patch_hyprland() {
   esac
 
   include_dir="$(dirname "$HYPR_INCLUDE")"
+  install_dir_quoted="$(shell_quote "$INSTALL_DIR")"
   mkdir -p "$include_dir"
-  cat > "$HYPR_INCLUDE" <<'EOF'
+  cat > "$HYPR_INCLUDE" <<EOF
 # Velora Shell Hyprland rules
 # Matches velora-shell and every velora-shell-* layer namespace.
 layerrule = blur on, match:namespace ^velora-shell($|-.*)
 layerrule = blur_popups on, match:namespace ^velora-shell($|-.*)
 layerrule = ignore_alpha 0.02, match:namespace ^velora-shell($|-.*)
-bind = SUPER, K, exec, qs -c velora-shell ipc call velora wallpaper
+bind = SUPER, K, exec, qs ipc -p ${install_dir_quoted} call velora wallpaper
 EOF
   log "Hyprland snippet written: $HYPR_INCLUDE"
 
@@ -448,8 +454,10 @@ EOF
     /^[[:space:]]*source[[:space:]]*=[[:space:]]*.*velora-hyprland\.conf[[:space:]]*$/ { next }
     /^[[:space:]]*#[[:space:]]*Velora Shell[[:space:]]*$/ { legacy = 1; next }
     legacy == 1 && /^[[:space:]]*layerrule[[:space:]]*=.*match:namespace[[:space:]]+\^?velora-shell/ { next }
+    legacy == 1 && /^[[:space:]]*bind[[:space:]]*=.*SUPER[[:space:]]*,[[:space:]]*K[[:space:]]*,.*velora.*wallpaper/ { next }
     legacy == 1 && /^[[:space:]]*$/ { legacy = 0; next }
     /^[[:space:]]*layerrule[[:space:]]*=.*match:namespace[[:space:]]+\^?velora-shell/ { next }
+    /^[[:space:]]*bind[[:space:]]*=.*SUPER[[:space:]]*,[[:space:]]*K[[:space:]]*,.*velora.*wallpaper/ { next }
     skip != 1 { print }
   ' "$HYPR_CONFIG" > "$tmp_file"
 

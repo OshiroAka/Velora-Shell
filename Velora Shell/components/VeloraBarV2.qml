@@ -140,7 +140,6 @@ Item {
     function popupProbeAt(y) {
         const pad = Math.round(4 * root.uiScale)
         const probes = [
-            { item: slotTheme, type: "theme" },
             { item: slotSearch, type: "search" },
             { item: slotVolume, type: "volume" },
             { item: slotWifi, type: "wifi" },
@@ -304,7 +303,6 @@ Item {
     }
 
     function focusSlot() {
-        if (focusTarget === "theme") return slotTheme
         if (focusTarget === "search") return slotSearch
         if (focusTarget === "workspace1") return slotWorkspace1
         if (focusTarget === "workspace2") return slotWorkspace2
@@ -427,11 +425,6 @@ Item {
     }
 
     function activateFocused() {
-        if (focusTarget === "theme") {
-            root.themeRequested(root.itemCenterY(slotTheme))
-            return
-        }
-
         if (focusTarget === "search") {
             root.quickPopupRequested("search", root.itemCenterY(slotSearch))
             return
@@ -856,19 +849,6 @@ Item {
         }
 
         ToolRow {
-            id: slotTheme
-
-            Layout.fillWidth: true
-            Layout.topMargin: Math.round(8 * root.uiScale)
-            label: root.tr("theme")
-            iconName: "palette"
-            command: ""
-            hoverPopupType: "theme"
-            selected: root.activePopupType === "theme"
-            onTriggered: root.themeRequested(root.itemCenterY(slotTheme))
-        }
-
-        ToolRow {
             id: slotSearch
 
             Layout.fillWidth: true
@@ -1028,6 +1008,7 @@ Item {
             UtilityButton {
                 id: slotSettings
 
+                compact: true
                 iconName: "settings"
                 hoverPopupType: "settings"
                 selected: root.activePopupType === "settings"
@@ -1468,12 +1449,13 @@ Item {
         property bool hovered: false
         property bool selected: false
         property bool passive: false
+        property bool compact: false
         property real iconRotation: 0
         property string hoverPopupType: ""
         signal triggered()
 
-        Layout.preferredWidth: Math.round(32 * root.uiScale)
-        Layout.preferredHeight: Math.round(32 * root.uiScale)
+        Layout.preferredWidth: Math.round((compact ? 24 : 32) * root.uiScale)
+        Layout.preferredHeight: Math.round((compact ? 24 : 32) * root.uiScale)
 
         Rectangle {
             anchors.fill: parent
@@ -1493,8 +1475,8 @@ Item {
 
         VeloraIcon {
             anchors.centerIn: parent
-            width: Math.round(26 * root.uiScale)
-            height: Math.round(26 * root.uiScale)
+            width: Math.round((button.compact ? 19 : 26) * root.uiScale)
+            height: Math.round((button.compact ? 19 : 26) * root.uiScale)
             iconName: button.iconName
             lineColor: button.selected ? (root.softStyle ? root.pink : root.lilac) : (button.hovered ? root.pink : root.inkSoft)
             value: button.iconName === "battery" ? root.normalizedBatteryLevel() : Math.max(0.08, Math.min(1, root.volume / 100))

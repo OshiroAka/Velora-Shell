@@ -879,8 +879,13 @@ Item {
 
             WheelHandler {
                 onWheel: function(event) {
-                    if (!root.rouletteSpinning)
-                        root.moveSelection(event.angleDelta.y < 0 ? 1 : -1)
+                    if (!root.rouletteSpinning) {
+                        const dx = Number(event.angleDelta.x)
+                        const dy = Number(event.angleDelta.y)
+                        const delta = Math.abs(dx) > Math.abs(dy) ? dx : dy
+                        if (delta !== 0)
+                            root.moveSelection(delta < 0 ? 1 : -1)
+                    }
                     event.accepted = true
                 }
             }
@@ -993,7 +998,7 @@ Item {
 
                 x: wheelStage.centerX - width / 2
                 y: wheelStage.centerY - height / 2
-                width: Math.round(wheelStage.innerRadiusX * 1.62)
+                width: Math.round(wheelStage.innerRadiusX * 1.18)
                 height: width
                 radius: width / 2
                 color: root.alpha(root.card, root.neon ? (visibilityHub.hovered ? 0.84 : 0.76) : (visibilityHub.hovered ? 0.92 : 0.84))
@@ -1032,7 +1037,7 @@ Item {
 
                     PanelIcon {
                         anchors.horizontalCenter: parent.horizontalCenter
-                        width: Math.max(18, Math.round(parent.parent.width * 0.16))
+                        width: Math.max(15, Math.round(parent.parent.width * 0.18))
                         height: width
                         kind: "hide"
                     }
@@ -1042,7 +1047,7 @@ Item {
                         text: "非表示"
                         color: root.ink
                         font.family: root.uiFont
-                        font.pixelSize: Math.max(13, Math.round(parent.parent.width * 0.105))
+                        font.pixelSize: Math.max(11, Math.round(parent.parent.width * 0.110))
                         font.weight: Font.Bold
                     }
 
@@ -1051,7 +1056,7 @@ Item {
                         text: "HIDE"
                         color: root.inkSoft
                         font.family: root.monoFont
-                        font.pixelSize: Math.max(8, Math.round(parent.parent.width * 0.060))
+                        font.pixelSize: Math.max(7, Math.round(parent.parent.width * 0.060))
                         font.weight: Font.Bold
                     }
                 }
