@@ -934,6 +934,7 @@ Item {
                         readonly property real startDegrees: root.wheelBoundaryAngle(offsetPhase - 0.5, slotCount)
                         readonly property real endDegrees: root.wheelBoundaryAngle(offsetPhase + 0.5, slotCount)
                         readonly property real focusAmount: Math.max(0, 1 - Math.min(1, Math.abs(offsetPhase)))
+                        readonly property real innerScale: 0.66 - focusAmount * 0.06
                         readonly property int wallpaperIndex: root.wheelIndex(index)
 
                         entry: root.wheelWallpaper(index)
@@ -944,8 +945,8 @@ Item {
                         centerY: wheelStage.centerY
                         outerRadiusX: wheelStage.outerRadiusX
                         outerRadiusY: wheelStage.outerRadiusY
-                        innerRadiusX: wheelStage.innerRadiusX * (1 - focusAmount * 0.120)
-                        innerRadiusY: wheelStage.innerRadiusY * (1 - focusAmount * 0.120)
+                        innerRadiusX: wheelStage.innerRadiusX * innerScale
+                        innerRadiusY: wheelStage.innerRadiusY * innerScale
                         startAngle: (-90 + startDegrees) * Math.PI / 180
                         endAngle: (-90 + endDegrees) * Math.PI / 180
                         z: Math.round(30 - Math.abs(offsetPhase) * 2) + (selected ? 10 : 0)
@@ -966,7 +967,7 @@ Item {
                 RouletteRimCanvas {
                     anchors.fill: parent
                     outerRadius: wheelStage.outerRadiusX
-                    innerRadius: wheelStage.innerRadiusX
+                    innerRadius: wheelStage.innerRadiusX * 0.66
                     centerX: wheelStage.centerX
                     centerY: wheelStage.centerY
                     slotCount: root.wheelSlotCount()
