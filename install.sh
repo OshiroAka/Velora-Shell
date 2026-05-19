@@ -182,6 +182,7 @@ pkg_for_command() {
         cava) printf 'cava' ;;
         wal) printf 'python-pywal16' ;;
         easyeffects) printf 'easyeffects calf lsp-plugins-lv2 zam-plugins-lv2' ;;
+        pipewire-pulse) printf 'pipewire-pulse' ;;
         xdg-open) printf 'xdg-utils' ;;
         awww) printf 'awww' ;;
         linux-wallpaperengine) printf 'linux-wallpaperengine' ;;
@@ -201,6 +202,7 @@ pkg_for_command() {
         cava) printf 'cava' ;;
         wal) printf 'python3-pywal' ;;
         easyeffects) printf 'easyeffects calf lsp-plugins-lv2 zam-plugins-lv2' ;;
+        pipewire-pulse) printf 'pipewire-pulse' ;;
         xdg-open) printf 'xdg-utils' ;;
         awww|linux-wallpaperengine) printf '' ;;
         *) printf '%s' "$cmd" ;;
@@ -219,6 +221,7 @@ pkg_for_command() {
         cava) printf 'cava' ;;
         wal) printf 'python3-pywal' ;;
         easyeffects) printf 'easyeffects calf lsp-plugins-lv2 zam-plugins-lv2' ;;
+        pipewire-pulse) printf 'pipewire-pulseaudio' ;;
         xdg-open) printf 'xdg-utils' ;;
         awww|linux-wallpaperengine) printf '' ;;
         *) printf '%s' "$cmd" ;;
@@ -237,6 +240,7 @@ pkg_for_command() {
         cava) printf 'cava' ;;
         wal) printf 'python3-pywal' ;;
         easyeffects) printf 'easyeffects calf lsp-plugins-lv2 zam-plugins-lv2' ;;
+        pipewire-pulse) printf 'pipewire-pulseaudio' ;;
         xdg-open) printf 'xdg-utils' ;;
         awww|linux-wallpaperengine) printf '' ;;
         *) printf '%s' "$cmd" ;;
@@ -248,6 +252,55 @@ pkg_for_command() {
   esac
 }
 
+audio_feature_packages() {
+  local manager="$1"
+
+  case "$manager" in
+    yay|paru|pacman)
+      printf '%s\n' easyeffects pipewire-pulse wireplumber lsp-plugins-lv2 calf zam-plugins-lv2
+      ;;
+    apt)
+      printf '%s\n' easyeffects pipewire-pulse wireplumber lsp-plugins-lv2 calf-plugins zam-plugins
+      ;;
+    dnf)
+      printf '%s\n' easyeffects pipewire-pulseaudio wireplumber lsp-plugins-lv2 calf zam-plugins-lv2
+      ;;
+    zypper)
+      printf '%s\n' easyeffects pipewire-pulseaudio wireplumber lsp-plugins-lv2 calf zam-plugins
+      ;;
+  esac
+}
+
+package_installed() {
+  local manager="$1"
+  local package="$2"
+
+  case "$manager" in
+    yay|paru|pacman)
+      pacman -Q "$package" >/dev/null 2>&1
+      ;;
+    apt)
+      dpkg-query -W -f='${Status}' "$package" 2>/dev/null | grep -q 'install ok installed'
+      ;;
+    dnf|zypper)
+      rpm -q "$package" >/dev/null 2>&1
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+missing_audio_feature_packages() {
+  local manager="$1"
+  local package
+
+  while IFS= read -r package; do
+    [ -n "$package" ] || continue
+    package_installed "$manager" "$package" || printf '%s\n' "$package"
+  done
+}
+
 dependency_commands() {
   printf '%s\n' \
     rsync \
@@ -256,6 +309,7 @@ dependency_commands() {
     cava \
     wal \
     easyeffects \
+    pipewire-pulse \
     awww \
     mpvpaper \
     linux-wallpaperengine
@@ -271,21 +325,23 @@ missing_dependency_commands() {
 }
 
 install_missing_dependencies() {
-  local manager missing packages manual cmd pkg sudo_cmd
+  local manager missing missing_audio packages manual cmd pkg sudo_cmd
 
   if [ "$CHECK_DEPS" != "1" ] && [ "$INSTALL_DEPS" != "1" ] && [ "$DEPS_DRY_RUN" != "1" ]; then
     return 0
   fi
 
+  manager="$(detect_pkg_manager)"
   missing="$(dependency_commands | missing_dependency_commands | tr '\n' ' ')"
   missing="$(dedupe_words $missing)"
+  missing_audio="$(missing_audio_feature_packages "$manager" | tr '\n' ' ')"
+  missing_audio="$(dedupe_words $missing_audio)"
 
-  if [ -z "$missing" ]; then
+  if [ -z "$missing" ] && [ -z "$missing_audio" ]; then
     log "all checked dependencies are available"
     return 0
   fi
 
-  manager="$(detect_pkg_manager)"
   packages=""
   manual=""
 
@@ -298,10 +354,15 @@ install_missing_dependencies() {
     fi
   done
 
+  if [ -n "$missing_audio" ]; then
+    packages="${packages}${packages:+ }${missing_audio}"
+  fi
+
   packages="$(dedupe_words $packages)"
   manual="$(dedupe_words $manual)"
 
-  warn "missing commands: $missing"
+  [ -z "$missing" ] || warn "missing commands: $missing"
+  [ -z "$missing_audio" ] || warn "missing audio packages: $missing_audio"
 
   if [ "$INSTALL_DEPS" != "1" ] && [ "$DEPS_DRY_RUN" != "1" ]; then
     warn "run ./install.sh --deps to try installing them automatically"
