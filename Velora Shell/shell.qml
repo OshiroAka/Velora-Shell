@@ -20,6 +20,7 @@ ShellRoot {
         NotificationServer.bodyMarkupSupported = true
         NotificationServer.actionsSupported = true
         NotificationServer.imageSupported = true
+        topWallpaperScan.running = true
     }
 
     Connections {
@@ -44,21 +45,34 @@ ShellRoot {
     property bool wallpaperSelectorWindowOpen: false
     property bool settingsPanelWindowOpen: false
     property bool wallpaperPreloadEnabled: false
+    property bool settingsPanelPreloadEnabled: false
+    property bool quickPopupPreloadEnabled: false
     property bool rightDashboardOpen: false
+    property bool topWallpaperPopupOpen: false
+    property bool topWallpaperKeyboardFocus: false
+    property int topWallpaperOffset: 0
+    property int topWallpaperSlideDirection: 0
+    property real topWallpaperSlideProgress: 0
     property bool leftMenuOpen: false
     property bool leftMenuHovering: false
+    property bool leftMenuPinned: false
     property bool leftMenuTriggerHovering: false
     property bool leftMenuPanelHovering: false
     property bool leftMediaWindowOpen: false
     property bool leftMediaWindowHovering: false
     property bool leftMediaWindowEntranceHold: false
     property real leftMediaWindowCenterY: 300
+    property string leftDetailWindowType: "media"
+    property real leftDetailSwitchProgress: 1
+    property bool leftMenuInteractiveFocus: false
     property bool leftMenuPreloadEnabled: false
     property string rightDashboardSection: "weather"
     property bool focusMode: false
     property int focusIndex: 0
     readonly property bool barOnRight: veloraTheme.barPosition === "right"
-    readonly property bool rightSoftLayout: barOnRight
+    readonly property bool leftMenuOnLeft: barOnRight
+    readonly property string leftMenuAttachSide: leftMenuOnLeft ? "left" : "right"
+    readonly property bool rightSoftLayout: true
     readonly property int sidebarVisualWidth: 112
     readonly property int desktopFrameMargin: 14
     readonly property int sidebarOuterMargin: desktopFrameMargin
@@ -75,6 +89,21 @@ ShellRoot {
     readonly property real desktopFrameMatteOpacity: sidebarPanelGlassAlpha()
     readonly property int popupFrameGap: 14
     readonly property string popupAttachSide: barOnRight ? "right" : "left"
+    readonly property int topWallpaperPopupMargin: 8
+    readonly property int topWallpaperPopupRadius: 28
+    readonly property int topWallpaperSliceCount: 10
+    readonly property int topWallpaperSelectedSlot: Math.floor(topWallpaperSliceCount / 2)
+    readonly property string topWallpaperHomeDir: Quickshell.env("HOME") || ""
+    readonly property string topWallpaperDir: topWallpaperHomeDir + "/Pictures/Wallpapers"
+    readonly property string topWallpaperScanScript: Quickshell.shellDir + "/scripts/velora-wallpaper-scan"
+    readonly property var topWallpaperFallbackEntries: [
+        { kind: "static", path: topWallpaperDir + "/static/WPP_blue.png", preview: topWallpaperDir + "/static/WPP_blue.png", title: "WPP_blue" },
+        { kind: "static", path: topWallpaperDir + "/static/wp15708544.jpg", preview: topWallpaperDir + "/static/wp15708544.jpg", title: "wp15708544" },
+        { kind: "static", path: topWallpaperDir + "/static/anime-anime-devushki-anime-anime-girls-belye-volosy-golub-zh.jpg", preview: topWallpaperDir + "/static/anime-anime-devushki-anime-anime-girls-belye-volosy-golub-zh.jpg", title: "white girl" },
+        { kind: "static", path: topWallpaperDir + "/static/wp12419427-tokyo-night-4k-wallpapers.jpg", preview: topWallpaperDir + "/static/wp12419427-tokyo-night-4k-wallpapers.jpg", title: "tokyo night" },
+        { kind: "static", path: topWallpaperDir + "/static/wp6570018-tokyo-aesthetic-wallpapers.jpg", preview: topWallpaperDir + "/static/wp6570018-tokyo-aesthetic-wallpapers.jpg", title: "tokyo morning" }
+    ]
+    property var topWallpaperEntries: topWallpaperFallbackEntries
     readonly property int leftMenuWidth: 348
     readonly property int leftMenuTriggerWidth: 18
     readonly property int leftMenuFrameInset: frameVisualsEnabled ? desktopFrameMargin + 1 : desktopFrameMargin
@@ -97,6 +126,242 @@ ShellRoot {
     readonly property bool quickPopupVisible: activeQuickPopupType.length > 0
     readonly property bool quickPopupPanelVisible: quickPopupVisible || quickPopupWindowOpen
     readonly property string visibleQuickPopupType: quickPopupVisible ? activeQuickPopupType : renderedQuickPopupType
+
+    function shellQuote(value) {
+        return "'" + String(value || "").replace(/'/g, "'\"'\"'") + "'"
+    }
+
+    function clockAlertCommand(title, message) {
+        const sound = "/usr/share/sounds/freedesktop/stereo/alarm-clock-elapsed.oga"
+        return "title=" + shellQuote(title || "Velora") + "; body=" + shellQuote(message || "Clock alert") + "; sound=" + shellQuote(sound) + "; " +
+            "notify-send -a Velora -u critical -t 12000 \"$title\" \"$body\" >/dev/null 2>&1 || true; " +
+            "if [ -f \"$sound\" ]; then " +
+            "for i in 1 2 3; do " +
+            "if command -v pw-play >/dev/null 2>&1; then pw-play \"$sound\" >/dev/null 2>&1; " +
+            "elif command -v paplay >/dev/null 2>&1; then paplay \"$sound\" >/dev/null 2>&1; " +
+            "elif command -v mpv >/dev/null 2>&1; then mpv --no-video --really-quiet \"$sound\" >/dev/null 2>&1; " +
+            "fi; sleep 0.18; done; fi"
+    }
+
+    function sendClockNotification(message, title) {
+        if (leftClockNotifyProcess.running)
+            leftClockNotifyProcess.running = false
+        leftClockNotifyProcess.command = ["bash", "-lc", clockAlertCommand(title || "Velora", message)]
+        leftClockNotifyProcess.running = true
+    }
+
+    QtObject {
+        id: leftClockState
+
+        property date currentDate: new Date()
+        property var alarms: [
+            { time: "07:00", detail: "Weekday", enabled: true },
+            { time: "08:30", detail: "Weekend", enabled: true },
+            { time: "22:00", detail: "Daily", enabled: true }
+        ]
+        property string lastAlarmMinute: ""
+        property int timerSeconds: 1800
+        property int timerRemaining: 1800
+        property bool timerRunning: false
+
+        function alarmAt(index) {
+            if (index >= 0 && index < alarms.length)
+                return alarms[index]
+            return { time: "07:00", detail: "", enabled: false }
+        }
+
+        function replaceAlarms(next) {
+            alarms = next.slice()
+            lastAlarmMinute = ""
+        }
+
+        function setAlarmEnabled(index, enabled) {
+            if (index < 0 || index >= alarms.length)
+                return
+            var next = alarms.slice()
+            var item = Object.assign({}, next[index])
+            item.enabled = enabled
+            next[index] = item
+            replaceAlarms(next)
+        }
+
+        function addAlarm() {
+            var d = new Date(currentDate.getTime() + 60 * 60 * 1000)
+            var next = alarms.slice()
+            next.push({
+                time: String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0"),
+                detail: "Custom",
+                enabled: true
+            })
+            replaceAlarms(next)
+        }
+
+        function shiftAlarmMinutes(index, delta) {
+            if (index < 0 || index >= alarms.length)
+                return
+            var item = Object.assign({}, alarms[index])
+            var parts = String(item.time || "07:00").split(":")
+            var total = ((parseInt(parts[0]) || 0) * 60 + (parseInt(parts[1]) || 0) + delta + 1440) % 1440
+            item.time = String(Math.floor(total / 60)).padStart(2, "0") + ":" + String(total % 60).padStart(2, "0")
+            var next = alarms.slice()
+            next[index] = item
+            replaceAlarms(next)
+        }
+
+        function removeAlarm(index) {
+            if (alarms.length <= 1 || index < 0 || index >= alarms.length)
+                return
+            var next = alarms.slice()
+            next.splice(index, 1)
+            replaceAlarms(next)
+        }
+
+        function checkAlarms() {
+            const hhmm = Qt.formatTime(currentDate, "HH:mm")
+            const dayKey = Qt.formatDate(currentDate, "yyyyMMdd") + "-" + hhmm
+            for (var i = 0; i < alarms.length; ++i) {
+                const alarm = alarmAt(i)
+                if (alarm.enabled && hhmm === alarm.time && lastAlarmMinute !== dayKey) {
+                    lastAlarmMinute = dayKey
+                    root.sendClockNotification("Alarm " + alarm.time, "Velora alarm")
+                    break
+                }
+            }
+        }
+
+        function adjustTimerSeconds(delta) {
+            const next = Math.max(60, Math.min(24 * 3600, timerSeconds + delta))
+            timerSeconds = next
+            if (!timerRunning)
+                timerRemaining = next
+            else
+                timerRemaining = Math.max(1, Math.min(24 * 3600, timerRemaining + delta))
+        }
+
+        function setTimerPreset(seconds) {
+            timerSeconds = seconds
+            timerRemaining = seconds
+            timerRunning = false
+        }
+
+        function toggleTimer() {
+            if (timerRemaining <= 0)
+                timerRemaining = timerSeconds
+            timerRunning = !timerRunning
+        }
+
+        function resetTimer() {
+            timerRunning = false
+            timerRemaining = timerSeconds
+        }
+
+        function finishTimer() {
+            timerRunning = false
+            timerRemaining = 0
+            root.sendClockNotification("Timer finished", "Velora timer")
+        }
+
+    }
+
+    Timer {
+        interval: 1000
+        running: true
+        repeat: true
+        triggeredOnStart: true
+        onTriggered: {
+            leftClockState.currentDate = new Date()
+            leftClockState.checkAlarms()
+        }
+    }
+
+    Timer {
+        interval: 1000
+        running: leftClockState.timerRunning
+        repeat: true
+        onTriggered: {
+            if (leftClockState.timerRemaining > 1)
+                leftClockState.timerRemaining -= 1
+            else
+                leftClockState.finishTimer()
+        }
+    }
+
+    Process {
+        id: leftClockNotifyProcess
+
+        running: false
+        command: ["bash", "-lc", "true"]
+        onExited: running = false
+    }
+
+    Process {
+        id: topWallpaperScan
+
+        running: false
+        property var tmp: []
+        command: [root.topWallpaperScanScript]
+
+        onStarted: tmp = []
+
+        stdout: SplitParser {
+            onRead: function(data) {
+                const line = String(data).trim()
+                if (!line || line === "BEGIN")
+                    return
+
+                if (line === "END") {
+                    if (topWallpaperScan.tmp.length > 0)
+                        root.topWallpaperEntries = topWallpaperScan.tmp.slice()
+                    return
+                }
+
+                const parts = line.split("|")
+                if (parts.length < 3)
+                    return
+
+                const kind = parts[0].toLowerCase()
+                const path = parts[1]
+                const preview = parts[2]
+                const title = parts.length > 3 ? parts.slice(3).join("|") : path
+                topWallpaperScan.tmp.push({
+                    kind: kind,
+                    path: path,
+                    preview: preview,
+                    title: title
+                })
+            }
+        }
+
+        onExited: {
+            running = false
+            if (tmp.length > 0)
+                root.topWallpaperEntries = tmp.slice()
+        }
+    }
+
+    NumberAnimation {
+        id: topWallpaperSlideAnimation
+
+        target: root
+        property: "topWallpaperSlideProgress"
+        from: 0
+        to: 1
+        duration: veloraTheme.motionEnabled ? 520 : 1
+        easing.type: Easing.BezierSpline
+        easing.bezierCurve: veloraTheme.motionCurveEmphasizedDecel
+
+        onStopped: {
+            if (root.topWallpaperSlideDirection !== 0 && root.topWallpaperSlideProgress >= 1) {
+                const entries = root.topWallpaperEntries && root.topWallpaperEntries.length > 0 ? root.topWallpaperEntries : root.topWallpaperFallbackEntries
+                if (entries && entries.length > 0)
+                    root.topWallpaperOffset = ((root.topWallpaperOffset + root.topWallpaperSlideDirection) % entries.length + entries.length) % entries.length
+            }
+
+            root.topWallpaperSlideProgress = 0
+            root.topWallpaperSlideDirection = 0
+        }
+    }
+
     readonly property var focusItems: [
         "clock",
         "search",
@@ -111,7 +376,7 @@ ShellRoot {
         "wifi",
         "brightness",
         "notifications",
-        "settings",
+        "bluetooth",
         "avatar"
     ]
     readonly property string focusTarget: focusItems[Math.max(0, Math.min(focusIndex, focusItems.length - 1))]
@@ -142,6 +407,59 @@ ShellRoot {
         if (!frameVisualsMounted)
             return "transparent"
         return veloraTheme.alpha(veloraTheme.surfaceSidebar, sidebarPanelGlassAlpha())
+    }
+
+    function topWallpaperPopupWidth(screenWidth) {
+        const available = Math.max(760, screenWidth - barReserveWidth - desktopFrameMargin * 4)
+        return Math.round(Math.min(1340, Math.max(960, Math.min(available, screenWidth * 0.82))))
+    }
+
+    function topWallpaperPopupHeight(screenHeight) {
+        return Math.round(Math.min(840, Math.max(640, screenHeight * 0.72)))
+    }
+
+    function topWallpaperEntry(index) {
+        const entries = topWallpaperEntries && topWallpaperEntries.length > 0 ? topWallpaperEntries : topWallpaperFallbackEntries
+        if (!entries || entries.length <= 0)
+            return { preview: "", path: "", title: "" }
+        const normalizedIndex = ((topWallpaperOffset + index) % entries.length + entries.length) % entries.length
+        return entries[normalizedIndex]
+    }
+
+    function topWallpaperSlideEase() {
+        const t = Math.max(0, Math.min(1, topWallpaperSlideProgress))
+        return 1 - Math.pow(1 - t, 3)
+    }
+
+    function moveTopWallpaper(delta) {
+        const entries = topWallpaperEntries && topWallpaperEntries.length > 0 ? topWallpaperEntries : topWallpaperFallbackEntries
+        if (!entries || entries.length <= 1)
+            return
+
+        if (topWallpaperSlideAnimation.running)
+            topWallpaperSlideAnimation.complete()
+
+        topWallpaperSlideDirection = delta > 0 ? 1 : -1
+        topWallpaperSlideProgress = 0
+        topWallpaperSlideAnimation.start()
+    }
+
+    function toggleTopWallpaperPopup(forceOpen, withKeyboardFocus) {
+        const nextOpen = forceOpen === true ? true : (forceOpen === false ? false : !topWallpaperPopupOpen)
+        topWallpaperPopupOpen = nextOpen
+        topWallpaperKeyboardFocus = nextOpen && withKeyboardFocus === true
+
+        if (topWallpaperPopupOpen) {
+            wallpaperSelectorOpen = false
+            wallpaperSelectorWindowOpen = false
+            settingsPanelOpen = false
+            settingsPanelWindowOpen = false
+            quickPopupType = ""
+            rightDashboardOpen = false
+
+            if (!topWallpaperScan.running)
+                topWallpaperScan.running = true
+        }
     }
 
     function sidebarBarMaterialColor() {
@@ -189,7 +507,11 @@ ShellRoot {
     }
 
     function enterFocus() {
-        exitFocus()
+        wallpaperSelectorOpen = false
+        settingsPanelOpen = false
+        closeQuickPopup()
+        focusIndex = Math.max(0, Math.min(focusIndex, focusItems.length - 1))
+        focusMode = true
     }
 
     function exitFocus() {
@@ -197,7 +519,10 @@ ShellRoot {
     }
 
     function toggleFocus() {
-        exitFocus()
+        if (focusMode)
+            exitFocus()
+        else
+            enterFocus()
     }
 
     function moveFocus(dir) {
@@ -215,6 +540,8 @@ ShellRoot {
             return "brightness"
         if (target === "notifications")
             return "notifications"
+        if (target === "bluetooth")
+            return "bluetooth"
         return ""
     }
 
@@ -253,9 +580,12 @@ ShellRoot {
 
     onLeftMenuOpenChanged: {
         if (!leftMenuOpen) {
+            leftMenuPinned = false
+            leftMenuInteractiveFocus = false
             leftMediaWindowOpen = false
             leftMediaWindowHovering = false
             leftMediaWindowEntranceHold = false
+            leftDetailSwitchProgress = 1
         }
     }
 
@@ -268,6 +598,8 @@ ShellRoot {
             return 248
         if (type === "notifications")
             return 414
+        if (type === "bluetooth")
+            return 456
         if (type === "wallpaperVisibility")
             return 132
         return 38
@@ -286,6 +618,8 @@ ShellRoot {
             return 938
         if (type === "notifications")
             return 982
+        if (type === "bluetooth")
+            return 1028
         if (type === "wallpaperVisibility")
             return defaultQuickPopupCenterY("theme")
         return 290
@@ -321,6 +655,22 @@ ShellRoot {
         exitFocus()
         prepareWallpaperSelector(centerY)
         wallpaperSelectorOpen = forceOpen ? true : !wallpaperSelectorOpen
+        focusWallpaperSelectorInput()
+    }
+
+    function focusWallpaperSelectorInput() {
+        if (!wallpaperSelectorOpen)
+            return
+
+        Qt.callLater(function() {
+            if (!root.wallpaperSelectorOpen)
+                return
+
+            if (typeof inlineModalLayer !== "undefined")
+                inlineModalLayer.forceActiveFocus()
+            if (typeof inlineWallpaperLoader !== "undefined" && inlineWallpaperLoader.item)
+                inlineWallpaperLoader.item.forceActiveFocus()
+        })
     }
 
     function prepareSettingsPanel(centerY) {
@@ -413,6 +763,40 @@ ShellRoot {
         openQuickPopup(type, centerY)
     }
 
+    function openAdaptiveBarPopup(type, centerY) {
+        if (barOnRight) {
+            toggleQuickPopup(type, centerY)
+            return
+        }
+
+        exitFocus()
+        discardQuickPopupAnimation()
+        closeRightDashboard()
+        wallpaperSelectorOpen = false
+        settingsPanelOpen = false
+        leftMediaWindowOpen = false
+        leftMediaWindowEntranceHold = false
+        leftDetailSwitchProgress = 1
+        leftMenuPinned = true
+        leftMenuInteractiveFocus = type === "search"
+        openLeftMenu()
+    }
+
+    function previewAdaptiveBarPopup(type, centerY) {
+        if (barOnRight) {
+            previewSidebarPopup(type, centerY)
+            return
+        }
+
+        discardQuickPopupAnimation()
+        closeRightDashboard()
+    }
+
+    function endAdaptiveBarPopupHover(type) {
+        if (barOnRight)
+            endSidebarPopupHover(type)
+    }
+
     function openRightDashboard(section) {
         if (rightSoftLayout) {
             rightDashboardOpen = false
@@ -434,7 +818,7 @@ ShellRoot {
     }
 
     function updateLeftMenuHovering() {
-        leftMenuHovering = leftMenuTriggerHovering || leftMenuPanelHovering || leftMediaWindowHovering || leftMediaWindowEntranceHold
+        leftMenuHovering = leftMenuPinned || leftMenuTriggerHovering || leftMenuPanelHovering || leftMediaWindowHovering || leftMediaWindowEntranceHold
     }
 
     function scheduleLeftMenuClose() {
@@ -443,13 +827,52 @@ ShellRoot {
             leftMenuCloseTimer.restart()
     }
 
-    function openLeftMediaWindow(centerY) {
+    function openLeftDetailWindow(type, centerY, pinned) {
         const value = Number(centerY)
+        const nextType = type && type.length > 0 ? type : "media"
+        leftMenuPinned = pinned === true
+        leftMenuInteractiveFocus = false
+        const switching = leftMediaWindowOpen && leftDetailWindowType !== nextType
+        leftDetailWindowType = nextType
+        if (switching) {
+            leftDetailSwitchProgress = 0
+            Qt.callLater(function() {
+                if (root.leftMediaWindowOpen)
+                    root.leftDetailSwitchProgress = 1
+            })
+        } else {
+            leftDetailSwitchProgress = 1
+        }
         leftMediaWindowCenterY = value > 0 ? value : 300
         leftMediaWindowEntranceHold = true
         leftMediaWindowEntranceHoldTimer.restart()
         leftMediaWindowOpen = true
         openLeftMenu()
+    }
+
+    function openLeftMediaWindow(centerY) {
+        openLeftDetailWindow("media", centerY)
+    }
+
+    function leftDetailWindowWidth(type) {
+        if (type === "paint")
+            return 720
+        if (type === "clock")
+            return 430
+        if (type === "wallpaper")
+            return 380
+        return leftMediaWindowWidth
+    }
+
+    function leftDetailWindowHeight(type, screenHeight) {
+        const available = Math.max(360, screenHeight - leftMenuFrameInset * 2)
+        if (type === "paint")
+            return Math.min(920, available)
+        if (type === "clock")
+            return Math.min(900, available)
+        if (type === "wallpaper")
+            return Math.min(1040, available)
+        return Math.min(leftMediaWindowHeight, available)
     }
 
     function leftMediaWindowY(panelHeight, screenHeight) {
@@ -488,6 +911,12 @@ ShellRoot {
         return barPanelWidth + frameVisualInset + popupFrameGap
     }
 
+    function leftMenuAttachedPopupX(screenWidth, popupWidth) {
+        if (leftMenuOnLeft)
+            return leftMenuFrameInset + leftMenuWidth + leftMediaWindowGap
+        return Math.round(Math.max(frameVisualInset, screenWidth - leftMenuFrameInset - leftMenuWidth - leftMediaWindowGap - popupWidth))
+    }
+
     function quickPopupWidth(type) {
         if (type === "theme")
             return 820
@@ -501,6 +930,8 @@ ShellRoot {
             return 286
         if (type === "notifications")
             return 360
+        if (type === "bluetooth")
+            return 340
         if (type === "wallpaperVisibility")
             return 372
         return 286
@@ -519,6 +950,8 @@ ShellRoot {
             return 376
         if (type === "notifications")
             return 560
+        if (type === "bluetooth")
+            return 392
         if (type === "wallpaperVisibility")
             return 470
         return 324
@@ -545,8 +978,10 @@ ShellRoot {
         repeat: false
         onTriggered: {
             root.updateLeftMenuHovering()
-            if (!root.leftMenuHovering)
+            if (!root.leftMenuHovering) {
+                root.leftMenuInteractiveFocus = false
                 root.leftMenuOpen = false
+            }
         }
     }
 
@@ -561,6 +996,15 @@ ShellRoot {
         }
     }
 
+    Behavior on leftDetailSwitchProgress {
+        enabled: veloraTheme.motionEnabled
+        NumberAnimation {
+            duration: veloraTheme.motionPanelGeometry
+            easing.type: veloraTheme.motionEaseEmphasized
+            easing.bezierCurve: veloraTheme.motionEmphasizedCurve
+        }
+    }
+
     Timer {
         id: leftMenuPreloadTimer
 
@@ -568,6 +1012,15 @@ ShellRoot {
         running: true
         repeat: false
         onTriggered: root.leftMenuPreloadEnabled = true
+    }
+
+    Timer {
+        id: quickPopupPreloadTimer
+
+        interval: 1000
+        running: true
+        repeat: false
+        onTriggered: root.quickPopupPreloadEnabled = true
     }
 
     Timer {
@@ -604,6 +1057,15 @@ ShellRoot {
     }
 
     Timer {
+        id: settingsPanelPreloadTimer
+
+        interval: 1300
+        running: true
+        repeat: false
+        onTriggered: root.settingsPanelPreloadEnabled = true
+    }
+
+    Timer {
         id: settingsPanelUnmountTimer
 
         interval: veloraTheme.motionUnmountDelay
@@ -637,6 +1099,22 @@ ShellRoot {
             theme()
         }
 
+        function topWallpaper(): void {
+            root.toggleTopWallpaperPopup(null, true)
+        }
+
+        function topWallpaperNext(): void {
+            root.moveTopWallpaper(1)
+        }
+
+        function topWallpaperPrevious(): void {
+            root.moveTopWallpaper(-1)
+        }
+
+        function closeTopWallpaper(): void {
+            root.toggleTopWallpaperPopup(false, false)
+        }
+
         function wallpaperFilter(): void {
             root.openWallpaperVisibility(root.defaultQuickPopupCenterY("theme"))
         }
@@ -658,23 +1136,27 @@ ShellRoot {
         }
 
         function search(): void {
-            root.openQuickPopup("search")
+            root.openAdaptiveBarPopup("search", root.defaultQuickPopupCenterY("search"))
         }
 
         function volume(): void {
-            root.openQuickPopup("volume")
+            root.openAdaptiveBarPopup("volume", root.defaultQuickPopupCenterY("volume"))
         }
 
         function wifi(): void {
-            root.openQuickPopup("wifi")
+            root.openAdaptiveBarPopup("wifi", root.defaultQuickPopupCenterY("wifi"))
         }
 
         function brightness(): void {
-            root.openQuickPopup("brightness")
+            root.openAdaptiveBarPopup("brightness", root.defaultQuickPopupCenterY("brightness"))
         }
 
         function notifications(): void {
-            root.openQuickPopup("notifications")
+            root.openAdaptiveBarPopup("notifications", root.defaultQuickPopupCenterY("notifications"))
+        }
+
+        function bluetooth(): void {
+            root.openAdaptiveBarPopup("bluetooth", root.defaultQuickPopupCenterY("bluetooth"))
         }
 
         function weather(): void {
@@ -694,12 +1176,26 @@ ShellRoot {
         }
 
         function leftMedia(): void {
-            root.openLeftMediaWindow(root.leftMediaWindowCenterY > 0 ? root.leftMediaWindowCenterY : 560)
+            root.openLeftDetailWindow("media", root.leftMediaWindowCenterY > 0 ? root.leftMediaWindowCenterY : 560, true)
+        }
+
+        function leftClock(): void {
+            root.openLeftDetailWindow("clock", root.leftMediaWindowCenterY > 0 ? root.leftMediaWindowCenterY : 560, true)
+        }
+
+        function leftPaint(): void {
+            root.openLeftDetailWindow("paint", root.leftMediaWindowCenterY > 0 ? root.leftMediaWindowCenterY : 560, true)
+        }
+
+        function leftWallpaper(): void {
+            root.openLeftDetailWindow("wallpaper", root.leftMediaWindowCenterY > 0 ? root.leftMediaWindowCenterY : 560, true)
         }
 
         function closeLeftMedia(): void {
+            root.leftMenuPinned = false
             root.leftMediaWindowOpen = false
             root.leftMediaWindowEntranceHold = false
+            root.leftDetailSwitchProgress = 1
         }
 
         function memo(): void {
@@ -732,6 +1228,574 @@ ShellRoot {
     }
 
     Variants {
+        model: root.topWallpaperPopupOpen ? Quickshell.screens : []
+
+        PanelWindow {
+            id: topWallpaperPopupPanel
+
+            required property var modelData
+            readonly property int popupWidth: root.topWallpaperPopupWidth(modelData.width > 0 ? modelData.width : 1920)
+            readonly property int popupHeight: root.topWallpaperPopupHeight(modelData.height > 0 ? modelData.height : 1200)
+
+            screen: modelData
+            color: "transparent"
+            implicitWidth: modelData.width > 0 ? modelData.width : popupWidth
+            implicitHeight: root.topWallpaperPopupMargin + popupHeight + 18
+            exclusiveZone: 0
+            exclusionMode: ExclusionMode.Ignore
+            focusable: root.topWallpaperKeyboardFocus
+
+            WlrLayershell.layer: WlrLayer.Top
+            WlrLayershell.namespace: "velora-shell-wallpaper-top-popup"
+            WlrLayershell.keyboardFocus: root.topWallpaperKeyboardFocus ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
+
+            anchors {
+                top: true
+                left: true
+                right: true
+            }
+
+            mask: Region {
+                Region {
+                    item: topWallpaperPopupSurface
+                    radius: root.topWallpaperPopupRadius
+                }
+            }
+
+            Item {
+                id: topWallpaperPopupStage
+
+                x: Math.round((parent.width - width + (root.barOnRight ? root.barReserveWidth : -root.barReserveWidth)) / 2)
+                y: root.topWallpaperPopupMargin
+                width: topWallpaperPopupPanel.popupWidth
+                height: topWallpaperPopupPanel.popupHeight
+                focus: root.topWallpaperKeyboardFocus
+
+                Keys.onEscapePressed: {
+                    root.toggleTopWallpaperPopup(false, false)
+                }
+
+                Keys.onPressed: function(event) {
+                    if (event.key === Qt.Key_Left || event.key === Qt.Key_A) {
+                        root.moveTopWallpaper(-1)
+                        event.accepted = true
+                        return
+                    }
+
+                    if (event.key === Qt.Key_Right || event.key === Qt.Key_D) {
+                        root.moveTopWallpaper(1)
+                        event.accepted = true
+                        return
+                    }
+                }
+
+                Component.onCompleted: {
+                    if (root.topWallpaperKeyboardFocus)
+                        forceActiveFocus()
+                }
+
+                Connections {
+                    target: root
+
+                    function onTopWallpaperKeyboardFocusChanged() {
+                        if (root.topWallpaperKeyboardFocus)
+                            topWallpaperPopupStage.forceActiveFocus()
+                    }
+                }
+
+                DropShadow {
+                    anchors.fill: topWallpaperPopupSurface
+                    horizontalOffset: 0
+                    verticalOffset: 12
+                    radius: 34
+                    samples: 57
+                    color: veloraTheme.alpha(veloraTheme.shadowColor, veloraTheme.themeMode === "dark" ? 0.16 : 0.10)
+                    source: topWallpaperPopupSurface
+                }
+
+                Rectangle {
+                    id: topWallpaperPopupSurface
+
+                    anchors.fill: parent
+                    radius: root.topWallpaperPopupRadius
+                    color: "transparent"
+                    border.width: 0
+                    border.color: root.desktopFrameBorderColor()
+                    antialiasing: true
+                }
+
+                Item {
+                    id: topWallpaperImageSlices
+
+                    readonly property int edgeFadeHeight: Math.round(Math.min(46, Math.max(26, height * 0.23)))
+
+                    anchors.fill: topWallpaperPopupSurface
+                    visible: false
+                    clip: true
+                    layer.enabled: true
+                    layer.effect: OpacityMask {
+                        maskSource: topWallpaperClipMask
+                    }
+
+                    Canvas {
+                        id: topWallpaperClipMask
+
+                        anchors.fill: parent
+                        visible: false
+
+                        onPaint: {
+                            const ctx = getContext("2d")
+                            const fadeRatio = Math.max(0.12, Math.min(0.27, topWallpaperImageSlices.edgeFadeHeight / Math.max(1, height)))
+                            const r = Math.min(root.topWallpaperPopupRadius, width / 2, height / 2)
+                            const gradient = ctx.createLinearGradient(0, 0, 0, height)
+
+                            ctx.clearRect(0, 0, width, height)
+                            gradient.addColorStop(0.00, "rgba(255,255,255,0.00)")
+                            gradient.addColorStop(fadeRatio * 0.34, "rgba(255,255,255,0.28)")
+                            gradient.addColorStop(fadeRatio, "rgba(255,255,255,1.00)")
+                            gradient.addColorStop(1.00, "rgba(255,255,255,1.00)")
+
+                            ctx.beginPath()
+                            ctx.moveTo(r, 0)
+                            ctx.lineTo(width - r, 0)
+                            ctx.quadraticCurveTo(width, 0, width, r)
+                            ctx.lineTo(width, height - r)
+                            ctx.quadraticCurveTo(width, height, width - r, height)
+                            ctx.lineTo(r, height)
+                            ctx.quadraticCurveTo(0, height, 0, height - r)
+                            ctx.lineTo(0, r)
+                            ctx.quadraticCurveTo(0, 0, r, 0)
+                            ctx.closePath()
+                            ctx.fillStyle = gradient
+                            ctx.fill()
+                        }
+
+                        Component.onCompleted: requestPaint()
+                        onWidthChanged: requestPaint()
+                        onHeightChanged: requestPaint()
+                    }
+
+                    Repeater {
+                        model: root.topWallpaperSliceCount + 2
+
+                        delegate: Item {
+                            id: wallpaperSlice
+
+                            readonly property int logicalIndex: index - 1 - root.topWallpaperSelectedSlot
+                            readonly property real slotWidth: topWallpaperImageSlices.width / Math.max(1, root.topWallpaperSliceCount)
+                            readonly property real sliceSkew: Math.max(22, Math.min(36, topWallpaperImageSlices.width * 0.038))
+                            readonly property real slideOffset: -root.topWallpaperSlideDirection * root.topWallpaperSlideEase() * slotWidth
+                            readonly property var entry: root.topWallpaperEntry(logicalIndex)
+
+                            anchors.fill: parent
+                            layer.enabled: true
+                            layer.effect: OpacityMask {
+                                maskSource: wallpaperSliceMask
+                            }
+
+                            Canvas {
+                                id: wallpaperSliceMask
+
+                                anchors.fill: parent
+                                visible: false
+
+                                onPaint: {
+                                    const ctx = getContext("2d")
+                                    const left = wallpaperSlice.logicalIndex * wallpaperSlice.slotWidth + wallpaperSlice.slideOffset
+                                    const right = left + wallpaperSlice.slotWidth
+                                    const skew = wallpaperSlice.sliceSkew
+
+                                    ctx.clearRect(0, 0, width, height)
+                                    ctx.beginPath()
+                                    ctx.moveTo(left + skew, -8)
+                                    ctx.lineTo(right + skew, -8)
+                                    ctx.lineTo(right - skew, height + 8)
+                                    ctx.lineTo(left - skew, height + 8)
+                                    ctx.closePath()
+                                    ctx.fillStyle = "white"
+                                    ctx.fill()
+                                }
+
+                                Component.onCompleted: requestPaint()
+                                onWidthChanged: requestPaint()
+                                onHeightChanged: requestPaint()
+
+                                Connections {
+                                    target: root
+
+                                    function onTopWallpaperSlideProgressChanged() { wallpaperSliceMask.requestPaint() }
+                                    function onTopWallpaperSlideDirectionChanged() { wallpaperSliceMask.requestPaint() }
+                                }
+                            }
+
+                            Rectangle {
+                                anchors.fill: parent
+                                color: root.desktopFrameMatteColor()
+                            }
+
+                            Image {
+                                anchors.fill: parent
+                                source: wallpaperSlice.entry && wallpaperSlice.entry.preview ? wallpaperSlice.entry.preview : ""
+                                fillMode: Image.PreserveAspectCrop
+                                asynchronous: true
+                                cache: true
+                                smooth: true
+                                mipmap: true
+                                opacity: 0.90
+                                sourceSize.width: 560
+                                sourceSize.height: 360
+                            }
+
+                            Rectangle {
+                                anchors.fill: parent
+                                color: root.desktopFrameMatteColor()
+                                opacity: veloraTheme.themeMode === "dark" ? 0.22 : 0.14
+                            }
+                        }
+                    }
+
+                    Repeater {
+                        model: 2
+
+                        delegate: Item {
+                            id: selectedWallpaperLayer
+
+                            readonly property bool incoming: index === 1
+                            readonly property real progress: root.topWallpaperSlideDirection === 0 ? 0 : root.topWallpaperSlideEase()
+                            readonly property real slotWidth: topWallpaperImageSlices.width / Math.max(1, root.topWallpaperSliceCount)
+                            readonly property real activeWidth: Math.min(topWallpaperImageSlices.width * 0.44, slotWidth * 4.35)
+                            readonly property real inactiveWidth: slotWidth * 1.04
+                            readonly property real currentWidth: incoming
+                                ? inactiveWidth + (activeWidth - inactiveWidth) * progress
+                                : activeWidth - (activeWidth - inactiveWidth) * progress
+                            readonly property real travel: slotWidth * 1.18
+                            readonly property real centerX: topWallpaperImageSlices.width / 2
+                                + (incoming ? root.topWallpaperSlideDirection * travel * (1 - progress) : -root.topWallpaperSlideDirection * travel * progress)
+                            readonly property real sliceSkew: Math.max(26, Math.min(42, topWallpaperImageSlices.width * 0.052))
+                            readonly property var entry: root.topWallpaperEntry(incoming ? root.topWallpaperSlideDirection : 0)
+
+                            anchors.fill: parent
+                            visible: !incoming || root.topWallpaperSlideDirection !== 0
+                            opacity: incoming ? progress : 1 - progress * 0.34
+                            layer.enabled: true
+                            layer.effect: OpacityMask {
+                                maskSource: selectedWallpaperMask
+                            }
+
+                            Canvas {
+                                id: selectedWallpaperMask
+
+                                anchors.fill: parent
+                                visible: false
+
+                                onPaint: {
+                                    const ctx = getContext("2d")
+                                    const half = selectedWallpaperLayer.currentWidth / 2
+                                    const left = selectedWallpaperLayer.centerX - half
+                                    const right = selectedWallpaperLayer.centerX + half
+                                    const skew = selectedWallpaperLayer.sliceSkew
+
+                                    ctx.clearRect(0, 0, width, height)
+                                    ctx.beginPath()
+                                    ctx.moveTo(left + skew, -8)
+                                    ctx.lineTo(right + skew, -8)
+                                    ctx.lineTo(right - skew, height + 8)
+                                    ctx.lineTo(left - skew, height + 8)
+                                    ctx.closePath()
+                                    ctx.fillStyle = "white"
+                                    ctx.fill()
+                                }
+
+                                Component.onCompleted: requestPaint()
+                                onWidthChanged: requestPaint()
+                                onHeightChanged: requestPaint()
+
+                                Connections {
+                                    target: root
+
+                                    function onTopWallpaperSlideProgressChanged() { selectedWallpaperMask.requestPaint() }
+                                    function onTopWallpaperSlideDirectionChanged() { selectedWallpaperMask.requestPaint() }
+                                }
+                            }
+
+                            Image {
+                                anchors.fill: parent
+                                source: selectedWallpaperLayer.entry && selectedWallpaperLayer.entry.preview ? selectedWallpaperLayer.entry.preview : ""
+                                fillMode: Image.PreserveAspectCrop
+                                asynchronous: true
+                                cache: true
+                                smooth: true
+                                mipmap: true
+                                opacity: 0.98
+                                sourceSize.width: 720
+                                sourceSize.height: 420
+                            }
+
+                            Rectangle {
+                                anchors.fill: parent
+                                color: root.desktopFrameMatteColor()
+                                opacity: veloraTheme.themeMode === "dark" ? 0.10 : 0.06
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        anchors {
+                            top: parent.top
+                            left: parent.left
+                            right: parent.right
+                        }
+                        height: topWallpaperImageSlices.edgeFadeHeight
+                        color: "transparent"
+                        gradient: Gradient {
+                            GradientStop { position: 0.00; color: root.desktopFrameMatteColor() }
+                            GradientStop { position: 0.32; color: veloraTheme.alpha(veloraTheme.surfaceSidebar, root.desktopFrameMatteOpacity * 0.42) }
+                            GradientStop { position: 1.00; color: veloraTheme.alpha(veloraTheme.surfaceSidebar, 0.0) }
+                        }
+                    }
+
+                }
+
+                Rectangle {
+                    anchors.fill: topWallpaperPopupSurface
+                    anchors.margins: 1
+                    radius: Math.max(0, topWallpaperPopupSurface.radius - 1)
+                    color: "transparent"
+                    border.width: 1
+                    border.color: root.sidebarPanelInnerLineColor()
+                    antialiasing: true
+                }
+
+                Canvas {
+                    id: topWallpaperSliceCanvas
+
+                    anchors.fill: topWallpaperPopupSurface
+                    visible: false
+                    antialiasing: true
+
+                    onPaint: {
+                        const ctx = getContext("2d")
+                        ctx.clearRect(0, 0, width, height)
+
+                        const sliceCount = root.topWallpaperSliceCount
+                        const slotWidth = width / Math.max(1, sliceCount)
+                        const lean = Math.max(22, Math.min(36, width * 0.038))
+                        const slideOffset = -root.topWallpaperSlideDirection * root.topWallpaperSlideEase() * slotWidth
+                        const selectedProgress = root.topWallpaperSlideDirection === 0 ? 0 : root.topWallpaperSlideEase()
+                        const selectedCenter = width / 2 - root.topWallpaperSlideDirection * slotWidth * 1.18 * selectedProgress
+                        const selectedWidth = Math.min(width * 0.44, slotWidth * 4.35) - (Math.min(width * 0.44, slotWidth * 4.35) - slotWidth * 1.04) * selectedProgress
+                        const selectedLeft = selectedCenter - selectedWidth / 2
+                        const selectedRight = selectedCenter + selectedWidth / 2
+                        const incomingCenter = width / 2 + root.topWallpaperSlideDirection * slotWidth * 1.18 * (1 - selectedProgress)
+                        const incomingWidth = root.topWallpaperSlideDirection === 0 ? 0 : slotWidth * 1.04 + (Math.min(width * 0.44, slotWidth * 4.35) - slotWidth * 1.04) * selectedProgress
+                        const incomingLeft = incomingCenter - incomingWidth / 2
+                        const incomingRight = incomingCenter + incomingWidth / 2
+                        const lineColor = root.desktopFrameBorderColor()
+                        const highlightColor = root.sidebarPanelInnerLineColor()
+
+                        ctx.lineCap = "round"
+                        ctx.lineJoin = "round"
+
+                        for (let i = 0; i <= sliceCount; ++i) {
+                            const baseX = slotWidth * i + slideOffset
+                            if ((baseX > selectedLeft + lean * 0.25 && baseX < selectedRight - lean * 0.25)
+                                    || (root.topWallpaperSlideDirection !== 0 && baseX > incomingLeft + lean * 0.25 && baseX < incomingRight - lean * 0.25))
+                                continue
+
+                            ctx.beginPath()
+                            ctx.moveTo(baseX + lean, -8)
+                            ctx.lineTo(baseX - lean, height + 8)
+                            ctx.strokeStyle = veloraTheme.alpha(lineColor, veloraTheme.themeMode === "dark" ? 0.34 : 0.42)
+                            ctx.lineWidth = 1.45
+                            ctx.stroke()
+
+                            ctx.beginPath()
+                            ctx.moveTo(baseX + lean + 3, -5)
+                            ctx.lineTo(baseX - lean + 3, height + 5)
+                            ctx.strokeStyle = veloraTheme.alpha(highlightColor, veloraTheme.themeMode === "dark" ? 0.18 : 0.24)
+                            ctx.lineWidth = 0.85
+                            ctx.stroke()
+                        }
+
+                        function drawSelectedEdge(edgeX, edgeLean, edgeAlpha) {
+                            ctx.beginPath()
+                            ctx.moveTo(edgeX + edgeLean, -8)
+                            ctx.lineTo(edgeX - edgeLean, height + 8)
+                            ctx.strokeStyle = veloraTheme.alpha(lineColor, edgeAlpha)
+                            ctx.lineWidth = 2.1
+                            ctx.stroke()
+
+                            ctx.beginPath()
+                            ctx.moveTo(edgeX + edgeLean + 3, -4)
+                            ctx.lineTo(edgeX - edgeLean + 3, height + 4)
+                            ctx.strokeStyle = veloraTheme.alpha(highlightColor, edgeAlpha * 0.72)
+                            ctx.lineWidth = 0.95
+                            ctx.stroke()
+                        }
+
+                        drawSelectedEdge(selectedLeft, lean, veloraTheme.themeMode === "dark" ? 0.42 : 0.50)
+                        drawSelectedEdge(selectedRight, lean, veloraTheme.themeMode === "dark" ? 0.42 : 0.50)
+
+                        if (root.topWallpaperSlideDirection !== 0) {
+                            drawSelectedEdge(incomingLeft, lean, (veloraTheme.themeMode === "dark" ? 0.42 : 0.50) * selectedProgress)
+                            drawSelectedEdge(incomingRight, lean, (veloraTheme.themeMode === "dark" ? 0.42 : 0.50) * selectedProgress)
+                        }
+                    }
+
+                    Component.onCompleted: requestPaint()
+                    onWidthChanged: requestPaint()
+                    onHeightChanged: requestPaint()
+
+                    Connections {
+                        target: veloraTheme
+                        function onSurfaceSidebarChanged() { topWallpaperSliceCanvas.requestPaint() }
+                        function onBorderSoftChanged() { topWallpaperSliceCanvas.requestPaint() }
+                        function onThemeModeChanged() { topWallpaperSliceCanvas.requestPaint() }
+                        function onSidebarBorderGlowChanged() { topWallpaperSliceCanvas.requestPaint() }
+                    }
+
+                    Connections {
+                        target: root
+
+                        function onTopWallpaperSlideProgressChanged() { topWallpaperSliceCanvas.requestPaint() }
+                        function onTopWallpaperSlideDirectionChanged() { topWallpaperSliceCanvas.requestPaint() }
+                    }
+                }
+
+                Item {
+                    id: topWallpaperNavLeft
+
+                    visible: false
+                    anchors {
+                        top: topWallpaperPopupSurface.top
+                        bottom: topWallpaperPopupSurface.bottom
+                        left: topWallpaperPopupSurface.left
+                    }
+                    width: Math.min(74, topWallpaperPopupSurface.width * 0.16)
+                    opacity: topWallpaperNavLeftMouse.containsMouse || root.topWallpaperKeyboardFocus ? 0.82 : 0.30
+
+                    Behavior on opacity {
+                        enabled: veloraTheme.motionEnabled
+                        NumberAnimation { duration: veloraTheme.motionFast; easing.type: Easing.OutCubic }
+                    }
+
+                    Rectangle {
+                        width: 30
+                        height: 64
+                        radius: 15
+                        anchors {
+                            left: parent.left
+                            leftMargin: 8
+                            verticalCenter: parent.verticalCenter
+                        }
+                        color: veloraTheme.alpha(veloraTheme.surfaceSidebar, veloraTheme.themeMode === "dark" ? 0.36 : 0.42)
+                        border.width: 1
+                        border.color: root.sidebarPanelInnerLineColor()
+                    }
+
+                    Text {
+                        anchors {
+                            left: parent.left
+                            leftMargin: 16
+                            verticalCenter: parent.verticalCenter
+                        }
+                        text: "‹"
+                        color: veloraTheme.alpha(veloraTheme.textPrimary, veloraTheme.themeMode === "dark" ? 0.76 : 0.68)
+                        font.pixelSize: 28
+                        font.weight: Font.DemiBold
+                    }
+
+                    MouseArea {
+                        id: topWallpaperNavLeftMouse
+
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            root.moveTopWallpaper(-1)
+                            topWallpaperPopupStage.forceActiveFocus()
+                        }
+                    }
+                }
+
+                Item {
+                    id: topWallpaperNavRight
+
+                    visible: false
+                    anchors {
+                        top: topWallpaperPopupSurface.top
+                        bottom: topWallpaperPopupSurface.bottom
+                        right: topWallpaperPopupSurface.right
+                    }
+                    width: Math.min(74, topWallpaperPopupSurface.width * 0.16)
+                    opacity: topWallpaperNavRightMouse.containsMouse || root.topWallpaperKeyboardFocus ? 0.82 : 0.30
+
+                    Behavior on opacity {
+                        enabled: veloraTheme.motionEnabled
+                        NumberAnimation { duration: veloraTheme.motionFast; easing.type: Easing.OutCubic }
+                    }
+
+                    Rectangle {
+                        width: 30
+                        height: 64
+                        radius: 15
+                        anchors {
+                            right: parent.right
+                            rightMargin: 8
+                            verticalCenter: parent.verticalCenter
+                        }
+                        color: veloraTheme.alpha(veloraTheme.surfaceSidebar, veloraTheme.themeMode === "dark" ? 0.36 : 0.42)
+                        border.width: 1
+                        border.color: root.sidebarPanelInnerLineColor()
+                    }
+
+                    Text {
+                        anchors {
+                            right: parent.right
+                            rightMargin: 16
+                            verticalCenter: parent.verticalCenter
+                        }
+                        text: "›"
+                        color: veloraTheme.alpha(veloraTheme.textPrimary, veloraTheme.themeMode === "dark" ? 0.76 : 0.68)
+                        font.pixelSize: 28
+                        font.weight: Font.DemiBold
+                    }
+
+                    MouseArea {
+                        id: topWallpaperNavRightMouse
+
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            root.moveTopWallpaper(1)
+                            topWallpaperPopupStage.forceActiveFocus()
+                        }
+                    }
+                }
+
+                VeloraWallpaperSelector {
+                    anchors.fill: topWallpaperPopupSurface
+                    z: 100
+                    theme: veloraTheme
+                    externalSurface: true
+                    attachSide: root.popupAttachSide
+                    open: root.topWallpaperPopupOpen
+                    preload: root.topWallpaperPopupOpen
+                    visible: root.topWallpaperPopupOpen
+                    focus: root.topWallpaperKeyboardFocus
+
+                    onCloseRequested: root.toggleTopWallpaperPopup(false, false)
+                    onVisibilityRequested: {
+                        root.toggleTopWallpaperPopup(false, false)
+                        root.openWallpaperVisibility(root.defaultQuickPopupCenterY("theme"))
+                    }
+                }
+            }
+        }
+    }
+
+    Variants {
         model: Quickshell.screens
 
         PanelWindow {
@@ -742,24 +1806,32 @@ ShellRoot {
             property real mediaReveal: root.leftMenuOpen && root.leftMediaWindowOpen ? 1 : 0
             readonly property int slideDistance: root.leftMenuWidth + root.leftMenuFrameInset + root.leftMenuTriggerWidth + 8
             readonly property bool mediaWindowVisible: root.leftMediaWindowOpen || mediaReveal > 0.01
-            readonly property int mediaWindowX: root.leftMenuFrameInset + root.leftMenuWidth + root.leftMediaWindowGap
-            readonly property int mediaWindowSlideDistance: Math.min(118, Math.max(82, Math.round(root.leftMediaWindowWidth * 0.18)))
+            readonly property bool menuOnLeft: root.leftMenuOnLeft
+            readonly property real detailReveal: mediaReveal * root.leftDetailSwitchProgress
+            readonly property int detailWindowWidth: root.leftDetailWindowWidth(root.leftDetailWindowType)
+            readonly property int detailWindowHeight: root.leftDetailWindowHeight(root.leftDetailWindowType, height)
+            readonly property int menuOpenX: menuOnLeft ? root.leftMenuFrameInset : width - root.leftMenuFrameInset - root.leftMenuWidth
+            readonly property int menuSlideOffset: Math.round((1 - reveal) * slideDistance)
+            readonly property int menuX: menuOpenX + (menuOnLeft ? -menuSlideOffset : menuSlideOffset)
+            readonly property int mediaWindowX: menuOnLeft ? menuOpenX + root.leftMenuWidth + root.leftMediaWindowGap : menuOpenX - root.leftMediaWindowGap - detailWindowWidth
+            readonly property int mediaWindowSlideDistance: Math.min(118, Math.max(82, Math.round(detailWindowWidth * 0.18)))
 
             screen: modelData
             color: "transparent"
-            implicitWidth: Math.max(root.leftMenuTriggerWidth, root.leftMenuFrameInset + root.leftMenuWidth + 1, mediaWindowVisible ? mediaWindowX + root.leftMediaWindowWidth + root.leftMenuFrameInset : 0)
+            implicitWidth: Math.max(root.leftMenuTriggerWidth, root.leftMenuFrameInset + root.leftMenuWidth + 1, mediaWindowVisible ? root.leftMenuFrameInset + root.leftMenuWidth + root.leftMediaWindowGap + detailWindowWidth + root.leftMenuFrameInset : 0)
             exclusiveZone: 0
             exclusionMode: ExclusionMode.Ignore
-            focusable: false
+            focusable: root.leftMenuOpen
 
             WlrLayershell.layer: WlrLayer.Top
             WlrLayershell.namespace: "velora-shell-left-menu"
-            WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+            WlrLayershell.keyboardFocus: root.leftMenuOpen ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
 
             anchors {
                 top: true
                 bottom: true
-                left: true
+                left: root.leftMenuOnLeft
+                right: !root.leftMenuOnLeft
             }
 
             mask: Region {
@@ -775,7 +1847,7 @@ ShellRoot {
 
                 Region {
                     item: leftMediaWindowInputMask
-                    radius: leftMediaWindowLoader.item ? leftMediaWindowLoader.item.cornerRadius : 22
+                    radius: leftMediaWindowLoader.cornerRadius
                 }
             }
 
@@ -800,7 +1872,7 @@ ShellRoot {
             Item {
                 id: leftMenuTrigger
 
-                x: 0
+                x: leftMenuPanel.menuOnLeft ? 0 : parent.width - width
                 y: 0
                 width: root.leftMenuTriggerWidth
                 height: parent.height
@@ -847,13 +1919,13 @@ ShellRoot {
             VeloraAttachedSurface {
                 theme: veloraTheme
                 sidebarMaterial: true
-                attachSide: "left"
+                attachSide: leftMenuPanel.menuOnLeft ? "left" : "right"
                 x: leftMenuLoader.x
                 y: leftMenuLoader.y
                 width: leftMenuLoader.width
                 height: leftMenuLoader.height
                 radius: leftMenuLoader.item ? leftMenuLoader.item.cornerRadius : 13
-                revealProgress: 1
+                revealProgress: leftMenuPanel.reveal
                 visible: root.leftMenuOpen || leftMenuPanel.reveal > 0.01
             }
 
@@ -864,26 +1936,53 @@ ShellRoot {
                 asynchronous: true
                 width: root.leftMenuWidth
                 height: Math.max(0, parent.height - root.leftMenuFrameInset * 2)
-                x: root.leftMenuFrameInset - Math.round((1 - leftMenuPanel.reveal) * leftMenuPanel.slideDistance)
+                x: leftMenuPanel.menuX
                 y: root.leftMenuFrameInset
                 visible: root.leftMenuOpen || leftMenuPanel.reveal > 0.01
-                opacity: 1
+                opacity: leftMenuPanel.reveal
 
                 sourceComponent: Component {
                     VeloraLeftMenu {
                         theme: veloraTheme
+                        clockState: leftClockState
                         externalSurface: true
-                        attachSide: "left"
+                        attachSide: leftMenuPanel.menuOnLeft ? "left" : "right"
                         popupType: "search"
                         open: root.leftMenuOpen
                         preload: root.leftMenuPreloadEnabled
-                        interactiveFocus: false
+                        interactiveFocus: root.leftMenuInteractiveFocus
                         width: leftMenuLoader.width
                         height: leftMenuLoader.height
                         visible: leftMenuLoader.visible
 
                         onMediaWindowRequested: function(centerY) {
                             root.openLeftMediaWindow(leftMenuLoader.y + centerY)
+                        }
+
+                        onDetailWindowRequested: function(detailType, centerY) {
+                            root.openLeftDetailWindow(detailType, leftMenuLoader.y + centerY)
+                        }
+
+                        onSettingsRequested: function(centerY) {
+                            root.leftMenuPinned = false
+                            root.leftMenuInteractiveFocus = false
+                            root.leftMediaWindowOpen = false
+                            root.leftMediaWindowEntranceHold = false
+                            root.leftDetailSwitchProgress = 1
+                            root.openLeftMenu()
+                            root.toggleSettingsPanel(leftMenuLoader.y + centerY)
+                        }
+
+                        onCloseRequested: {
+                            root.leftMenuPinned = false
+                            root.leftMenuInteractiveFocus = false
+                            root.leftMediaWindowOpen = false
+                            root.leftMediaWindowEntranceHold = false
+                            root.leftDetailSwitchProgress = 1
+                            root.leftMenuOpen = false
+                            root.leftMenuTriggerHovering = false
+                            root.leftMenuPanelHovering = false
+                            root.leftMediaWindowHovering = false
                         }
 
                         HoverHandler {
@@ -904,7 +2003,7 @@ ShellRoot {
             VeloraAttachedSurface {
                 theme: veloraTheme
                 sidebarMaterial: true
-                attachSide: "left"
+                attachSide: leftMenuPanel.menuOnLeft ? "left" : "right"
                 x: leftMediaWindowLoader.x
                 y: leftMediaWindowLoader.y
                 width: leftMediaWindowLoader.width
@@ -917,31 +2016,50 @@ ShellRoot {
             Loader {
                 id: leftMediaWindowLoader
 
-                readonly property int cornerRadius: item ? item.cornerRadius : 22
+                readonly property int cornerRadius: 22
 
                 active: leftMenuPanel.mediaWindowVisible
                 asynchronous: false
-                width: root.leftMediaWindowWidth
-                height: root.leftMediaWindowHeight
-                x: leftMenuPanel.mediaWindowX - Math.round((1 - leftMenuPanel.mediaReveal) * leftMenuPanel.mediaWindowSlideDistance)
+                width: leftMenuPanel.detailWindowWidth
+                height: leftMenuPanel.detailWindowHeight
+                x: leftMenuPanel.mediaWindowX + (leftMenuPanel.menuOnLeft ? -1 : 1) * Math.round((1 - leftMenuPanel.mediaReveal) * leftMenuPanel.mediaWindowSlideDistance)
                 y: root.leftMediaWindowY(height, parent.height) + Math.round((1 - leftMenuPanel.mediaReveal) * 14)
                 visible: active
                 opacity: leftMenuPanel.mediaReveal
                 scale: 0.94 + leftMenuPanel.mediaReveal * 0.06
-                transformOrigin: Item.Left
+                transformOrigin: leftMenuPanel.menuOnLeft ? Item.Left : Item.Right
 
                 onActiveChanged: if (!active) root.leftMediaWindowHovering = false
 
                 sourceComponent: Component {
-                    VeloraDashboard {
-                        theme: veloraTheme
-                        compact: true
-                        externalSurface: true
-                        entryProgress: leftMenuPanel.mediaReveal
-                        activeSection: "media"
+                    Item {
                         width: leftMediaWindowLoader.width
                         height: leftMediaWindowLoader.height
                         visible: leftMediaWindowLoader.active
+                        opacity: leftMenuPanel.detailReveal
+                        scale: 0.975 + leftMenuPanel.detailReveal * 0.025
+                        x: (leftMenuPanel.menuOnLeft ? -1 : 1) * Math.round((1 - leftMenuPanel.detailReveal) * 28)
+                        transformOrigin: leftMenuPanel.menuOnLeft ? Item.Left : Item.Right
+
+                        VeloraDashboard {
+                            anchors.fill: parent
+                            theme: veloraTheme
+                            compact: true
+                            externalSurface: true
+                            entryProgress: leftMenuPanel.detailReveal
+                            activeSection: "media"
+                            visible: root.leftDetailWindowType === "media"
+                        }
+
+                        VeloraLeftDetailPanel {
+                            anchors.fill: parent
+                            theme: veloraTheme
+                            clockState: leftClockState
+                            attachSide: leftMenuPanel.menuOnLeft ? "left" : "right"
+                            detailType: root.leftDetailWindowType
+                            entryProgress: leftMenuPanel.detailReveal
+                            visible: root.leftDetailWindowType !== "media"
+                        }
 
                         MouseArea {
                             anchors.fill: parent
@@ -1206,7 +2324,7 @@ ShellRoot {
             id: panel
 
             required property var modelData
-            readonly property bool wantsDrawerKeyboard: root.quickPopupType === "search" || root.settingsPanelOpen || root.wallpaperSelectorOpen
+            readonly property bool wantsDrawerKeyboard: root.focusMode || root.quickPopupType === "search" || root.settingsPanelOpen || root.wallpaperSelectorOpen
 
             screen: modelData
             color: "transparent"
@@ -1772,7 +2890,7 @@ ShellRoot {
                 focusTarget: root.focusTarget
                 visualizerActive: root.frameVisualsEnabled && sideVisualizerRail.activeForPaint
                 shellDrawsPanelSurface: root.frameVisualsMounted
-                activePopupType: root.wallpaperSelectorVisible ? "theme" : (root.settingsPanelVisible ? "settings" : root.activeQuickPopupType)
+                activePopupType: root.wallpaperSelectorOpen ? "theme" : root.quickPopupType
                 onMoveFocusRequested: function(dir) {
                     root.moveFocus(dir)
                 }
@@ -1788,13 +2906,13 @@ ShellRoot {
                     root.toggleSettingsPanel(localCenter > 0 ? barRoot.y + localCenter : root.defaultQuickPopupCenterY("settings"))
                 }
                 onQuickPopupRequested: function(type, centerY) {
-                    root.toggleQuickPopup(type, barRoot.y + centerY)
+                    root.openAdaptiveBarPopup(type, barRoot.y + centerY)
                 }
                 onQuickPopupHovered: function(type, centerY) {
-                    root.previewSidebarPopup(type, barRoot.y + centerY)
+                    root.previewAdaptiveBarPopup(type, barRoot.y + centerY)
                 }
                 onQuickPopupHoverEnded: function(type) {
-                    root.endSidebarPopupHover(type)
+                    root.endAdaptiveBarPopupHover(type)
                 }
                 anchors {
                     top: parent.top
@@ -1818,8 +2936,8 @@ ShellRoot {
 
                 x: inlineQuickPopupLoader.x
                 y: inlineQuickPopupLoader.y
-                width: inlineQuickPopupLoader.active ? inlineQuickPopupLoader.width : 0
-                height: inlineQuickPopupLoader.active ? inlineQuickPopupLoader.height : 0
+                width: root.quickPopupPanelVisible ? inlineQuickPopupLoader.width : 0
+                height: root.quickPopupPanelVisible ? inlineQuickPopupLoader.height : 0
             }
 
             VeloraAttachedSurface {
@@ -1843,14 +2961,14 @@ ShellRoot {
                 readonly property int cornerRadius: item ? item.cornerRadius : 13
                 readonly property real revealProgress: item ? item.revealProgress : 0
 
-                active: root.quickPopupPanelVisible
+                active: root.quickPopupPanelVisible || root.quickPopupPreloadEnabled
                 asynchronous: false
                 z: 21
                 width: root.quickPopupWidth(root.visibleQuickPopupType)
                 height: root.quickPopupHeight(root.visibleQuickPopupType)
                 x: root.quickPopupX(parent.width, width)
                 y: root.quickPopupY(root.visibleQuickPopupType, height, parent.height)
-                visible: active
+                visible: root.quickPopupPanelVisible
 
                 onActiveChanged: if (!active) root.quickPopupHovering = false
 
@@ -1864,7 +2982,7 @@ ShellRoot {
                         interactiveFocus: root.quickPopupType === "search"
                         width: inlineQuickPopupLoader.width
                         height: inlineQuickPopupLoader.height
-                        visible: inlineQuickPopupLoader.active
+                        visible: root.quickPopupPanelVisible
                         onCloseRequested: root.closeQuickPopup()
                         onPointerInsideChanged: function(inside) {
                             root.quickPopupHovering = inside
@@ -1923,31 +3041,31 @@ ShellRoot {
                         if (!selector)
                             return
 
-                        if (event.key === Qt.Key_Left || event.key === Qt.Key_A) {
+                        if ((event.key === Qt.Key_Left || event.key === Qt.Key_A) && selector.moveSelection) {
                             selector.moveSelection(-1)
                             event.accepted = true
                             return
                         }
 
-                        if (event.key === Qt.Key_Right || event.key === Qt.Key_D) {
+                        if ((event.key === Qt.Key_Right || event.key === Qt.Key_D) && selector.moveSelection) {
                             selector.moveSelection(1)
                             event.accepted = true
                             return
                         }
 
-                        if (event.key === Qt.Key_Down || event.key === Qt.Key_S) {
+                        if ((event.key === Qt.Key_Down || event.key === Qt.Key_S) && selector.cycleWallpaperMode) {
                             selector.cycleWallpaperMode(1)
                             event.accepted = true
                             return
                         }
 
-                        if (event.key === Qt.Key_Up || event.key === Qt.Key_W) {
+                        if ((event.key === Qt.Key_Up || event.key === Qt.Key_W) && selector.cycleWallpaperMode) {
                             selector.cycleWallpaperMode(-1)
                             event.accepted = true
                             return
                         }
 
-                        if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                        if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && selector.applySelected) {
                             selector.applySelected()
                             event.accepted = true
                             return
@@ -2016,19 +3134,21 @@ ShellRoot {
 
                     readonly property int cornerRadius: item ? item.cornerRadius : 28
                     readonly property real revealProgress: item ? item.revealProgress : 0
-                    readonly property int availableWidth: Math.max(340, root.mainAreaWidth(parent.width) - root.popupFrameGap * 2)
-                    readonly property int availableHeight: Math.max(360, parent.height - root.frameVisualInset * 2 - 24)
+                    readonly property int availableWidth: root.leftMenuWidth
+                    readonly property int availableHeight: Math.max(360, parent.height - root.leftMenuFrameInset * 2)
 
                     active: root.wallpaperSelectorPanelVisible || root.wallpaperPreloadEnabled
                     asynchronous: false
                     z: 3
-                    width: Math.round(Math.min(790, availableWidth, Math.max(570, availableWidth * 0.47)))
-                    height: Math.round(Math.min(475, availableHeight, Math.max(330, width * 0.60)))
-                    x: Math.round(root.mainAreaX(parent.width) + Math.max(0, (root.mainAreaWidth(parent.width) - width) / 2))
-                    y: Math.round(Math.max(root.frameVisualInset, parent.height - height - 12))
+                    width: availableWidth
+                    height: availableHeight
+                    x: root.leftMenuOnLeft ? root.leftMenuFrameInset : Math.round(parent.width - root.leftMenuFrameInset - width)
+                    y: root.leftMenuFrameInset
                     visible: root.wallpaperSelectorPanelVisible
 
                     onActiveChanged: if (!active) root.wallpaperSelectorHovering = false
+                    onLoaded: root.focusWallpaperSelectorInput()
+                    onVisibleChanged: if (visible) root.focusWallpaperSelectorInput()
 
                     sourceComponent: Component {
                         VeloraWallpaperSelector {
@@ -2039,7 +3159,7 @@ ShellRoot {
                             height: inlineWallpaperLoader.height
                             open: root.wallpaperSelectorVisible
                             preload: root.wallpaperPreloadEnabled
-                            visible: inlineWallpaperLoader.active
+                            visible: root.wallpaperSelectorPanelVisible
                             focus: root.wallpaperSelectorOpen
                             onCloseRequested: root.wallpaperSelectorOpen = false
                             onVisibilityRequested: root.openWallpaperVisibility(root.defaultQuickPopupCenterY("theme"))
@@ -2090,14 +3210,14 @@ ShellRoot {
 
                     x: inlineSettingsLoader.x
                     y: inlineSettingsLoader.y
-                    width: inlineSettingsLoader.active ? inlineSettingsLoader.width : 0
-                    height: inlineSettingsLoader.active ? inlineSettingsLoader.height : 0
+                    width: root.settingsPanelPanelVisible ? inlineSettingsLoader.width : 0
+                    height: root.settingsPanelPanelVisible ? inlineSettingsLoader.height : 0
                 }
 
                 VeloraAttachedSurface {
                     z: 4
                     theme: veloraTheme
-                    attachSide: root.popupAttachSide
+                    attachSide: root.leftMenuAttachSide
                     x: inlineSettingsLoader.x
                     y: inlineSettingsLoader.y
                     width: inlineSettingsLoader.width
@@ -2111,16 +3231,16 @@ ShellRoot {
                     id: inlineSettingsLoader
 
                     readonly property int cornerRadius: item ? item.cornerRadius : 18
-                    readonly property real revealProgress: item ? item.revealProgress : (root.settingsPanelVisible ? 1 : 0)
+                    readonly property real revealProgress: item ? item.revealProgress : 0
 
-                    active: root.settingsPanelPanelVisible
+                    active: root.settingsPanelPanelVisible || root.settingsPanelPreloadEnabled
                     asynchronous: true
                     z: 5
                     width: Math.round(Math.min(root.quickPopupWidth("settings"), parent.width * 0.49))
                     height: Math.round(Math.min(root.quickPopupHeight("settings"), width * 0.66))
-                    x: root.attachedPopupX(parent.width, width)
+                    x: root.leftMenuAttachedPopupX(parent.width, width)
                     y: root.quickPopupY("settings", height, parent.height)
-                    visible: active
+                    visible: root.settingsPanelPanelVisible
 
                     onActiveChanged: if (!active) root.settingsPanelHovering = false
 
@@ -2128,11 +3248,11 @@ ShellRoot {
                         VeloraSettingsPanel {
                             theme: veloraTheme
                             externalSurface: true
-                            attachSide: root.popupAttachSide
+                            attachSide: root.leftMenuAttachSide
                             width: inlineSettingsLoader.width
                             height: inlineSettingsLoader.height
                             open: root.settingsPanelVisible
-                            visible: inlineSettingsLoader.active
+                            visible: root.settingsPanelPanelVisible
                             focus: root.settingsPanelOpen
                             onCloseRequested: root.settingsPanelOpen = false
 
@@ -2182,10 +3302,7 @@ ShellRoot {
 
                     function onWallpaperSelectorOpenChanged() {
                         if (root.wallpaperSelectorOpen)
-                            Qt.callLater(function() {
-                                if (inlineWallpaperLoader.item)
-                                    inlineWallpaperLoader.item.forceActiveFocus()
-                            })
+                            root.focusWallpaperSelectorInput()
                     }
 
                     function onSettingsPanelOpenChanged() {

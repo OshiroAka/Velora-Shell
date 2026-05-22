@@ -111,7 +111,15 @@ def build_css(theme, wal):
  * @source https://betterdiscord.app
  */
 
-:root {{
+:root,
+.theme-dark,
+.theme-light,
+.visual-refresh,
+.visual-refresh.theme-dark,
+.visual-refresh.theme-light,
+#app-mount,
+#app-mount .theme-dark,
+#app-mount .theme-light {{
   --velora-wallpaper-image: {css_url(wallpaper)};
   --velora-bg: {bg};
   --velora-panel: {panel};
@@ -124,11 +132,16 @@ def build_css(theme, wal):
   --velora-accent: {accent};
   --velora-accent-2: {accent2};
   --velora-accent-3: {accent3};
+  --velora-link: color-mix(in srgb, var(--velora-accent-2) 72%, white 28%);
   --velora-border: {border};
   --velora-glow: {alpha(theme, "accentPrimary", accent, 0.34)};
   --velora-hover: {alpha(theme, "accentPrimary", accent, 0.16)};
   --velora-active: {alpha(theme, "accentPrimary", accent, 0.26)};
   --velora-shadow: {shadow};
+  --velora-chat: color-mix(in srgb, var(--velora-bg) 94%, black 6%);
+  --velora-sidebar-solid: color-mix(in srgb, var(--velora-panel) 95%, black 5%);
+  --velora-panel-solid: color-mix(in srgb, var(--velora-panel-2) 92%, var(--velora-bg) 8%);
+  --velora-card-solid: color-mix(in srgb, var(--velora-card) 92%, var(--velora-bg) 8%);
 
   --background-primary: color-mix(in srgb, var(--velora-bg) 88%, black 12%) !important;
   --background-secondary: var(--velora-panel) !important;
@@ -149,6 +162,10 @@ def build_css(theme, wal):
   --scrollbar-auto-thumb: var(--velora-border) !important;
   --scrollbar-auto-track: transparent !important;
   --text-normal: var(--velora-text) !important;
+  --text-primary: var(--velora-text) !important;
+  --text-secondary: var(--velora-text-soft) !important;
+  --text-tertiary: var(--velora-muted) !important;
+  --text-link: var(--velora-link) !important;
   --text-muted: var(--velora-muted) !important;
   --header-primary: var(--velora-text) !important;
   --header-secondary: var(--velora-text-soft) !important;
@@ -156,9 +173,26 @@ def build_css(theme, wal):
   --interactive-hover: var(--velora-text) !important;
   --interactive-active: var(--velora-text) !important;
   --interactive-muted: var(--velora-muted) !important;
+  --channels-default: var(--velora-text-soft) !important;
+  --channel-icon: var(--velora-text-soft) !important;
   --brand-500: var(--velora-accent) !important;
   --brand-experiment: var(--velora-accent) !important;
   --focus-primary: var(--velora-accent-3) !important;
+  --background-base-lowest: var(--velora-chat) !important;
+  --background-base-lower: var(--velora-panel-solid) !important;
+  --background-base-low: var(--velora-sidebar-solid) !important;
+  --background-surface-high: var(--velora-card-solid) !important;
+  --background-surface-higher: var(--velora-panel-solid) !important;
+  --background-surface-highest: var(--velora-panel-solid) !important;
+  --bg-base-primary: var(--velora-chat) !important;
+  --bg-base-secondary: var(--velora-sidebar-solid) !important;
+  --bg-base-tertiary: var(--velora-panel-solid) !important;
+  --bg-surface-overlay: var(--velora-panel-solid) !important;
+  --bg-surface-raised: var(--velora-panel-solid) !important;
+  --chat-background-default: var(--velora-chat) !important;
+  --chat-text-muted: var(--velora-muted) !important;
+  --custom-channel-members-bg: var(--velora-sidebar-solid) !important;
+  --custom-guild-sidebar-bg: var(--velora-panel-solid) !important;
 }}
 
 body,
@@ -282,7 +316,177 @@ a,
 .username__0a06e,
 .title__9293f,
 .name__20a53 {{
-  color: var(--velora-accent-3) !important;
+  color: var(--velora-link) !important;
+}}
+
+#app-mount [class*="chatContent"],
+#app-mount [class*="messagesWrapper"],
+#app-mount [class*="peopleColumn"],
+#app-mount [class*="contentRegion"] {{
+  background: var(--velora-chat) !important;
+}}
+
+#app-mount [class*="messageContent"],
+#app-mount [class*="contents_"] [class*="markup"],
+#app-mount [class*="message_"] [class*="markup"],
+#app-mount [data-list-item-id*="chat-messages"] {{
+  color: var(--velora-text) !important;
+  opacity: 1 !important;
+}}
+
+#app-mount [class*="messageContent"] *,
+#app-mount [class*="markup"] *,
+#app-mount [class*="message_"] [class*="contents"] {{
+  opacity: 1 !important;
+}}
+
+#app-mount [class*="timestamp"],
+#app-mount [class*="edited"],
+#app-mount [class*="repliedText"],
+#app-mount [class*="subText"],
+#app-mount [class*="activityText"],
+#app-mount [class*="membersGroup"] {{
+  color: var(--velora-text-soft) !important;
+}}
+
+#app-mount [class*="guilds"],
+#app-mount [class*="wrapper_ef3116"],
+#app-mount [class*="scroller_ef3116"],
+#app-mount [class*="itemsContainer_ef3116"],
+#app-mount [class*="tutorialContainer"],
+#app-mount [data-list-id="guildsnav"],
+#app-mount nav[aria-label*="serv" i],
+#app-mount nav[aria-label*="server" i] {{
+  background: var(--velora-panel-solid) !important;
+}}
+
+#app-mount [class*="sidebarList"],
+#app-mount [class*="sidebar_"],
+#app-mount [class*="privateChannels"],
+#app-mount [class*="channelList"],
+#app-mount [class*="scroller__99e7c"],
+#app-mount [class*="content__99f8c"],
+#app-mount [class*="container__9293f"],
+#app-mount [class*="searchBar__35e86"],
+#app-mount nav[aria-label*="direct" i],
+#app-mount nav[aria-label*="mensagens" i],
+#app-mount [class*="container__2637a"],
+#app-mount [class*="panels_"] {{
+  background: var(--velora-sidebar-solid) !important;
+}}
+
+#app-mount [class*="privateChannels"] *,
+#app-mount [class*="sidebarList"] *,
+#app-mount nav[aria-label*="direct" i] *,
+#app-mount nav[aria-label*="mensagens" i] * {{
+  color: var(--velora-text-soft) !important;
+}}
+
+#app-mount [class*="searchBar"],
+#app-mount [class*="searchBarComponent"],
+#app-mount [class*="channel_"],
+#app-mount [class*="interactive_"],
+#app-mount [class*="layout_"],
+#app-mount [class*="link_"] {{
+  color: var(--velora-text-soft) !important;
+}}
+
+#app-mount [class*="selected"] [class*="layout_"],
+#app-mount [class*="selected"] [class*="link_"],
+#app-mount [class*="modeSelected"] [class*="link_"],
+#app-mount [class*="interactiveSelected"] {{
+  background: var(--velora-active) !important;
+  color: var(--velora-text) !important;
+}}
+
+#app-mount [class*="userProfile"],
+#app-mount [class*="userPanel"],
+#app-mount [class*="userPopout"],
+#app-mount [class*="profilePanel"],
+#app-mount [class*="asidePanel"],
+#app-mount [class*="outer_c0bea0"],
+#app-mount [class*="inner_c0bea0"],
+#app-mount [class*="overlay_"],
+#app-mount [class*="section_"] {{
+  background: var(--velora-panel-solid) !important;
+  color: var(--velora-text) !important;
+  border-color: color-mix(in srgb, var(--velora-border) 34%, transparent 66%) !important;
+}}
+
+#app-mount [class*="userProfile"] [class*="card_"],
+#app-mount [class*="userProfile"] [class*="body_"],
+#app-mount [class*="userProfile"] [class*="footer_"],
+#app-mount [class*="profilePanel"] [class*="card_"],
+#app-mount [class*="profilePanel"] [class*="body_"],
+#app-mount [class*="profilePanel"] [class*="footer_"],
+#app-mount [class*="asidePanel"] [class*="card_"],
+#app-mount [class*="asidePanel"] [class*="body_"],
+#app-mount [class*="asidePanel"] [class*="footer_"] {{
+  background-color: color-mix(in srgb, var(--velora-card-solid) 82%, transparent 18%) !important;
+  color: var(--velora-text) !important;
+}}
+
+html.theme-light,
+body.theme-light,
+#app-mount.theme-light,
+#app-mount .theme-light,
+#app-mount.visual-refresh.theme-light,
+#app-mount .visual-refresh.theme-light {{
+  color-scheme: dark !important;
+  --text-normal: var(--velora-text) !important;
+  --text-primary: var(--velora-text) !important;
+  --text-secondary: var(--velora-text-soft) !important;
+  --text-tertiary: var(--velora-muted) !important;
+  --text-muted: var(--velora-muted) !important;
+  --text-link: var(--velora-link) !important;
+  --header-primary: var(--velora-text) !important;
+  --header-secondary: var(--velora-text-soft) !important;
+  --interactive-normal: var(--velora-text-soft) !important;
+  --interactive-hover: var(--velora-text) !important;
+  --interactive-active: var(--velora-text) !important;
+  --channels-default: var(--velora-text-soft) !important;
+  --background-primary: var(--velora-chat) !important;
+  --background-secondary: var(--velora-sidebar-solid) !important;
+  --background-tertiary: var(--velora-panel-solid) !important;
+  --background-base-lowest: var(--velora-chat) !important;
+  --background-base-lower: var(--velora-panel-solid) !important;
+  --background-base-low: var(--velora-sidebar-solid) !important;
+  --bg-base-primary: var(--velora-chat) !important;
+  --bg-base-secondary: var(--velora-sidebar-solid) !important;
+  --bg-base-tertiary: var(--velora-panel-solid) !important;
+}}
+
+#app-mount.theme-light *,
+#app-mount .theme-light *,
+#app-mount.visual-refresh.theme-light *,
+#app-mount .visual-refresh.theme-light * {{
+  color: var(--velora-text) !important;
+  opacity: 1 !important;
+  text-shadow: none !important;
+}}
+
+#app-mount.theme-light a,
+#app-mount .theme-light a,
+#app-mount.theme-light [class*="anchor"],
+#app-mount .theme-light [class*="anchor"],
+#app-mount.theme-light [class*="username"],
+#app-mount .theme-light [class*="username"],
+#app-mount.theme-light [class*="name_"],
+#app-mount .theme-light [class*="name_"] {{
+  color: var(--velora-link) !important;
+}}
+
+#app-mount.theme-light [class*="timestamp"],
+#app-mount .theme-light [class*="timestamp"],
+#app-mount.theme-light [class*="subText"],
+#app-mount .theme-light [class*="subText"],
+#app-mount.theme-light [class*="activityText"],
+#app-mount .theme-light [class*="activityText"],
+#app-mount.theme-light [class*="membersGroup"],
+#app-mount .theme-light [class*="membersGroup"],
+#app-mount.theme-light [class*="text-xs"],
+#app-mount .theme-light [class*="text-xs"] {{
+  color: var(--velora-text-soft) !important;
 }}
 """
 

@@ -27,16 +27,16 @@ QtObject {
     readonly property int motionFast: motionEnabled ? 120 : 1
     readonly property int motionNormal: motionEnabled ? 200 : 1
     readonly property int motionSlow: motionEnabled ? 320 : 1
-    readonly property int motionPanelIn: motionEnabled ? 220 : 1
-    readonly property int motionPanelOut: motionEnabled ? 140 : 1
-    readonly property int motionPanelGeometry: motionEnabled ? 220 : 1
-    readonly property int motionMenuIn: motionEnabled ? 320 : 1
-    readonly property int motionMenuOut: motionEnabled ? 180 : 1
+    readonly property int motionPanelIn: motionEnabled ? 280 : 1
+    readonly property int motionPanelOut: motionEnabled ? 210 : 1
+    readonly property int motionPanelGeometry: motionEnabled ? 270 : 1
+    readonly property int motionMenuIn: motionEnabled ? 360 : 1
+    readonly property int motionMenuOut: motionEnabled ? 240 : 1
     readonly property int motionHover: motionEnabled ? 120 : 1
-    readonly property int motionUnmountDelay: motionEnabled ? motionPanelOut + 60 : 1
-    readonly property int motionPanelOffset: motionEnabled ? 28 : 0
-    readonly property int motionLayersIn: motionEnabled ? 520 : 1
-    readonly property int motionLayersOut: motionEnabled ? 360 : 1
+    readonly property int motionUnmountDelay: motionEnabled ? motionPanelOut + 120 : 1
+    readonly property int motionPanelOffset: motionEnabled ? 40 : 0
+    readonly property int motionLayersIn: motionEnabled ? 380 : 1
+    readonly property int motionLayersOut: motionEnabled ? 260 : 1
     readonly property int motionFadeLayers: motionEnabled ? 320 : 1
     readonly property int motionEaseEnter: Easing.OutCubic
     readonly property int motionEaseExit: Easing.InCubic
@@ -263,7 +263,7 @@ QtObject {
         const n = Number(value)
         if (isNaN(n))
             return visualizerStrength
-        return Math.max(0.20, Math.min(0.90, n))
+        return Math.max(0.16, Math.min(0.68, n))
     }
 
     function withOpacity(colorValue, opacity, role) {

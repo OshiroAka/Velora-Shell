@@ -35,13 +35,22 @@ Item {
     property string mediaActionCommand: ""
     property bool bluetoothPowered: false
     property bool bluetoothAvailable: false
+    property var clockState: null
+    property var fallbackClockAlarms: [
+        { time: "07:00", detail: "Weekday", enabled: true },
+        { time: "08:30", detail: "Weekend", enabled: true },
+        { time: "22:00", detail: "Daily", enabled: true }
+    ]
     property string pendingCommand: ""
     property string activeCommand: ""
+    property var menuWallpapers: []
+    property bool menuWallpaperLoadedOnce: false
     property string searchQuery: ""
     property string searchMode: "apps"
     property int searchSelectedIndex: 0
     property var searchResults: []
     property bool searchReady: false
+    readonly property var clockAlarms: clockState ? clockState.alarms : fallbackClockAlarms
     readonly property bool backgroundPollingActive: open && visible
     readonly property int cornerRadius: 13
     readonly property int arrowCenterY: {
@@ -69,6 +78,7 @@ Item {
     readonly property color borderSoft: theme ? (pywalStyle ? theme.withAlpha(theme.sidebarBorderGlow, Math.min(0.30, Math.max(0.16, theme.sidebarBorderGlow.a))) : theme.borderSoft) : Qt.rgba(1, 1, 1, 0.78)
     readonly property string uiFont: "Noto Sans CJK JP"
     readonly property string monoFont: "JetBrainsMono Nerd Font"
+    readonly property string menuWallpaperScanScript: Quickshell.shellDir + "/scripts/velora-wallpaper-scan"
     readonly property string mediaCommand: "players=$(playerctl -l 2>/dev/null || true); pick=\"\"; for p in $players; do state=$(playerctl -p \"$p\" status 2>/dev/null || true); if [ \"$state\" = \"Playing\" ]; then pick=\"$p\"; break; fi; done; if [ -z \"$pick\" ]; then pick=$(printf '%s\\n' \"$players\" | sed -n '1p'); fi; [ -z \"$pick\" ] && { printf '\\t\\t\\t\\t0\\tStopped\\t\\n'; exit 0; }; title=$(playerctl -p \"$pick\" metadata title 2>/dev/null || true); artist=$(playerctl -p \"$pick\" metadata artist 2>/dev/null || true); length=$(playerctl -p \"$pick\" metadata mpris:length 2>/dev/null || true); art=$(playerctl -p \"$pick\" metadata mpris:artUrl 2>/dev/null || true); pos=$(playerctl -p \"$pick\" position 2>/dev/null || true); status=$(playerctl -p \"$pick\" status 2>/dev/null || true); printf '%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n' \"$title\" \"$artist\" \"$length\" \"$art\" \"$pos\" \"$status\" \"$pick\""
     readonly property string bluetoothCommand: "if ! command -v bluetoothctl >/dev/null 2>&1; then printf 'POWER|unavailable\\n'; exit 0; fi; power=$(bluetoothctl show 2>/dev/null | awk -F': ' '/Powered/ {print $2; exit}'); [ -z \"$power\" ] && power=unknown; printf 'POWER|%s\\n' \"$power\"; bluetoothctl devices Connected 2>/dev/null | sed -n 's/^Device \\([^ ]*\\) \\(.*\\)$/CONNECTED|\\1|\\2/p'; bluetoothctl devices Paired 2>/dev/null | sed -n 's/^Device \\([^ ]*\\) \\(.*\\)$/PAIRED|\\1|\\2/p'; bluetoothctl devices 2>/dev/null | sed -n 's/^Device \\([^ ]*\\) \\(.*\\)$/KNOWN|\\1|\\2/p'"
     property real revealProgress: 0
@@ -91,9 +101,185 @@ Item {
     signal closeRequested()
     signal pointerInsideChanged(bool inside)
     signal mediaWindowRequested(real centerY)
+    signal detailWindowRequested(string detailType, real centerY)
+    signal settingsRequested(real centerY)
 
     function alpha(colorValue, opacity) {
         return root.theme ? root.theme.alpha(colorValue, opacity) : Qt.rgba(colorValue.r, colorValue.g, colorValue.b, opacity)
+    }
+
+    function tr(key) {
+        const lang = root.theme ? root.theme.language : "ja"
+        const texts = {
+            "ja": {
+                "search": "検索...",
+                "weather": "天気",
+                "cloudy": "曇り",
+                "high": "最高",
+                "low": "最低",
+                "location": "山中湖村",
+                "media": "メディア",
+                "noMedia": "再生中のメディアなし",
+                "mediaFallback": "playerctl / MPRIS",
+                "paint": "ペイント",
+                "paintMode": "自由線",
+                "brushSize": "ブラシサイズ",
+                "opacity": "不透明度",
+                "alarm": "アラーム",
+                "nextAlarm": "次のアラーム: 07:00（明日）",
+                "weekday": "平日",
+                "saturday": "土日",
+                "daily": "毎日",
+                "custom": "カスタム",
+                "nextAlarmPrefix": "次のアラーム",
+                "today": "今日",
+                "tomorrow": "明日",
+                "noActiveAlarm": "アラームなし",
+                "wallpaper": "壁紙マネージャー",
+                "applyWallpaper": "壁紙を適用",
+                "settings": "設定",
+                "noResults": "見つかりません"
+            },
+            "en": {
+                "search": "Search...",
+                "weather": "Weather",
+                "cloudy": "Cloudy",
+                "high": "High",
+                "low": "Low",
+                "location": "Yamanakako",
+                "media": "Media",
+                "noMedia": "No media playing",
+                "mediaFallback": "playerctl / MPRIS",
+                "paint": "Paint",
+                "paintMode": "Free draw",
+                "brushSize": "Brush size",
+                "opacity": "Opacity",
+                "alarm": "Alarm",
+                "nextAlarm": "Next alarm: 07:00 (tomorrow)",
+                "weekday": "Weekdays",
+                "saturday": "Weekend",
+                "daily": "Daily",
+                "custom": "Custom",
+                "nextAlarmPrefix": "Next alarm",
+                "today": "today",
+                "tomorrow": "tomorrow",
+                "noActiveAlarm": "No active alarms",
+                "wallpaper": "Wallpaper manager",
+                "applyWallpaper": "Apply wallpaper",
+                "settings": "Settings",
+                "noResults": "No results"
+            },
+            "pt-BR": {
+                "search": "Buscar...",
+                "weather": "Clima",
+                "cloudy": "Nublado",
+                "high": "Máx.",
+                "low": "Mín.",
+                "location": "Yamanakako",
+                "media": "Mídia",
+                "noMedia": "Nenhuma mídia tocando",
+                "mediaFallback": "playerctl / MPRIS",
+                "paint": "Desenhar",
+                "paintMode": "Traço livre",
+                "brushSize": "Tamanho do pincel",
+                "opacity": "Opacidade",
+                "alarm": "Alarme",
+                "nextAlarm": "Próximo alarme: 07:00 (amanhã)",
+                "weekday": "Dias úteis",
+                "saturday": "Fim de semana",
+                "daily": "Todos os dias",
+                "custom": "Customizado",
+                "nextAlarmPrefix": "Próximo alarme",
+                "today": "hoje",
+                "tomorrow": "amanhã",
+                "noActiveAlarm": "Nenhum alarme ativo",
+                "wallpaper": "Seletor de wallpapers",
+                "applyWallpaper": "Aplicar wallpaper",
+                "settings": "Configurações",
+                "noResults": "Sem resultados"
+            }
+        }
+        const table = texts[lang] || texts["ja"]
+        return table[key] || texts["ja"][key] || key
+    }
+
+    function alarmDetailLabel(detail) {
+        const value = String(detail || "").toLowerCase()
+        if (value === "weekday")
+            return tr("weekday")
+        if (value === "weekend")
+            return tr("saturday")
+        if (value === "daily")
+            return tr("daily")
+        if (value === "custom")
+            return tr("custom")
+        return detail || ""
+    }
+
+    function alarmMinutes(timeText) {
+        const parts = String(timeText || "07:00").split(":")
+        return (parseInt(parts[0]) || 0) * 60 + (parseInt(parts[1]) || 0)
+    }
+
+    function nextAlarmLabel() {
+        const list = clockAlarms || []
+        const now = clockState ? clockState.currentDate : new Date()
+        const nowMinutes = now.getHours() * 60 + now.getMinutes()
+        var best = null
+        var bestDelta = 1441
+        for (var i = 0; i < list.length; ++i) {
+            const alarm = list[i]
+            if (!alarm || !alarm.enabled)
+                continue
+            const delta = (alarmMinutes(alarm.time) - nowMinutes + 1440) % 1440
+            if (delta < bestDelta) {
+                bestDelta = delta
+                best = alarm
+            }
+        }
+        if (!best)
+            return tr("noActiveAlarm")
+        const dayText = nowMinutes + bestDelta < 1440 ? tr("today") : tr("tomorrow")
+        return tr("nextAlarmPrefix") + ": " + best.time + " (" + dayText + ")"
+    }
+
+    function setClockAlarmEnabled(index, enabled) {
+        if (clockState) {
+            clockState.setAlarmEnabled(index, enabled)
+            return
+        }
+        if (index < 0 || index >= fallbackClockAlarms.length)
+            return
+        var next = fallbackClockAlarms.slice()
+        var item = Object.assign({}, next[index])
+        item.enabled = enabled
+        next[index] = item
+        fallbackClockAlarms = next
+    }
+
+    function basename(path) {
+        var name = String(path || "").split("/").pop()
+        var dot = name.lastIndexOf(".")
+        if (dot > 0)
+            name = name.slice(0, dot)
+        return name.replace(/[-_]+/g, " ")
+    }
+
+    function displayWallpaperSource(entry) {
+        if (!entry)
+            return ""
+        if (entry.preview && String(entry.preview).length > 0)
+            return entry.preview
+        return entry.path || ""
+    }
+
+    function ensureMenuWallpapersLoaded() {
+        if (typeof menuWallpaperScan === "undefined")
+            return
+        if (menuWallpaperLoadedOnce || menuWallpaperScan.running)
+            return
+        menuWallpaperLoadedOnce = true
+        menuWallpaperScan.running = true
     }
 
     function clamp01(value) {
@@ -145,10 +331,6 @@ Item {
 
     function restartEntryAnimation() {
         entryAnimation.stop()
-        if (externalSurface) {
-            entryProgress = 1
-            return
-        }
         entryProgress = 0
         entryAnimation.restart()
     }
@@ -165,16 +347,6 @@ Item {
         if (!backgroundPollingActive || typeof volumeQuery === "undefined")
             return
 
-        if (!volumeQuery.running)
-            volumeQuery.running = true
-        if (!brightnessQuery.running)
-            brightnessQuery.running = true
-        if (!wifiQuery.running)
-            wifiQuery.running = true
-        if (!notificationQuery.running)
-            notificationQuery.running = true
-        if (!bluetoothQuery.running)
-            bluetoothQuery.running = true
         if (!mediaQuery.running)
             mediaQuery.running = true
     }
@@ -187,6 +359,7 @@ Item {
         animateReveal()
         if (open) {
             ensureSearchReady()
+            ensureMenuWallpapersLoaded()
             refreshStatusQueries()
             restartEntryAnimation()
         } else {
@@ -201,9 +374,10 @@ Item {
 
     onVisibleChanged: {
         if (visible && open) {
-            if (revealProgress <= 0.001)
+            if (revealProgress <= 0.001 && !revealAnimation.running)
                 animateReveal()
             ensureSearchReady()
+            ensureMenuWallpapersLoaded()
             refreshStatusQueries()
             if (!entryAnimation.running && entryProgress <= 0.001)
                 restartEntryAnimation()
@@ -610,6 +784,8 @@ Item {
         syncTrackedNotifications()
         if (open || preload)
             ensureSearchReady()
+        if (open || preload)
+            ensureMenuWallpapersLoaded()
         if (open) {
             refreshStatusQueries()
         }
@@ -973,6 +1149,54 @@ Item {
         onExited: running = false
     }
 
+    Process {
+        id: menuWallpaperScan
+
+        running: false
+        property var tmp: []
+        command: [root.menuWallpaperScanScript]
+
+        onStarted: tmp = []
+
+        stdout: SplitParser {
+            onRead: function(lineRaw) {
+                const line = String(lineRaw).trim()
+                if (!line || line === "BEGIN")
+                    return
+                if (line === "END") {
+                    if (menuWallpaperScan.tmp.length > 0)
+                        root.menuWallpapers = menuWallpaperScan.tmp.slice(0, 6)
+                    return
+                }
+
+                const parts = line.split("|")
+                if (parts.length < 3)
+                    return
+
+                const kind = (parts[0] || "static").toLowerCase()
+                const path = parts[1] || ""
+                const preview = parts[2] || ""
+                const title = parts.length > 3 && parts.slice(3).join("|").length > 0 ? parts.slice(3).join("|") : root.basename(path)
+                menuWallpaperScan.tmp.push({
+                    kind: kind,
+                    path: path,
+                    preview: preview,
+                    title: title,
+                    label: title
+                })
+
+                if (menuWallpaperScan.tmp.length <= 6)
+                    root.menuWallpapers = menuWallpaperScan.tmp.slice(0, 6)
+            }
+        }
+
+        onExited: {
+            running = false
+            if (tmp.length > 0)
+                root.menuWallpapers = tmp.slice(0, 6)
+        }
+    }
+
     opacity: root.externalSurface ? 1 : revealProgress
     scale: root.externalSurface ? 1 : 0.99 + revealProgress * 0.01
     transformOrigin: attachedRight ? Item.Right : Item.Left
@@ -1094,30 +1318,6 @@ Item {
         ControlCenterView {
             anchors.fill: parent
             anchors.margins: 12
-        }
-
-        VolumeView {
-            anchors.fill: parent
-            anchors.margins: 22
-            visible: false
-        }
-
-        WifiView {
-            anchors.fill: parent
-            anchors.margins: 16
-            visible: false
-        }
-
-        BrightnessView {
-            anchors.fill: parent
-            anchors.margins: 22
-            visible: false
-        }
-
-        NotificationsView {
-            anchors.fill: parent
-            anchors.margins: 16
-            visible: false
         }
     }
 
@@ -1680,6 +1880,8 @@ Item {
     component ControlCenterView: Flickable {
         id: control
 
+        readonly property bool showingSearchResults: root.searchQuery.trim().length > 0
+
         clip: true
         contentWidth: width
         contentHeight: controlColumn.implicitHeight
@@ -1718,51 +1920,153 @@ Item {
                         lineColor: root.inkSoft
                     }
 
-                    MouseArea {
-                        id: filterMouse
+                MouseArea {
+                    id: filterMouse
 
-                        anchors.fill: parent
-                        hoverEnabled: true
+                    anchors.fill: parent
+                    hoverEnabled: true
                         acceptedButtons: Qt.LeftButton
                         cursorShape: Qt.PointingHandCursor
                     }
                 }
             }
 
-            WeatherPanelCard {
+            SearchResultsCard {
+                visible: control.showingSearchResults
                 Layout.fillWidth: true
-                Layout.preferredHeight: 214
+                Layout.preferredHeight: visible ? Math.max(126, 58 + Math.min(root.searchResults.length, 4) * 36) : 0
+            }
+
+            WeatherPanelCard {
+                visible: !control.showingSearchResults
+                Layout.fillWidth: true
+                Layout.preferredHeight: visible ? 214 : 0
                 entryDelay: 45
             }
 
             MediaPanelCard {
+                visible: !control.showingSearchResults
                 Layout.fillWidth: true
-                Layout.preferredHeight: 146
+                Layout.preferredHeight: visible ? 146 : 0
                 entryDelay: 92
             }
 
-            AudioPanelCard {
+            PaintPanelCard {
+                visible: !control.showingSearchResults
                 Layout.fillWidth: true
-                Layout.preferredHeight: 116
+                Layout.preferredHeight: visible ? 188 : 0
                 entryDelay: 138
             }
 
-            MemoPanelCard {
+            ClockPanelCard {
+                visible: !control.showingSearchResults
                 Layout.fillWidth: true
-                Layout.preferredHeight: 132
+                Layout.preferredHeight: visible ? 176 : 0
                 entryDelay: 184
             }
 
-            NoticePanelCard {
+            WallpaperPanelCard {
+                visible: !control.showingSearchResults
                 Layout.fillWidth: true
-                Layout.preferredHeight: 126
+                Layout.preferredHeight: visible ? 188 : 0
                 entryDelay: 230
             }
 
-            DevicesPanelCard {
+            SettingsFooterButton {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 166
-                entryDelay: 276
+                Layout.preferredHeight: 46
+                Layout.topMargin: 6
+            }
+        }
+    }
+
+    component SearchResultsCard: ControlCard {
+        depthIndex: 5
+        innerMargin: 10
+
+        CardHeader {
+            iconName: "search"
+            title: root.tr("search")
+        }
+
+        Repeater {
+            model: root.searchResults
+
+            SearchResultRow {
+                Layout.fillWidth: true
+                entry: modelData
+                selected: index === root.searchSelectedIndex
+                onClicked: root.launchSearchEntry(entry)
+            }
+        }
+
+        Text {
+            visible: root.searchResults.length <= 0
+            Layout.fillWidth: true
+            Layout.preferredHeight: 56
+            text: root.tr("noResults")
+            color: root.inkSoft
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+            font.family: root.uiFont
+            font.pixelSize: 12
+            font.weight: Font.DemiBold
+        }
+    }
+
+    component SettingsFooterButton: Rectangle {
+        id: settingsFooter
+
+        property bool hovered: false
+
+        radius: 12
+        color: hovered ? root.alpha(root.pink, 0.16) : root.alpha(root.card, 0.34)
+        border.width: 1
+        border.color: root.alpha(hovered ? root.pink : root.borderSoft, hovered ? 0.30 : 0.22)
+
+        RowLayout {
+            anchors.fill: parent
+            anchors.leftMargin: 12
+            anchors.rightMargin: 10
+            spacing: 10
+
+            PopupIcon {
+                Layout.preferredWidth: 20
+                Layout.preferredHeight: 20
+                iconName: "settings"
+                lineColor: settingsFooter.hovered ? root.pink : root.inkSoft
+            }
+
+            Text {
+                Layout.fillWidth: true
+                text: root.tr("settings")
+                color: settingsFooter.hovered ? root.pink : root.ink
+                font.family: root.uiFont
+                font.pixelSize: 12
+                font.weight: Font.Bold
+                elide: Text.ElideRight
+            }
+
+            Text {
+                text: root.attachSide === "left" ? "›" : "‹"
+                color: root.lilac
+                font.family: root.uiFont
+                font.pixelSize: 22
+                font.weight: Font.Bold
+            }
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            hoverEnabled: true
+            acceptedButtons: Qt.LeftButton
+            cursorShape: Qt.PointingHandCursor
+            onEntered: settingsFooter.hovered = true
+            onExited: settingsFooter.hovered = false
+            onClicked: function(mouse) {
+                mouse.accepted = true
+                const centerPoint = settingsFooter.mapToItem(root, settingsFooter.width / 2, settingsFooter.height / 2)
+                root.settingsRequested(centerPoint.y)
             }
         }
     }
@@ -1866,7 +2170,7 @@ Item {
 
         CardHeader {
             iconName: "weather"
-            title: "天気"
+            title: root.tr("weather")
         }
 
         RowLayout {
@@ -1895,7 +2199,7 @@ Item {
                 }
 
                 SmallText {
-                    text: "曇り"
+                    text: root.tr("cloudy")
                     color: root.ink
                 }
             }
@@ -1903,8 +2207,8 @@ Item {
             ColumnLayout {
                 spacing: 6
 
-                MetricLine { label: "最高"; value: "20°C" }
-                MetricLine { label: "最低"; value: "12°C" }
+                MetricLine { label: root.tr("high"); value: "20°C" }
+                MetricLine { label: root.tr("low"); value: "12°C" }
             }
         }
 
@@ -1934,7 +2238,7 @@ Item {
 
             SmallText {
                 Layout.fillWidth: true
-                text: "山中湖村"
+                text: root.tr("location")
                 color: root.pink
             }
 
@@ -2002,12 +2306,12 @@ Item {
 
                 CardHeader {
                     iconName: "music"
-                    title: "メディア"
+                    title: root.tr("media")
                 }
 
                 Text {
                     Layout.fillWidth: true
-                    text: root.mediaTitle.length > 0 ? root.mediaTitle : "再生中のメディアなし"
+                    text: root.mediaTitle.length > 0 ? root.mediaTitle : root.tr("noMedia")
                     color: root.ink
                     font.family: root.uiFont
                     font.pixelSize: 13
@@ -2017,7 +2321,7 @@ Item {
 
                 SmallText {
                     Layout.fillWidth: true
-                    text: root.mediaArtist.length > 0 ? root.mediaArtist : "playerctl / MPRIS"
+                    text: root.mediaArtist.length > 0 ? root.mediaArtist : root.tr("mediaFallback")
                     elide: Text.ElideRight
                 }
 
@@ -2053,6 +2357,271 @@ Item {
             PlayerButton {
                 label: "›"
                 onClicked: root.runMediaAction("next")
+            }
+        }
+    }
+
+    component PaintPanelCard: ControlCard {
+        id: paintCard
+
+        depthIndex: 2
+
+        TapHandler {
+            acceptedButtons: Qt.LeftButton
+            onTapped: {
+                const centerPoint = paintCard.mapToItem(root, paintCard.width / 2, paintCard.height / 2)
+                root.detailWindowRequested("paint", centerPoint.y)
+            }
+        }
+
+        CardHeader {
+            iconName: "paint"
+            title: root.tr("paint")
+            actionText: root.tr("paintMode")
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 10
+
+            Repeater {
+                model: ["paint", "eraser", "box", "memo", "text"]
+
+                Rectangle {
+                    Layout.preferredWidth: 28
+                    Layout.preferredHeight: 28
+                    radius: 8
+                    color: index === 0 ? root.alpha(root.pink, 0.20) : root.alpha(root.card, 0.35)
+                    border.width: 1
+                    border.color: root.alpha(index === 0 ? root.pink : root.borderSoft, 0.25)
+
+                    PopupIcon {
+                        anchors.centerIn: parent
+                        width: 16
+                        height: 16
+                        iconName: modelData
+                        lineColor: index === 0 ? root.pink : root.inkSoft
+                        entryDelay: 150 + index * 14
+                    }
+                }
+            }
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 9
+
+            Repeater {
+                model: [root.pink, root.lilac, root.theme ? root.theme.accentTertiary : Qt.rgba(0.62, 0.78, 0.88, 1), Qt.rgba(1, 1, 1, 0.92), Qt.rgba(0.02, 0.02, 0.025, 1)]
+
+                Rectangle {
+                    Layout.preferredWidth: 20
+                    Layout.preferredHeight: 20
+                    radius: 10
+                    color: modelData
+                    border.width: 1
+                    border.color: root.alpha(root.borderSoft, 0.35)
+                }
+            }
+
+            Item { Layout.fillWidth: true }
+
+            Rectangle {
+                Layout.preferredWidth: 24
+                Layout.preferredHeight: 24
+                radius: 7
+                color: root.alpha(root.card, 0.38)
+                border.width: 1
+                border.color: root.alpha(root.borderSoft, 0.28)
+
+                Text {
+                    anchors.centerIn: parent
+                    text: "+"
+                    color: root.inkSoft
+                    font.family: root.monoFont
+                    font.pixelSize: 15
+                    font.weight: Font.Bold
+                }
+            }
+        }
+
+        CompactSliderRow {
+            iconName: "paint"
+            label: root.tr("brushSize")
+            value: 0.48
+            valueText: "12px"
+        }
+
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 46
+            radius: 8
+            color: root.alpha(root.card, 0.30)
+            border.width: 1
+            border.color: root.alpha(root.borderSoft, 0.16)
+
+            Canvas {
+                anchors.fill: parent
+                anchors.margins: 7
+                onPaint: {
+                    const ctx = getContext("2d")
+                    ctx.reset()
+                    ctx.clearRect(0, 0, width, height)
+                    ctx.strokeStyle = root.alpha(root.pink, 0.45)
+                    ctx.lineWidth = 7
+                    ctx.lineCap = "round"
+                    ctx.lineJoin = "round"
+                    ctx.beginPath()
+                    ctx.moveTo(width * 0.18, height * 0.62)
+                    ctx.bezierCurveTo(width * 0.34, height * 0.20, width * 0.44, height * 0.78, width * 0.62, height * 0.38)
+                    ctx.bezierCurveTo(width * 0.72, height * 0.18, width * 0.75, height * 0.70, width * 0.88, height * 0.46)
+                    ctx.stroke()
+                }
+            }
+        }
+    }
+
+    component ClockPanelCard: ControlCard {
+        id: clockCard
+
+        depthIndex: 3
+
+        TapHandler {
+            acceptedButtons: Qt.LeftButton
+            onTapped: {
+                const centerPoint = clockCard.mapToItem(root, clockCard.width / 2, clockCard.height / 2)
+                root.detailWindowRequested("clock", centerPoint.y)
+            }
+        }
+
+        CardHeader {
+            iconName: "calendar"
+            title: root.tr("alarm")
+            actionText: "+"
+        }
+
+        Repeater {
+            model: Math.min(root.clockAlarms.length, 3)
+
+            AlarmPreviewRow {
+                required property int index
+                readonly property var alarmItem: root.clockAlarms[index]
+
+                timeText: alarmItem.time
+                detailText: root.alarmDetailLabel(alarmItem.detail)
+                checked: alarmItem.enabled
+                onToggled: function(value) {
+                    root.setClockAlarmEnabled(index, value)
+                }
+            }
+        }
+
+        SmallText {
+            Layout.fillWidth: true
+            text: root.nextAlarmLabel()
+            horizontalAlignment: Text.AlignHCenter
+        }
+    }
+
+    component WallpaperPanelCard: ControlCard {
+        id: wallpaperCard
+
+        depthIndex: 4
+
+        TapHandler {
+            acceptedButtons: Qt.LeftButton
+            onTapped: {
+                const centerPoint = wallpaperCard.mapToItem(root, wallpaperCard.width / 2, wallpaperCard.height / 2)
+                root.detailWindowRequested("wallpaper", centerPoint.y)
+            }
+        }
+
+        CardHeader {
+            iconName: "image"
+            title: root.tr("wallpaper")
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 8
+
+            Repeater {
+                model: Math.min(root.menuWallpapers.length, 3)
+
+                Rectangle {
+                    required property int index
+                    readonly property var item: root.menuWallpapers[index]
+                    readonly property string previewSource: root.displayWallpaperSource(item)
+
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 54
+                    radius: 7
+                    clip: true
+                    color: root.alpha(root.card, 0.30)
+                    border.width: index === 0 ? 2 : 1
+                    border.color: index === 0 ? root.pink : root.alpha(root.borderSoft, 0.28)
+
+                    Image {
+                        anchors.fill: parent
+                        source: parent.previewSource
+                        fillMode: Image.PreserveAspectCrop
+                        asynchronous: true
+                        cache: true
+                        smooth: true
+                        opacity: status === Image.Ready ? 1 : 0
+                    }
+
+                    Rectangle {
+                        anchors.fill: parent
+                        color: Qt.rgba(0, 0, 0, 0.18)
+                    }
+
+                    Text {
+                        anchors {
+                            left: parent.left
+                            right: parent.right
+                            bottom: parent.bottom
+                            margins: 7
+                        }
+                        text: parent.item ? (parent.item.title || parent.item.label || root.basename(parent.item.path)) : ""
+                        color: "white"
+                        font.family: root.uiFont
+                        font.pixelSize: 9
+                        font.weight: Font.Bold
+                        elide: Text.ElideRight
+                    }
+                }
+            }
+
+            Text {
+                visible: root.menuWallpapers.length <= 0
+                Layout.fillWidth: true
+                Layout.preferredHeight: 54
+                text: menuWallpaperScan.running ? "..." : root.tr("noResults")
+                color: root.inkSoft
+                horizontalAlignment: Text.AlignHCenter
+                verticalAlignment: Text.AlignVCenter
+                font.family: root.uiFont
+                font.pixelSize: 11
+                font.weight: Font.DemiBold
+            }
+        }
+
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 34
+            radius: 8
+            color: root.alpha(root.pink, 0.18)
+            border.width: 1
+            border.color: root.alpha(root.pink, 0.24)
+
+            Text {
+                anchors.centerIn: parent
+                text: root.tr("applyWallpaper")
+                color: root.ink
+                font.family: root.uiFont
+                font.pixelSize: 11
+                font.weight: Font.Bold
             }
         }
     }
@@ -2366,6 +2935,48 @@ Item {
         }
     }
 
+    component AlarmPreviewRow: RowLayout {
+        property string timeText: "07:00"
+        property string detailText: ""
+        property bool checked: true
+        signal toggled(bool checked)
+
+        Layout.fillWidth: true
+        spacing: 9
+
+        PopupIcon {
+            Layout.preferredWidth: 20
+            Layout.preferredHeight: 20
+            iconName: "calendar"
+            lineColor: root.inkSoft
+        }
+
+        Text {
+            text: parent.timeText
+            color: root.ink
+            font.family: root.monoFont
+            font.pixelSize: 15
+            font.weight: Font.Bold
+        }
+
+        Text {
+            Layout.fillWidth: true
+            text: parent.detailText
+            color: root.inkSoft
+            font.family: root.uiFont
+            font.pixelSize: 10
+            font.weight: Font.DemiBold
+            horizontalAlignment: Text.AlignRight
+            elide: Text.ElideRight
+        }
+
+        SoftToggle {
+            checked: parent.checked
+            entryDelay: 120
+            onClicked: parent.toggled(!parent.checked)
+        }
+    }
+
     component NoticeRow: RowLayout {
         property string source: ""
         property string title: ""
@@ -2530,8 +3141,6 @@ Item {
         id: box
 
         function forceSearchFocus() {
-            if (!root.interactiveFocus)
-                return
             input.forceActiveFocus()
             input.selectAll()
         }
@@ -2561,7 +3170,7 @@ Item {
                 Text {
                     anchors.verticalCenter: parent.verticalCenter
                     visible: input.text.length <= 0
-                    text: "検索..."
+                    text: root.tr("search")
                     color: root.inkSoft
                     font.family: root.uiFont
                     font.pixelSize: 13
@@ -3451,6 +4060,37 @@ Item {
                 ctx.lineTo(s * 0.76, s * 0.29)
                 ctx.lineTo(s * 0.76, s * 0.40)
                 ctx.lineTo(s * 0.55, s * 0.35)
+                ctx.stroke()
+            } else if (iconName === "paint") {
+                ctx.beginPath()
+                ctx.moveTo(s * 0.26, s * 0.76)
+                ctx.quadraticCurveTo(s * 0.34, s * 0.52, s * 0.58, s * 0.30)
+                ctx.lineTo(s * 0.72, s * 0.44)
+                ctx.quadraticCurveTo(s * 0.50, s * 0.66, s * 0.28, s * 0.78)
+                ctx.stroke()
+                ctx.beginPath()
+                ctx.arc(s * 0.70, s * 0.28, s * 0.08, 0, Math.PI * 2)
+                ctx.fill()
+            } else if (iconName === "eraser") {
+                ctx.beginPath()
+                ctx.moveTo(s * 0.24, s * 0.62)
+                ctx.lineTo(s * 0.54, s * 0.32)
+                ctx.lineTo(s * 0.76, s * 0.54)
+                ctx.lineTo(s * 0.48, s * 0.82)
+                ctx.lineTo(s * 0.24, s * 0.62)
+                ctx.stroke()
+                ctx.beginPath()
+                ctx.moveTo(s * 0.40, s * 0.74)
+                ctx.lineTo(s * 0.58, s * 0.74)
+                ctx.stroke()
+            } else if (iconName === "text") {
+                ctx.beginPath()
+                ctx.moveTo(s * 0.26, s * 0.28)
+                ctx.lineTo(s * 0.74, s * 0.28)
+                ctx.moveTo(cx, s * 0.28)
+                ctx.lineTo(cx, s * 0.76)
+                ctx.moveTo(s * 0.38, s * 0.76)
+                ctx.lineTo(s * 0.62, s * 0.76)
                 ctx.stroke()
             } else if (iconName === "display") {
                 roundRect(ctx, s * 0.18, s * 0.24, s * 0.64, s * 0.42, s * 0.05)

@@ -85,7 +85,7 @@ Item {
             ensureLoaded()
     }
     onVisibleChanged: {
-        if (visible && open && revealProgress <= 0.001)
+        if (visible && open && revealProgress <= 0.001 && !revealAnimation.running)
             animateReveal()
         if (visible && open)
             ensureLoaded()

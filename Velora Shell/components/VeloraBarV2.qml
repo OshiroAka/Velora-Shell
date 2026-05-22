@@ -144,7 +144,8 @@ Item {
             { item: slotVolume, type: "volume" },
             { item: slotWifi, type: "wifi" },
             { item: slotBrightness, type: "brightness" },
-            { item: slotNotifications, type: "notifications" }
+            { item: slotNotifications, type: "notifications" },
+            { item: slotBluetooth, type: "bluetooth" }
         ]
 
         for (let i = 0; i < probes.length; i += 1) {
@@ -315,7 +316,7 @@ Item {
         if (focusTarget === "wifi") return slotWifi
         if (focusTarget === "brightness") return slotBrightness
         if (focusTarget === "notifications") return slotNotifications
-        if (focusTarget === "settings") return slotSettings
+        if (focusTarget === "bluetooth") return slotBluetooth
         if (focusTarget === "avatar") return slotAvatar
         return slotClock
     }
@@ -471,8 +472,8 @@ Item {
             return
         }
 
-        if (focusTarget === "settings") {
-            root.settingsRequested(root.itemCenterY(slotSettings))
+        if (focusTarget === "bluetooth") {
+            root.quickPopupRequested("bluetooth", root.itemCenterY(slotBluetooth))
             return
         }
     }
@@ -1006,13 +1007,12 @@ Item {
             }
 
             UtilityButton {
-                id: slotSettings
+                id: slotBluetooth
 
-                compact: true
-                iconName: "settings"
-                hoverPopupType: "settings"
-                selected: root.activePopupType === "settings"
-                onTriggered: root.settingsRequested(root.itemCenterY(slotSettings))
+                iconName: "bluetooth"
+                hoverPopupType: "bluetooth"
+                selected: root.activePopupType === "bluetooth"
+                onTriggered: root.quickPopupRequested("bluetooth", root.itemCenterY(slotBluetooth))
             }
 
             UtilityButton {
@@ -1240,6 +1240,7 @@ Item {
         property bool active: Hyprland.focusedWorkspace && Hyprland.focusedWorkspace.id === number
         property bool hovered: false
 
+        Layout.alignment: Qt.AlignHCenter
         radius: 6
         color: active ? root.alpha(root.pink, 0.48) : (hovered ? root.alpha(root.card, 0.70) : root.alpha(root.card, 0.34))
         border.width: 1
@@ -1319,7 +1320,7 @@ Item {
             width: Math.round(24 * root.uiScale)
             height: Math.round(24 * root.uiScale)
             iconName: row.iconName
-            lineColor: row.selected ? (root.softStyle ? root.pink : root.lilac) : (row.hovered ? root.pink : root.inkSoft)
+            lineColor: row.selected ? (root.softStyle ? root.pink : root.lilac) : root.inkSoft
             layer.enabled: root.pywalStyle && (row.selected || row.hovered)
             layer.effect: DropShadow {
                 transparentBorder: true
@@ -1340,7 +1341,7 @@ Item {
             }
 
             text: row.label
-            color: row.selected ? root.pink : (row.hovered ? root.pink : root.ink)
+            color: row.selected ? root.pink : root.ink
             font.family: root.uiFont
             font.pixelSize: Math.round(11 * root.uiScale)
             font.weight: Font.DemiBold
@@ -1384,6 +1385,7 @@ Item {
         property bool hovered: false
         property string hoverPopupType: ""
 
+        Layout.alignment: Qt.AlignHCenter
         Layout.preferredWidth: Math.round(34 * root.uiScale)
         Layout.preferredHeight: Math.round(34 * root.uiScale)
         radius: Math.round(8 * root.uiScale)
@@ -1454,8 +1456,9 @@ Item {
         property string hoverPopupType: ""
         signal triggered()
 
-        Layout.preferredWidth: Math.round((compact ? 24 : 32) * root.uiScale)
-        Layout.preferredHeight: Math.round((compact ? 24 : 32) * root.uiScale)
+        Layout.alignment: Qt.AlignHCenter
+        Layout.preferredWidth: Math.round(32 * root.uiScale)
+        Layout.preferredHeight: Math.round(32 * root.uiScale)
 
         Rectangle {
             anchors.fill: parent
@@ -1475,10 +1478,10 @@ Item {
 
         VeloraIcon {
             anchors.centerIn: parent
-            width: Math.round((button.compact ? 19 : 26) * root.uiScale)
-            height: Math.round((button.compact ? 19 : 26) * root.uiScale)
+            width: Math.round(26 * root.uiScale)
+            height: Math.round(26 * root.uiScale)
             iconName: button.iconName
-            lineColor: button.selected ? (root.softStyle ? root.pink : root.lilac) : (button.hovered ? root.pink : root.inkSoft)
+            lineColor: button.selected ? (root.softStyle ? root.pink : root.lilac) : root.inkSoft
             value: button.iconName === "battery" ? root.normalizedBatteryLevel() : Math.max(0.08, Math.min(1, root.volume / 100))
             rotation: button.iconRotation
             transformOrigin: Item.Center
@@ -1892,6 +1895,19 @@ Item {
                 ctx.beginPath()
                 ctx.moveTo(s * 0.44, s * 0.74)
                 ctx.quadraticCurveTo(s * 0.50, s * 0.81, s * 0.56, s * 0.74)
+                ctx.stroke()
+            } else if (iconName === "bluetooth") {
+                ctx.beginPath()
+                ctx.moveTo(cx, s * 0.18)
+                ctx.lineTo(s * 0.69, s * 0.35)
+                ctx.lineTo(cx, s * 0.50)
+                ctx.lineTo(s * 0.69, s * 0.65)
+                ctx.lineTo(cx, s * 0.82)
+                ctx.lineTo(cx, s * 0.18)
+                ctx.moveTo(cx, s * 0.50)
+                ctx.lineTo(s * 0.31, s * 0.35)
+                ctx.moveTo(cx, s * 0.50)
+                ctx.lineTo(s * 0.31, s * 0.65)
                 ctx.stroke()
             } else if (iconName === "settings") {
                 ctx.lineWidth = Math.max(1.5, s * 0.070)

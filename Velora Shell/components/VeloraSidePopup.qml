@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Layouts
 import Qt5Compat.GraphicalEffects
 import Quickshell
+import Quickshell.Bluetooth
 import Quickshell.Io
 import Quickshell.Services.Notifications
 
@@ -20,6 +21,8 @@ Item {
     property bool muted: false
     property bool wifiEnabled: true
     property bool nightLightEnabled: true
+    property bool bluetoothPowered: false
+    property bool bluetoothAvailable: false
     property string pendingCommand: ""
     property string activeCommand: ""
     property string searchQuery: ""
@@ -37,6 +40,8 @@ Item {
             return 248
         if (popupType === "notifications")
             return 414
+        if (popupType === "bluetooth")
+            return 456
         if (popupType === "wallpaperVisibility")
             return 132
         return 38
@@ -58,6 +63,17 @@ Item {
     readonly property string wallpaperDir: homeDir + "/Pictures/Wallpapers"
     readonly property string scanScript: Quickshell.shellDir + "/scripts/velora-wallpaper-scan"
     readonly property string visibilityScript: Quickshell.shellDir + "/scripts/velora-wallpaper-visibility"
+    readonly property string bluetoothCommand: "if ! command -v bluetoothctl >/dev/null 2>&1; then printf 'POWER|unavailable\\n'; exit 0; fi; power=$(bluetoothctl show 2>/dev/null | awk -F': ' '/Powered/ {print $2; exit}'); [ -z \"$power\" ] && power=unknown; printf 'POWER|%s\\n' \"$power\"; bluetoothctl devices Connected 2>/dev/null | sed -n 's/^Device \\([^ ]*\\) \\(.*\\)$/CONNECTED|\\1|\\2/p'; bluetoothctl devices Paired 2>/dev/null | sed -n 's/^Device \\([^ ]*\\) \\(.*\\)$/PAIRED|\\1|\\2/p'; bluetoothctl devices 2>/dev/null | sed -n 's/^Device \\([^ ]*\\) \\(.*\\)$/KNOWN|\\1|\\2/p'"
+    readonly property bool nativeBluetoothAvailable: Bluetooth.defaultAdapter !== null
+    readonly property bool bluetoothIsAvailable: nativeBluetoothAvailable || bluetoothAvailable
+    readonly property bool bluetoothIsPowered: nativeBluetoothAvailable ? (Bluetooth.defaultAdapter ? Bluetooth.defaultAdapter.enabled : false) : bluetoothPowered
+    readonly property var nativeBluetoothItems: nativeBluetoothAvailable ? [...Bluetooth.devices.values].sort(function(a, b) {
+        const aConnected = a && a.state === BluetoothDeviceState.Connected ? 1 : 0
+        const bConnected = b && b.state === BluetoothDeviceState.Connected ? 1 : 0
+        const aPaired = a && (a.bonded || a.paired) ? 1 : 0
+        const bPaired = b && (b.bonded || b.paired) ? 1 : 0
+        return (bConnected - aConnected) || (bPaired - aPaired) || root.textOf(a ? a.name : "").localeCompare(root.textOf(b ? b.name : ""))
+    }) : []
     readonly property var fallbackWallpapers: [
         { kind: "static", label: "wp15708544", title: "wp15708544", category: "Static", path: wallpaperDir + "/static/wp15708544.jpg", preview: wallpaperDir + "/static/wp15708544.jpg" }
     ]
@@ -88,6 +104,50 @@ Item {
 
     function alpha(colorValue, opacity) {
         return root.theme ? root.theme.alpha(colorValue, opacity) : Qt.rgba(colorValue.r, colorValue.g, colorValue.b, opacity)
+    }
+
+    function tr(key) {
+        const lang = root.theme ? root.theme.language : "ja"
+        const texts = {
+            "ja": {
+                "bluetoothOff": "Bluetooth オフ",
+                "btReady": "接続できます",
+                "btDisabled": "無線が無効です",
+                "btMissing": "bluetoothctl 未検出",
+                "btInstall": "BlueZ tools をインストール",
+                "btDevices": "デバイス",
+                "btNoDevices": "デバイスなし",
+                "btUnavailable": "Bluetooth は利用できません",
+                "connect": "接",
+                "disconnect": "切"
+            },
+            "en": {
+                "bluetoothOff": "Bluetooth off",
+                "btReady": "Ready to connect",
+                "btDisabled": "Radio disabled",
+                "btMissing": "bluetoothctl not found",
+                "btInstall": "Install BlueZ tools",
+                "btDevices": "devices",
+                "btNoDevices": "No devices",
+                "btUnavailable": "Bluetooth unavailable",
+                "connect": "Connect",
+                "disconnect": "Disconnect"
+            },
+            "pt-BR": {
+                "bluetoothOff": "Bluetooth desligado",
+                "btReady": "Pronto para conectar",
+                "btDisabled": "Radio desativado",
+                "btMissing": "bluetoothctl nao encontrado",
+                "btInstall": "Instale as ferramentas BlueZ",
+                "btDevices": "dispositivos",
+                "btNoDevices": "Sem dispositivos",
+                "btUnavailable": "Bluetooth indisponivel",
+                "connect": "Conectar",
+                "disconnect": "Desconectar"
+            }
+        }
+        const table = texts[lang] || texts["ja"]
+        return table[key] || texts["ja"][key] || key
     }
 
     function clamp01(value) {
@@ -174,6 +234,8 @@ Item {
             wifiQuery.running = true
         if (!notificationQuery.running)
             notificationQuery.running = true
+        if (!root.nativeBluetoothAvailable && !bluetoothQuery.running)
+            bluetoothQuery.running = true
     }
 
     HoverHandler {
@@ -196,9 +258,10 @@ Item {
 
     onVisibleChanged: {
         if (visible && open) {
-            if (revealProgress <= 0.001)
+            if (revealProgress <= 0.001 && !revealAnimation.running)
                 animateReveal()
-            restartEntryAnimation()
+            if (!entryAnimation.running && entryProgress <= 0.001)
+                restartEntryAnimation()
             refreshStatusQueries()
         }
     }
@@ -360,6 +423,123 @@ Item {
         const quotedSsid = shellQuote(ssid)
         runCommand("if nmcli -t -f NAME connection show | grep -Fx -- " + quotedSsid + " >/dev/null 2>&1; then nmcli connection up id " + quotedSsid + " >/dev/null 2>&1 || nmcli dev wifi connect " + quotedSsid + " >/dev/null 2>&1 || true; else nmcli dev wifi connect " + quotedSsid + " >/dev/null 2>&1 || (command -v nm-connection-editor >/dev/null 2>&1 && nm-connection-editor >/dev/null 2>&1 &); fi")
         wifiRefresh.restart()
+    }
+
+    function deviceKnown(address) {
+        const addr = textOf(address)
+        if (addr.length <= 0)
+            return true
+
+        for (var i = 0; i < deviceModel.count; ++i) {
+            if (deviceModel.get(i).address === addr)
+                return true
+        }
+
+        return false
+    }
+
+    function deviceIconLabel(name) {
+        const lower = textOf(name).toLowerCase()
+        if (lower.indexOf("key") >= 0 || lower.indexOf("keyboard") >= 0)
+            return "⌨"
+        if (lower.indexOf("mouse") >= 0 || lower.indexOf("mx master") >= 0)
+            return "▯"
+        return ""
+    }
+
+    function deviceIconName(name) {
+        const lower = textOf(name).toLowerCase()
+        if (lower.indexOf("airpods") >= 0 || lower.indexOf("buds") >= 0 || lower.indexOf("head") >= 0 || lower.indexOf("speaker") >= 0)
+            return "volume"
+        return "bluetooth"
+    }
+
+    function setBluetoothPower(enabled) {
+        if (!bluetoothIsAvailable)
+            return
+
+        if (nativeBluetoothAvailable) {
+            const adapter = Bluetooth.defaultAdapter
+            if (adapter) {
+                adapter.enabled = enabled
+                if (enabled)
+                    adapter.discovering = true
+            }
+            return
+        }
+
+        bluetoothPowered = enabled
+        runCommand("bluetoothctl power " + (enabled ? "on" : "off") + " >/dev/null 2>&1 || true")
+        bluetoothRefresh.restart()
+    }
+
+    function toggleBluetoothPower() {
+        setBluetoothPower(!bluetoothPowered)
+    }
+
+    function setBluetoothDeviceConnection(address, active) {
+        const addr = textOf(address)
+        if (!bluetoothIsAvailable || addr.length <= 0)
+            return
+
+        if (nativeBluetoothAvailable) {
+            const device = nativeBluetoothDevice(addr)
+            if (!device)
+                return
+            if (device.state === BluetoothDeviceState.Connecting || device.state === BluetoothDeviceState.Disconnecting)
+                return
+            if (device.connected)
+                device.disconnect()
+            else if (device.bonded || device.paired)
+                device.connect()
+            else
+                device.pair()
+            return
+        }
+
+        runCommand("bluetoothctl " + (active ? "disconnect " : "connect ") + root.shellQuote(addr) + " >/dev/null 2>&1 || true")
+        bluetoothRefresh.restart()
+    }
+
+    function nativeBluetoothDevice(address) {
+        const addr = textOf(address)
+        for (var i = 0; i < nativeBluetoothItems.length; ++i) {
+            const device = nativeBluetoothItems[i]
+            if (device && device.address === addr)
+                return device
+        }
+        return null
+    }
+
+    function bluetoothDeviceCount() {
+        return nativeBluetoothAvailable ? nativeBluetoothItems.length : deviceModel.count
+    }
+
+    function bluetoothDeviceAt(index) {
+        if (nativeBluetoothAvailable) {
+            const device = nativeBluetoothItems[index]
+            if (!device)
+                return { address: "", name: "", detail: "", active: false, loading: false, iconName: "bluetooth", iconLabel: "" }
+            const loading = device.state === BluetoothDeviceState.Connecting || device.state === BluetoothDeviceState.Disconnecting
+            const active = device.state === BluetoothDeviceState.Connected || device.connected
+            var detail = active ? "connected" : ((device.bonded || device.paired) ? "paired" : "known")
+            if (loading)
+                detail = device.state === BluetoothDeviceState.Connecting ? "connecting" : "disconnecting"
+            if (device.batteryAvailable)
+                detail += " · " + Math.round(device.battery * 100) + "%"
+            return {
+                address: device.address,
+                name: device.name || device.deviceName || device.address,
+                detail: detail,
+                active: active,
+                loading: loading,
+                iconName: root.deviceIconName(device.name || device.deviceName || device.icon || ""),
+                iconLabel: root.deviceIconLabel(device.name || device.deviceName || "")
+            }
+        }
+        if (index >= 0 && index < deviceModel.count)
+            return deviceModel.get(index)
+        return { address: "", name: "", detail: "", active: false, loading: false, iconName: "bluetooth", iconLabel: "" }
     }
 
     function activeWifi() {
@@ -705,6 +885,18 @@ Item {
     }
 
     Timer {
+        id: bluetoothRefresh
+        interval: 900
+        repeat: false
+        onTriggered: {
+            if (!root.backgroundPollingActive)
+                return
+            if (!root.nativeBluetoothAvailable && !bluetoothQuery.running)
+                bluetoothQuery.running = true
+        }
+    }
+
+    Timer {
         id: commandDebounce
         interval: 80
         repeat: false
@@ -733,6 +925,7 @@ Item {
                 if (!brightnessQuery.running)
                     brightnessQuery.running = true
                 wifiRefresh.restart()
+                bluetoothRefresh.restart()
             }
         }
     }
@@ -780,6 +973,10 @@ Item {
 
     ListModel {
         id: notificationModel
+    }
+
+    ListModel {
+        id: deviceModel
     }
 
     Process {
@@ -858,6 +1055,69 @@ Item {
         }
 
         onExited: running = false
+    }
+
+    Process {
+        id: bluetoothQuery
+
+        running: false
+        property var stagedDevices: []
+        command: ["bash", "-lc", root.bluetoothCommand]
+
+        onStarted: stagedDevices = []
+
+        stdout: SplitParser {
+            onRead: function(lineRaw) {
+                var line = lineRaw.trim()
+                if (!line)
+                    return
+
+                var parts = line.split("|")
+                if (parts[0] === "POWER") {
+                    var state = (parts[1] || "").toLowerCase()
+                    root.bluetoothAvailable = state !== "unavailable"
+                    root.bluetoothPowered = state === "yes"
+                    deviceModel.clear()
+                    bluetoothQuery.stagedDevices = []
+                    return
+                }
+
+                var kind = parts[0] || ""
+                var address = parts[1] || ""
+                var name = parts.slice(2).join("|")
+                if (address.length <= 0 || name.length <= 0)
+                    return
+
+                var active = kind === "CONNECTED"
+                var known = false
+                for (var i = 0; i < bluetoothQuery.stagedDevices.length; ++i) {
+                    if (bluetoothQuery.stagedDevices[i].address === address) {
+                        known = true
+                        if (active)
+                            bluetoothQuery.stagedDevices[i].active = true
+                        break
+                    }
+                }
+
+                if (!known) {
+                    bluetoothQuery.stagedDevices.push({
+                        address: address,
+                        name: name,
+                        detail: active ? "connected" : (kind === "PAIRED" ? "paired" : "known"),
+                        active: active,
+                        iconName: root.deviceIconName(name),
+                        iconLabel: root.deviceIconLabel(name)
+                    })
+                }
+            }
+        }
+
+        onExited: {
+            running = false
+            deviceModel.clear()
+            for (var i = 0; i < stagedDevices.length; ++i)
+                deviceModel.append(stagedDevices[i])
+        }
     }
 
     Process {
@@ -1097,6 +1357,12 @@ Item {
             anchors.fill: parent
             anchors.margins: 16
             visible: root.popupType === "notifications"
+        }
+
+        BluetoothView {
+            anchors.fill: parent
+            anchors.margins: 16
+            visible: root.popupType === "bluetooth"
         }
 
         WallpaperVisibilityView {
@@ -1877,6 +2143,198 @@ Item {
                         label: "通知をミュート"
                     }
                 }
+            }
+        }
+    }
+
+    component BluetoothView: Item {
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 12
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 10
+
+                PopupIcon {
+                    Layout.preferredWidth: 22
+                    Layout.preferredHeight: 22
+                    iconName: "bluetooth"
+                    entryDelay: 40
+                }
+
+                TitleText {
+                    Layout.fillWidth: true
+                    text: root.bluetoothIsPowered ? "Bluetooth" : root.tr("bluetoothOff")
+                    entryDelay: 48
+                }
+
+                SoftToggle {
+                    visible: root.bluetoothIsAvailable
+                    checked: root.bluetoothIsPowered
+                    entryDelay: 58
+                    onClicked: root.toggleBluetoothPower()
+                }
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 70
+                radius: 12
+                color: root.alpha(root.card, 0.38)
+                border.width: 1
+                border.color: root.line
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.margins: 12
+                    spacing: 10
+
+                    PopupIcon {
+                        Layout.preferredWidth: 30
+                        Layout.preferredHeight: 30
+                        iconName: "bluetooth"
+                        lineColor: root.bluetoothIsPowered ? root.pink : root.inkSoft
+                        entryDelay: 86
+                    }
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 2
+
+                        Text {
+                            Layout.fillWidth: true
+                            text: root.bluetoothIsAvailable ? (root.bluetoothIsPowered ? root.tr("btReady") : root.tr("btDisabled")) : root.tr("btMissing")
+                            color: root.ink
+                            font.family: root.uiFont
+                            font.pixelSize: 12
+                            font.weight: Font.Bold
+                            elide: Text.ElideRight
+                        }
+
+                        SmallText {
+                            Layout.fillWidth: true
+                            text: root.bluetoothIsAvailable ? String(root.bluetoothDeviceCount()) + " " + root.tr("btDevices") : root.tr("btInstall")
+                            elide: Text.ElideRight
+                        }
+                    }
+                }
+            }
+
+            Repeater {
+                model: Math.min(root.bluetoothDeviceCount(), 4)
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 52
+                    radius: 11
+                    color: deviceMouse.containsMouse ? root.alpha(root.card, 0.48) : root.alpha(root.card, 0.30)
+                    border.width: 1
+                    border.color: {
+                        const item = root.bluetoothDeviceAt(index)
+                        return root.alpha(item.active ? root.pink : root.borderSoft, item.active ? 0.34 : 0.20)
+                    }
+
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.margins: 10
+                        spacing: 10
+
+                        Rectangle {
+                            Layout.preferredWidth: 30
+                            Layout.preferredHeight: 30
+                            radius: 9
+                            color: {
+                                const item = root.bluetoothDeviceAt(index)
+                                return root.alpha(item.active ? root.pink : root.card, item.active ? 0.20 : 0.42)
+                            }
+
+                            Text {
+                                anchors.centerIn: parent
+                                visible: String(root.bluetoothDeviceAt(index).iconLabel || "").length > 0
+                                text: root.bluetoothDeviceAt(index).iconLabel
+                                color: root.ink
+                                font.family: root.uiFont
+                                font.pixelSize: 13
+                                font.weight: Font.Bold
+                            }
+
+                            PopupIcon {
+                                anchors.centerIn: parent
+                                visible: String(root.bluetoothDeviceAt(index).iconLabel || "").length <= 0
+                                width: 18
+                                height: 18
+                                iconName: root.bluetoothDeviceAt(index).iconName
+                                lineColor: root.bluetoothDeviceAt(index).active ? root.pink : root.inkSoft
+                            }
+                        }
+
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 1
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: root.bluetoothDeviceAt(index).name
+                                color: root.ink
+                                font.family: root.uiFont
+                                font.pixelSize: 12
+                                font.weight: Font.Bold
+                                elide: Text.ElideRight
+                            }
+
+                            SmallText {
+                                Layout.fillWidth: true
+                                text: root.bluetoothDeviceAt(index).detail
+                                elide: Text.ElideRight
+                            }
+                        }
+
+                        Text {
+                            text: root.bluetoothDeviceAt(index).loading ? "..." : (root.bluetoothDeviceAt(index).active ? root.tr("disconnect") : root.tr("connect"))
+                            color: root.pink
+                            font.family: root.uiFont
+                            font.pixelSize: 11
+                            font.weight: Font.Bold
+                        }
+                    }
+
+                    MouseArea {
+                        id: deviceMouse
+
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        acceptedButtons: Qt.LeftButton
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            const item = root.bluetoothDeviceAt(index)
+                            root.setBluetoothDeviceConnection(item.address, item.active)
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                visible: root.bluetoothDeviceCount() <= 0
+                Layout.fillWidth: true
+                Layout.preferredHeight: 86
+                radius: 11
+                color: root.alpha(root.card, 0.28)
+                border.width: 1
+                border.color: root.line
+
+                Text {
+                    anchors.centerIn: parent
+                    text: root.bluetoothIsAvailable ? root.tr("btNoDevices") : root.tr("btUnavailable")
+                    color: root.inkSoft
+                    font.family: root.uiFont
+                    font.pixelSize: 12
+                    font.weight: Font.DemiBold
+                }
+            }
+
+            Item {
+                Layout.fillHeight: true
             }
         }
     }
@@ -2882,6 +3340,19 @@ Item {
                 ctx.lineTo(s * 0.64, s * 0.42)
                 ctx.moveTo(s * 0.35, s * 0.55)
                 ctx.lineTo(s * 0.58, s * 0.55)
+                ctx.stroke()
+            } else if (iconName === "bluetooth") {
+                ctx.beginPath()
+                ctx.moveTo(cx, s * 0.18)
+                ctx.lineTo(s * 0.68, s * 0.34)
+                ctx.lineTo(cx, s * 0.50)
+                ctx.lineTo(s * 0.68, s * 0.66)
+                ctx.lineTo(cx, s * 0.82)
+                ctx.lineTo(cx, s * 0.18)
+                ctx.moveTo(cx, s * 0.50)
+                ctx.lineTo(s * 0.32, s * 0.34)
+                ctx.moveTo(cx, s * 0.50)
+                ctx.lineTo(s * 0.32, s * 0.66)
                 ctx.stroke()
             } else if (iconName === "box") {
                 roundRect(ctx, s * 0.24, s * 0.28, s * 0.52, s * 0.44, s * 0.05)
