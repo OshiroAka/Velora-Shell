@@ -959,13 +959,13 @@ Item {
             Rectangle {
                 id: previewCard
 
-                readonly property real preferredWidth: Math.min(620, Math.max(430, showcaseStage.width * 0.44))
+                readonly property real preferredWidth: Math.min(700, Math.max(540, showcaseStage.width * 0.475))
 
                 x: Math.round((showcaseStage.width - width) / 2)
-                y: Math.round(Math.max(86, showcaseStage.height * 0.13) - (1 - root.revealProgress) * 22)
+                y: Math.round(Math.max(148, showcaseStage.height * 0.158) - (1 - root.revealProgress) * 18)
                 width: Math.round(Math.min(showcaseStage.width - 76, preferredWidth))
-                height: Math.round(width * 0.61)
-                radius: 24
+                height: Math.round(width * 0.60)
+                radius: 20
                 color: Qt.rgba(1, 0.985, 1, root.neon ? 0.82 : 0.90)
                 border.width: 1
                 border.color: Qt.rgba(1, 1, 1, root.neon ? 0.72 : 0.88)
@@ -989,7 +989,7 @@ Item {
 
                 Image {
                     anchors.fill: parent
-                    anchors.margins: 10
+                    anchors.margins: 8
                     source: root.contentActive ? root.currentWallpaperPreview() : ""
                     fillMode: Image.PreserveAspectCrop
                     retainWhileLoading: true
@@ -1003,8 +1003,8 @@ Item {
 
                 Rectangle {
                     anchors.fill: parent
-                    anchors.margins: 10
-                    radius: Math.max(0, parent.radius - 10)
+                    anchors.margins: 8
+                    radius: Math.max(0, parent.radius - 8)
                     color: "transparent"
                     border.width: 1
                     border.color: root.alpha(root.selectorEdge, 0.30)
@@ -1012,6 +1012,7 @@ Item {
                 }
 
                 Rectangle {
+                    visible: false
                     x: 20
                     y: 20
                     width: previewLabel.implicitWidth + 22
@@ -1035,6 +1036,7 @@ Item {
                 }
 
                 Rectangle {
+                    visible: false
                     x: parent.width - width - 20
                     y: 18
                     width: 44
@@ -1377,21 +1379,18 @@ Item {
             visible: root.showcaseLayout
             enabled: root.showcaseLayout
             x: 0
-            y: Math.round(Math.min(parent.height - height - panelSurface.bottomDockHeight - 18, previewCard.y + previewCard.height * 0.74))
+            y: Math.round(Math.min(parent.height - height - panelSurface.bottomDockHeight - 22, previewCard.y + previewCard.height * 0.985))
             width: panelSurface.leftStageWidth
-            height: Math.round(Math.max(300, Math.min(385, parent.height * 0.44)))
+            height: Math.round(Math.max(220, Math.min(270, parent.height * 0.30)))
             clip: false
             z: 34
             readonly property real centerX: width * 0.50
-            readonly property real orbitCenterY: -Math.round(height * 0.025)
-            readonly property real orbitRadiusX: Math.min(width * 0.345, 535)
-            readonly property real orbitRadiusY: Math.min(height * 0.68, 226)
-            readonly property real baseOuterRadiusX: orbitRadiusX + 62
-            readonly property real baseOuterRadiusY: orbitRadiusY + 18
-            readonly property real baseInnerRadiusX: orbitRadiusX * 0.56
-            readonly property real baseInnerRadiusY: orbitRadiusY * 0.50
-            readonly property int perspectiveSlotCount: 9
-            readonly property int centerSlot: Math.floor(perspectiveSlotCount / 2)
+            readonly property real ribbonWidth: Math.min(width - 300, 1040)
+            readonly property real ribbonX: Math.round((width - ribbonWidth) / 2)
+            readonly property real ribbonY: 40
+            readonly property real ribbonHeight: 160
+            readonly property int ribbonCardCount: 5
+            readonly property int centerSlot: Math.floor(ribbonCardCount / 2)
 
             function slotOffset(slot) {
                 return slot - centerSlot
@@ -1401,7 +1400,7 @@ Item {
                 const count = root.wallpapers.length
                 if (count <= 0)
                     return root.fallbackWallpapers[0]
-                const index = (root.selectedIndex - centerSlot + slot + count) % count
+                const index = (root.selectedIndex + slotOffset(slot) + count) % count
                 return root.wallpapers[index]
             }
 
@@ -1409,52 +1408,42 @@ Item {
                 const count = root.wallpapers.length
                 if (count <= 0)
                     return 0
-                return (root.selectedIndex - centerSlot + slot + count) % count
-            }
-
-            function slotAngle(offset) {
-                return (90 + offset * 17.2) * Math.PI / 180
-            }
-
-            function slotCenterX(offset) {
-                return centerX + Math.cos(slotAngle(offset)) * orbitRadiusX
-            }
-
-            function slotCenterY(offset) {
-                return orbitCenterY + Math.sin(slotAngle(offset)) * orbitRadiusY
-            }
-
-            function slotDepth(offset) {
-                return 1 - Math.min(1, Math.abs(offset) / Math.max(1, centerSlot))
+                return (root.selectedIndex + slotOffset(slot) + count) % count
             }
 
             function slotWidth(offset) {
                 const distance = Math.abs(offset)
                 if (distance < 0.5)
-                    return 282
+                    return 216
                 if (distance < 1.5)
-                    return 228
-                if (distance < 2.5)
-                    return 188
-                if (distance < 3.5)
-                    return 152
-                return 122
+                    return 176
+                return 142
             }
 
             function slotHeight(offset) {
-                return slotWidth(offset) * 0.58
+                return slotWidth(offset) * 0.52
+            }
+
+            function slotCenterX(offset) {
+                const spacing = Math.min(194, ribbonWidth * 0.186)
+                return centerX + offset * spacing
+            }
+
+            function slotCenterY(offset) {
+                const distance = Math.abs(offset)
+                return ribbonY + 128 - distance * 12
             }
 
             function slotRotation(offset) {
-                return offset * 7.4 + (offset < 0 ? -2 : (offset > 0 ? 2 : 0))
+                return offset * 4.6
             }
 
             function slotYaw(offset) {
-                return -offset * 6.8
+                return 0
             }
 
             function slotOpacity(offset) {
-                return 0.58 + slotDepth(offset) * 0.42
+                return Math.max(0.62, 1 - Math.abs(offset) * 0.09)
             }
 
             WheelHandler {
@@ -1487,33 +1476,31 @@ Item {
 
                 onPaint: {
                     const ctx = getContext("2d")
+                    const x0 = perspectiveStage.ribbonX
+                    const x1 = perspectiveStage.ribbonX + perspectiveStage.ribbonWidth
                     const cx = perspectiveStage.centerX
-                    const cy = perspectiveStage.orbitCenterY
-                    const rx = perspectiveStage.baseOuterRadiusX
-                    const ry = perspectiveStage.baseOuterRadiusY
-                    const innerX = perspectiveStage.baseInnerRadiusX
-                    const innerY = perspectiveStage.baseInnerRadiusY
-                    const start = 0.13 * Math.PI
-                    const end = 0.87 * Math.PI
+                    const y = perspectiveStage.ribbonY
+                    const topSide = y + 52
+                    const topCenter = y + 18
+                    const bottomSide = y + 106
+                    const bottomCenter = y + 148
 
-                    function ovalSegment(radiusX, radiusY, closeToInner, innerRadiusX, innerRadiusY) {
-                        const samples = 72
+                    function ribbonPath(inset) {
+                        const pad = inset || 0
+                        const left = x0 + pad
+                        const right = x1 - pad
+                        const topS = topSide + pad * 0.24
+                        const topC = topCenter + pad * 0.18
+                        const bottomS = bottomSide - pad * 0.10
+                        const bottomC = bottomCenter - pad * 0.18
+
                         ctx.beginPath()
-                        for (let i = 0; i <= samples; ++i) {
-                            const a = start + (end - start) * i / samples
-                            const x = cx + Math.cos(a) * radiusX
-                            const y = cy + Math.sin(a) * radiusY
-                            if (i === 0)
-                                ctx.moveTo(x, y)
-                            else
-                                ctx.lineTo(x, y)
-                        }
-                        if (closeToInner) {
-                            for (let i = samples; i >= 0; --i) {
-                                const a = start + (end - start) * i / samples
-                                ctx.lineTo(cx + Math.cos(a) * innerRadiusX, cy + Math.sin(a) * innerRadiusY)
-                            }
-                        }
+                        ctx.moveTo(left, topS)
+                        ctx.bezierCurveTo(left + perspectiveStage.ribbonWidth * 0.18, topS + 26, cx - perspectiveStage.ribbonWidth * 0.22, topC, cx, topC)
+                        ctx.bezierCurveTo(cx + perspectiveStage.ribbonWidth * 0.22, topC, right - perspectiveStage.ribbonWidth * 0.18, topS + 26, right, topS)
+                        ctx.lineTo(right - 22, bottomS)
+                        ctx.bezierCurveTo(right - perspectiveStage.ribbonWidth * 0.18, bottomS + 38, cx + perspectiveStage.ribbonWidth * 0.18, bottomC, cx, bottomC)
+                        ctx.bezierCurveTo(cx - perspectiveStage.ribbonWidth * 0.18, bottomC, left + perspectiveStage.ribbonWidth * 0.18, bottomS + 38, left + 22, bottomS)
                         ctx.closePath()
                     }
 
@@ -1521,77 +1508,110 @@ Item {
                     ctx.clearRect(0, 0, width, height)
 
                     ctx.save()
-                    ctx.shadowColor = "rgba(78,67,96,0.10)"
-                    ctx.shadowBlur = 18
-                    ctx.shadowOffsetY = 14
-                    ovalSegment(rx, ry + 14, false, 0, 0)
-                    ctx.fillStyle = "rgba(82,78,98,0.12)"
+                    ctx.shadowColor = "rgba(76,69,92,0.12)"
+                    ctx.shadowBlur = 15
+                    ctx.shadowOffsetY = 10
+                    ribbonPath(0)
+                    ctx.fillStyle = "rgba(88,82,104,0.10)"
                     ctx.fill()
                     ctx.restore()
 
                     ctx.save()
-                    ctx.shadowColor = "rgba(232,136,194,0.08)"
-                    ctx.shadowBlur = 14
-                    ctx.shadowOffsetY = 6
-                    ovalSegment(rx, ry, true, innerX, innerY)
-                    ctx.fillStyle = "rgba(255,250,253,0.82)"
+                    ctx.shadowColor = "rgba(232,136,194,0.09)"
+                    ctx.shadowBlur = 12
+                    ctx.shadowOffsetY = 5
+                    ribbonPath(2)
+                    ctx.fillStyle = "rgba(255,249,253,0.68)"
                     ctx.fill()
-                    ctx.strokeStyle = "rgba(255,255,255,0.88)"
-                    ctx.lineWidth = 7
+                    ctx.strokeStyle = "rgba(255,255,255,0.90)"
+                    ctx.lineWidth = 6
                     ctx.stroke()
                     ctx.restore()
 
-                    ctx.save()
-                    ctx.beginPath()
-                    ctx.ellipse(cx, cy, innerX + 22, innerY + 12, 0, start, end)
-                    ctx.fillStyle = "rgba(255,250,253,0.42)"
-                    ctx.fill()
-                    ctx.restore()
-
-                    ovalSegment(rx - 10, ry - 8, true, innerX + 18, innerY + 10)
-                    ctx.strokeStyle = "rgba(214,175,234,0.20)"
-                    ctx.lineWidth = 1.2
-                    ctx.stroke()
-
-                    ctx.beginPath()
-                    ctx.ellipse(cx, cy, innerX, innerY, 0, start, end)
-                    ctx.strokeStyle = "rgba(188,142,230,0.18)"
+                    ribbonPath(15)
+                    ctx.strokeStyle = "rgba(214,175,234,0.16)"
                     ctx.lineWidth = 1.0
+                    ctx.stroke()
+
+                    ctx.beginPath()
+                    ctx.moveTo(x0 + 24, bottomSide + 16)
+                    ctx.bezierCurveTo(x0 + perspectiveStage.ribbonWidth * 0.24, bottomSide + 50, x1 - perspectiveStage.ribbonWidth * 0.24, bottomSide + 50, x1 - 24, bottomSide + 16)
+                    ctx.strokeStyle = "rgba(145,118,184,0.16)"
+                    ctx.lineWidth = 2.0
                     ctx.stroke()
                 }
             }
 
             Repeater {
-                model: root.contentActive ? perspectiveStage.perspectiveSlotCount : 0
+                model: root.contentActive ? perspectiveStage.ribbonCardCount : 0
 
-                EllipseWallpaperCard {
+                RibbonWallpaperCard {
                     id: perspectiveTile
 
                     required property int index
                     readonly property int tileSlotOffset: perspectiveStage.slotOffset(index)
-                    readonly property real offsetPhase: tileSlotOffset
-                    readonly property real tileFocusAmount: Math.max(0, 1 - Math.min(1, Math.abs(offsetPhase)))
+                    readonly property real tileFocusAmount: Math.max(0, 1 - Math.min(1, Math.abs(tileSlotOffset) / Math.max(1, perspectiveStage.centerSlot)))
                     readonly property bool centerSelected: index === perspectiveStage.centerSlot
                     readonly property int wallpaperIndex: perspectiveStage.indexForSlot(index)
 
+                    x: Math.round(perspectiveStage.slotCenterX(tileSlotOffset) - width / 2)
+                    y: Math.round(perspectiveStage.slotCenterY(tileSlotOffset) - height / 2)
+                    width: perspectiveStage.slotWidth(tileSlotOffset)
+                    height: perspectiveStage.slotHeight(tileSlotOffset)
                     entry: perspectiveStage.entryForSlot(index)
                     selected: centerSelected
-                    x: Math.round(perspectiveStage.slotCenterX(offsetPhase) - width / 2)
-                    y: Math.round(perspectiveStage.slotCenterY(offsetPhase) - height / 2)
-                    width: perspectiveStage.slotWidth(offsetPhase)
-                    height: perspectiveStage.slotHeight(offsetPhase)
-                    cardRotation: perspectiveStage.slotRotation(offsetPhase)
-                    cardYaw: perspectiveStage.slotYaw(offsetPhase)
-                    frontDepth: perspectiveStage.slotDepth(offsetPhase)
-                    z: Math.round(72 + tileFocusAmount * 32 - Math.abs(offsetPhase) * 5)
-                    opacity: perspectiveStage.slotOpacity(offsetPhase)
-                    scale: 1.0 + root.applyPulse * tileFocusAmount * 0.018
+                    cardRotation: perspectiveStage.slotRotation(tileSlotOffset)
+                    cardYaw: perspectiveStage.slotYaw(tileSlotOffset)
+                    z: Math.round(70 + tileFocusAmount * 20)
+                    opacity: perspectiveStage.slotOpacity(tileSlotOffset)
                     onClicked: {
                         if (perspectiveTile.centerSelected)
                             root.applySelected()
                         else
                             root.selectedIndex = perspectiveTile.wallpaperIndex
                     }
+                }
+            }
+
+            Text {
+                x: Math.round(perspectiveStage.ribbonX + 34)
+                y: Math.round(perspectiveStage.ribbonY + 86)
+                width: 42
+                height: 44
+                horizontalAlignment: Text.AlignHCenter
+                verticalAlignment: Text.AlignVCenter
+                text: "‹"
+                color: Qt.rgba(130 / 255, 101 / 255, 190 / 255, 1.0)
+                font.family: root.uiFont
+                font.pixelSize: 50
+                font.weight: Font.Bold
+                z: 160
+
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.moveSelection(-1)
+                }
+            }
+
+            Text {
+                x: Math.round(perspectiveStage.ribbonX + perspectiveStage.ribbonWidth - width - 34)
+                y: Math.round(perspectiveStage.ribbonY + 86)
+                width: 42
+                height: 44
+                horizontalAlignment: Text.AlignHCenter
+                verticalAlignment: Text.AlignVCenter
+                text: "›"
+                color: Qt.rgba(130 / 255, 101 / 255, 190 / 255, 1.0)
+                font.family: root.uiFont
+                font.pixelSize: 50
+                font.weight: Font.Bold
+                z: 160
+
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.moveSelection(1)
                 }
             }
         }
@@ -1602,7 +1622,7 @@ Item {
             visible: root.showcaseLayout
             enabled: root.showcaseLayout
             x: Math.round((panelSurface.leftStageWidth - width) / 2)
-            y: Math.round(Math.min(parent.height - height - 58, perspectiveStage.y + perspectiveStage.height * 0.84))
+            y: Math.round(Math.min(parent.height - height - 54, perspectiveStage.y + perspectiveStage.ribbonY + perspectiveStage.ribbonHeight + 18))
             width: 160
             height: 42
             z: 88
@@ -2331,6 +2351,97 @@ Item {
             anchors.fill: parent
             cursorShape: Qt.PointingHandCursor
             onClicked: cardTile.clicked()
+        }
+    }
+
+    component RibbonWallpaperCard: Item {
+        id: ribbonCard
+
+        property var entry: null
+        property bool selected: false
+        property real cardRotation: 0
+        property real cardYaw: 0
+        signal clicked()
+
+        transformOrigin: Item.Center
+        antialiasing: true
+        transform: Rotation {
+            origin.x: ribbonCard.width / 2
+            origin.y: ribbonCard.height / 2
+            axis.x: 0
+            axis.y: 0
+            axis.z: 1
+            angle: ribbonCard.cardRotation
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            anchors.margins: -4
+            radius: 11
+            color: Qt.rgba(66 / 255, 62 / 255, 82 / 255, 0.10)
+            antialiasing: true
+            layer.enabled: true
+            layer.effect: DropShadow {
+                transparentBorder: true
+                radius: selected ? 16 : 12
+                samples: selected ? 33 : 25
+                horizontalOffset: 0
+                verticalOffset: selected ? 8 : 6
+                color: Qt.rgba(58 / 255, 54 / 255, 74 / 255, selected ? 0.18 : 0.13)
+            }
+        }
+
+        Rectangle {
+            id: ribbonCardShell
+
+            anchors.fill: parent
+            radius: 9
+            color: Qt.rgba(1, 0.985, 1, 0.90)
+            border.width: selected ? 2 : 1
+            border.color: selected
+                ? Qt.rgba(239 / 255, 126 / 255, 185 / 255, 0.78)
+                : Qt.rgba(1, 1, 1, 0.88)
+            antialiasing: true
+            clip: true
+
+            Image {
+                anchors.fill: parent
+                anchors.margins: selected ? 4 : 5
+                source: root.contentActive ? root.displaySource(ribbonCard.entry) : ""
+                fillMode: Image.PreserveAspectCrop
+                retainWhileLoading: true
+                asynchronous: true
+                cache: true
+                smooth: true
+                mipmap: true
+                sourceSize.width: Math.round(ribbonCard.width * 2.8)
+                sourceSize.height: Math.round(ribbonCard.height * 2.8)
+            }
+
+            Rectangle {
+                anchors.fill: parent
+                anchors.margins: selected ? 4 : 5
+                radius: Math.max(0, ribbonCardShell.radius - 5)
+                color: "transparent"
+                border.width: 1
+                border.color: Qt.rgba(1, 1, 1, 0.46)
+                antialiasing: true
+            }
+
+            Rectangle {
+                anchors.fill: parent
+                gradient: Gradient {
+                    GradientStop { position: 0.0; color: Qt.rgba(1, 1, 1, 0.08) }
+                    GradientStop { position: 0.62; color: Qt.rgba(1, 1, 1, 0.00) }
+                    GradientStop { position: 1.0; color: Qt.rgba(0, 0, 0, selected ? 0.04 : 0.07) }
+                }
+            }
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            cursorShape: Qt.PointingHandCursor
+            onClicked: ribbonCard.clicked()
         }
     }
 

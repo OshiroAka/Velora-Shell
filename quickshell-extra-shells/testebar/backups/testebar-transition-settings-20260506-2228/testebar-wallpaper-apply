@@ -1,0 +1,165 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+kind="${1:-}"
+path="${2:-}"
+preview="${3:-}"
+transition="${4:-fade}"
+blur_enabled="${5:-1}"
+blur_radius="${6:-29}"
+blur_hold="${7:-0.18}"
+blur_fade_duration="${8:-1.40}"
+blur_bezier="${9:-0.05,0.7,0.1,1}"
+
+[ -n "$kind" ] || exit 2
+[ -n "$path" ] || exit 2
+
+cache_dir="$HOME/.cache/testebar"
+blur_dir="$cache_dir/blur-previews"
+mkdir -p "$cache_dir"
+mkdir -p "$blur_dir"
+
+case "$blur_radius" in
+  ''|*[!0-9]*) blur_radius=29 ;;
+esac
+if [ "$blur_radius" -lt 4 ]; then
+  blur_radius=4
+elif [ "$blur_radius" -gt 48 ]; then
+  blur_radius=48
+fi
+
+case "$blur_hold" in
+  ''|*[!0-9.]*|*.*.*) blur_hold=0.18 ;;
+esac
+
+case "$blur_fade_duration" in
+  ''|*[!0-9.]*|*.*.*) blur_fade_duration=1.40 ;;
+esac
+
+case "$blur_bezier" in
+  ''|*[!0-9.,-]*) blur_bezier="0.05,0.7,0.1,1" ;;
+esac
+
+previous_theme_path=""
+if [ -f "$cache_dir/current_wallpaper" ]; then
+  IFS='|' read -r _old_kind _old_path previous_theme_path < "$cache_dir/current_wallpaper" || previous_theme_path=""
+fi
+
+theme_path="$path"
+[ -n "$preview" ] && [ -f "$preview" ] && theme_path="$preview"
+
+blur_transition_path="$theme_path"
+if [ -n "$previous_theme_path" ] && [ -f "$previous_theme_path" ]; then
+  blur_transition_path="$previous_theme_path"
+fi
+
+start_awww() {
+  if ! pgrep -x awww-daemon >/dev/null 2>&1; then
+    nohup awww-daemon -q >/dev/null 2>&1 &
+    sleep 0.15
+  fi
+}
+
+apply_pywal() {
+  local img="$1"
+  [ -f "$img" ] || return 0
+  command -v wal >/dev/null 2>&1 || return 0
+  wal -i "$img" -n -q >/dev/null 2>&1 || true
+}
+
+blur_wallpaper_path() {
+  local source="$1"
+  local key output
+
+  [ "$blur_enabled" = "1" ] || return 1
+  [ -n "$source" ] && [ -f "$source" ] || return 1
+  command -v ffmpeg >/dev/null 2>&1 || return 1
+
+  key="$(printf '%s|%s|%s|%s\n' "$kind" "$path" "$source" "$blur_radius" | sha256sum | awk '{print $1}')"
+  output="$blur_dir/${key}.jpg"
+
+  if [ ! -s "$output" ] || [ "$source" -nt "$output" ]; then
+    ffmpeg -hide_banner -loglevel error -y \
+      -i "$source" \
+      -frames:v 1 \
+      -vf "scale=960:-2:flags=lanczos,boxblur=${blur_radius}:2,eq=saturation=0.82:brightness=-0.015" \
+      "$output" >/dev/null 2>&1 || return 1
+  fi
+
+  [ -s "$output" ] || return 1
+  printf '%s\n' "$output"
+}
+
+apply_blur_wallpaper() {
+  local source="$1"
+  local blurred
+
+  blurred="$(blur_wallpaper_path "$source" 2>/dev/null || true)"
+  [ -n "$blurred" ] || return 0
+
+  start_awww
+  awww img "$blurred" \
+    --transition-type fade \
+    --transition-duration "$blur_fade_duration" \
+    --transition-fps 60 \
+    --transition-bezier "$blur_bezier" >/dev/null 2>&1 || return 0
+  sleep "$blur_fade_duration"
+  sleep "$blur_hold"
+}
+
+persist_current_wallpaper() {
+  printf '%s|%s|%s\n' "$kind" "$path" "$theme_path" > "$cache_dir/current_wallpaper"
+}
+
+monitors() {
+  hyprctl monitors -j 2>/dev/null | python3 -c '
+import json, sys
+try:
+    data = json.load(sys.stdin)
+    out = [m.get("name", "") for m in data if m.get("name")]
+    print(" ".join(out))
+except Exception:
+    print("")
+' 2>/dev/null || true
+}
+
+case "$kind" in
+  static)
+    start_awww
+    apply_blur_wallpaper "$blur_transition_path"
+    awww img "$path" \
+      --transition-type "$transition" \
+      --transition-duration 0.95 \
+      --transition-fps 60 \
+      --transition-bezier 0.2,0,0,1
+    apply_pywal "$path"
+    persist_current_wallpaper
+    (sleep 0.85; pkill -x mpvpaper >/dev/null 2>&1 || true; pkill -x linux-wallpaperengine >/dev/null 2>&1 || true) >/dev/null 2>&1 &
+    ;;
+  live)
+    mons="$(monitors)"
+    [ -n "$mons" ] || mons="eDP-1"
+    pkill -x mpvpaper >/dev/null 2>&1 || true
+    apply_blur_wallpaper "$blur_transition_path"
+    sleep 0.10
+    : > /tmp/testebar-mpvpaper.log
+    for mon in $mons; do
+      nohup mpvpaper -o 'no-audio loop-file=inf panscan=1.0 video-unscaled=no hwdec=auto-safe scale=bilinear cscale=bilinear dscale=bilinear interpolation=no deband=no' "$mon" "$path" >>/tmp/testebar-mpvpaper.log 2>&1 &
+    done
+    apply_pywal "$theme_path"
+    persist_current_wallpaper
+    (sleep 0.85; pkill -x linux-wallpaperengine >/dev/null 2>&1 || true; awww kill >/dev/null 2>&1 || true) >/dev/null 2>&1 &
+    ;;
+  engine)
+    pkill -x linux-wallpaperengine >/dev/null 2>&1 || true
+    apply_blur_wallpaper "$blur_transition_path"
+    sleep 0.18
+    nohup linux-wallpaperengine --screen-root eDP-1 --bg "$path" >/tmp/testebar-wallpaperengine.log 2>&1 &
+    apply_pywal "$theme_path"
+    persist_current_wallpaper
+    (sleep 0.85; pkill -x mpvpaper >/dev/null 2>&1 || true; awww kill >/dev/null 2>&1 || true) >/dev/null 2>&1 &
+    ;;
+  *)
+    exit 2
+    ;;
+esac

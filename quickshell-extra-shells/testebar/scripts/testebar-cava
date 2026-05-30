@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+set -u
+
+bars="${1:-10}"
+case "$bars" in
+    ''|*[!0-9]*)
+        bars=10
+        ;;
+esac
+if [ "$bars" -lt 1 ]; then
+    bars=1
+elif [ "$bars" -gt 32 ]; then
+    bars=32
+fi
+runtime_dir="${XDG_RUNTIME_DIR:-/tmp}"
+config_path="${runtime_dir}/testebar-cava-${UID:-0}-${bars}.conf"
+cava_pid=""
+
+cleanup() {
+    rm -f "$config_path"
+}
+
+terminate() {
+    if [ -n "$cava_pid" ]; then
+        kill "$cava_pid" 2>/dev/null || true
+        wait "$cava_pid" 2>/dev/null || true
+    fi
+
+    cleanup
+    exit 0
+}
+
+run_cava() {
+    cava -p "$config_path" 2>/dev/null &
+    cava_pid="$!"
+    wait "$cava_pid"
+    local status="$?"
+    cava_pid=""
+    return "$status"
+}
+
+write_config() {
+    local method="$1"
+
+    cat > "$config_path" <<EOF
+[general]
+bars = ${bars}
+framerate = 24
+autosens = 1
+sensitivity = 140
+
+[input]
+method = ${method}
+source = auto
+
+[output]
+method = raw
+raw_target = /dev/stdout
+data_format = ascii
+ascii_max_range = 1000
+bar_delimiter = 59
+EOF
+}
+
+trap cleanup EXIT
+trap terminate INT TERM
+
+for method in pipewire pulse; do
+    write_config "$method"
+    run_cava
+    sleep 0.2
+done
+
+while true; do
+    line=""
+    for ((i = 0; i < bars; i += 1)); do
+        line="${line}0;"
+    done
+    printf '%s\n' "$line"
+    sleep 0.25
+done

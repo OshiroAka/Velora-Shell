@@ -12,16 +12,23 @@ Item {
     property var theme: null
     property bool externalSurface: false
     property string attachSide: "left"
-    readonly property int cornerRadius: 18
+    readonly property int cornerRadius: 24
     readonly property bool pywalStyle: theme && theme.themeId === "pywal16"
     readonly property bool neon: pywalStyle && theme.themeMode === "dark"
     readonly property string uiFont: "Noto Sans CJK JP"
     readonly property string monoFont: "JetBrainsMono Nerd Font"
+    readonly property color settingsLightText: Qt.rgba(0.27, 0.21, 0.39, 0.94)
+    readonly property color settingsLightTextSoft: Qt.rgba(0.39, 0.32, 0.52, 0.70)
+    readonly property color settingsLightAccent: accentPrimary()
+    readonly property color settingsLightLine: Qt.rgba(0.42, 0.31, 0.53, 0.10)
+    readonly property color settingsLightPanel: Qt.rgba(1, 1, 1, 0.54)
     readonly property string homeDir: Quickshell.env("HOME") || ""
     readonly property string wallpaperDir: homeDir + "/Pictures/Wallpapers"
     readonly property string applyScript: Quickshell.shellDir + "/scripts/velora-wallpaper-apply"
     readonly property string scanScript: Quickshell.shellDir + "/scripts/velora-wallpaper-scan"
     readonly property string zenLiveScript: Quickshell.shellDir + "/scripts/velora-zen-live-apply"
+    readonly property string zenThemeScript: Quickshell.shellDir + "/scripts/velora-zen-theme.py"
+    readonly property string spotifyThemeScript: Quickshell.shellDir + "/scripts/velora-spotify-theme.py"
     readonly property var navItems: [
         { key: "theme", icon: "palette" },
         { key: "wallpaper", icon: "image" },
@@ -53,6 +60,8 @@ Item {
     property var wallpapers: fallbackWallpapers
     property string noticeText: ""
     property bool zenAutoRestart: true
+    property bool webThemeBalance: true
+    property bool spotifyAutoRestart: true
     property bool open: visible
     property bool loadedOnce: false
     property bool scanComplete: false
@@ -164,8 +173,13 @@ Item {
                 "nav_language": "言語",
                 "themeStyle": "テーマスタイル",
                 "layout": "レイアウト",
+                "layoutLeft": "左",
+                "layoutRight": "右",
+                "layoutTop": "上",
                 "frameOn": "枠 ON",
                 "frameOff": "枠 OFF",
+                "topBarOn": "上バー ON",
+                "topBarOff": "上バー OFF",
                 "opacity": "透明度",
                 "opacityAll": "全体",
                 "opacityBar": "バー",
@@ -184,6 +198,18 @@ Item {
                 "zenRestartOff": "Zen 自動 OFF",
                 "zenRestartOnNotice": "Zen の自動再起動を有効にしました。",
                 "zenRestartOffNotice": "Zen の自動再起動を停止しました。",
+                "spotifyRestartOn": "Spotify 自動 ON",
+                "spotifyRestartOff": "Spotify 自動 OFF",
+                "spotifyRestartOnNotice": "Spotify の自動再起動を有効にしました。",
+                "spotifyRestartOffNotice": "Spotify は次回起動時に適用します。",
+                "webTheme": "Web / YouTube",
+                "webThemeHint": "背景を Velora と合わせます。",
+                "webBalanceOn": "バランス",
+                "webBalanceOff": "クリーン",
+                "webBalanceOnNotice": "Web のバランスを有効にしました。",
+                "webBalanceOffNotice": "Web をクリーン表示にしました。",
+                "webBalanceStateOn": "バーと同じ背景",
+                "webBalanceStateOff": "検索だけ残して透明",
                 "wallpaper": "壁紙",
                 "customWallpaper": "カスタム壁紙を選択",
                 "applying": "適用中...",
@@ -199,8 +225,13 @@ Item {
                 "nav_language": "Language",
                 "themeStyle": "Theme Style",
                 "layout": "Layout",
+                "layoutLeft": "Left",
+                "layoutRight": "Right",
+                "layoutTop": "Top",
                 "frameOn": "Frame ON",
                 "frameOff": "Frame OFF",
+                "topBarOn": "Top bar ON",
+                "topBarOff": "Top bar OFF",
                 "opacity": "Opacity",
                 "opacityAll": "Global",
                 "opacityBar": "Bar",
@@ -219,6 +250,18 @@ Item {
                 "zenRestartOff": "Zen auto OFF",
                 "zenRestartOnNotice": "Zen auto restart enabled.",
                 "zenRestartOffNotice": "Zen auto restart disabled.",
+                "spotifyRestartOn": "Spotify auto ON",
+                "spotifyRestartOff": "Spotify auto OFF",
+                "spotifyRestartOnNotice": "Spotify auto restart enabled.",
+                "spotifyRestartOffNotice": "Spotify will update on next launch.",
+                "webTheme": "Web / YouTube",
+                "webThemeHint": "Match site glass with Velora.",
+                "webBalanceOn": "Balance",
+                "webBalanceOff": "Clean",
+                "webBalanceOnNotice": "Web balance enabled.",
+                "webBalanceOffNotice": "Clean web mode enabled.",
+                "webBalanceStateOn": "Same background as the bar",
+                "webBalanceStateOff": "Only search, transparent page",
                 "wallpaper": "Wallpaper",
                 "customWallpaper": "Choose wallpaper folder",
                 "applying": "Applying...",
@@ -234,8 +277,13 @@ Item {
                 "nav_language": "Idioma",
                 "themeStyle": "Estilo do tema",
                 "layout": "Layout",
+                "layoutLeft": "Esquerda",
+                "layoutRight": "Direita",
+                "layoutTop": "Superior",
                 "frameOn": "Moldura ON",
                 "frameOff": "Moldura OFF",
+                "topBarOn": "Barra sup ON",
+                "topBarOff": "Barra sup OFF",
                 "opacity": "Transparência",
                 "opacityAll": "Geral",
                 "opacityBar": "Barra",
@@ -254,6 +302,18 @@ Item {
                 "zenRestartOff": "Zen auto OFF",
                 "zenRestartOnNotice": "Reinício automático do Zen ativado.",
                 "zenRestartOffNotice": "Reinício automático do Zen desativado.",
+                "spotifyRestartOn": "Spotify auto ON",
+                "spotifyRestartOff": "Spotify auto OFF",
+                "spotifyRestartOnNotice": "Reinício automático do Spotify ativado.",
+                "spotifyRestartOffNotice": "Spotify vai atualizar na próxima abertura.",
+                "webTheme": "Web / YouTube",
+                "webThemeHint": "Equilibra o fundo com a barra.",
+                "webBalanceOn": "Equilíbrio",
+                "webBalanceOff": "Limpo",
+                "webBalanceOnNotice": "Equilíbrio web ativado.",
+                "webBalanceOffNotice": "Modo web limpo ativado.",
+                "webBalanceStateOn": "Mesmo fundo da barra",
+                "webBalanceStateOff": "Só pesquisa e página transparente",
                 "wallpaper": "Papel de parede",
                 "customWallpaper": "Escolher pasta de wallpapers",
                 "applying": "Aplicando...",
@@ -411,6 +471,33 @@ Item {
         noticeReset.restart()
     }
 
+    function setWebThemeBalance(enabled) {
+        root.webThemeBalance = enabled
+        const mode = enabled ? "balance" : "clean"
+        if (!webThemeModeSave.running) {
+            webThemeModeSave.command = [root.zenThemeScript, "--quiet", "mode", "set", mode]
+            webThemeModeSave.running = true
+        } else {
+            webThemeModeSave.pendingMode = mode
+        }
+
+        root.noticeText = enabled ? root.tr("webBalanceOnNotice") : root.tr("webBalanceOffNotice")
+        noticeReset.restart()
+    }
+
+    function setSpotifyAutoRestart(enabled) {
+        root.spotifyAutoRestart = enabled
+        if (!spotifyModeSave.running) {
+            spotifyModeSave.command = [root.spotifyThemeScript, "mode", "set", enabled ? "restart" : "off"]
+            spotifyModeSave.running = true
+        } else {
+            spotifyModeSave.pendingMode = enabled ? "restart" : "off"
+        }
+
+        root.noticeText = enabled ? root.tr("spotifyRestartOnNotice") : root.tr("spotifyRestartOffNotice")
+        noticeReset.restart()
+    }
+
     function reload() {
         if (!scanWallpapers.running)
             scanWallpapers.running = true
@@ -424,6 +511,10 @@ Item {
         reload()
         if (!zenModeLoad.running)
             zenModeLoad.running = true
+        if (!webThemeModeLoad.running)
+            webThemeModeLoad.running = true
+        if (!spotifyModeLoad.running)
+            spotifyModeLoad.running = true
     }
 
     Timer {
@@ -480,6 +571,81 @@ Item {
                 const next = pendingMode
                 pendingMode = ""
                 command = [root.zenLiveScript, "mode", "set", next]
+                running = true
+            }
+        }
+    }
+
+    Process {
+        id: webThemeModeLoad
+
+        running: false
+        command: [root.zenThemeScript, "mode", "get"]
+
+        stdout: SplitParser {
+            onRead: function(data) {
+                root.webThemeBalance = String(data || "").trim() !== "clean"
+            }
+        }
+
+        onExited: running = false
+    }
+
+    Process {
+        id: webThemeModeSave
+
+        property string pendingMode: ""
+        running: false
+        command: [root.zenThemeScript, "--quiet", "mode", "set", "balance"]
+        onExited: {
+            running = false
+            if (pendingMode.length > 0) {
+                const next = pendingMode
+                pendingMode = ""
+                command = [root.zenThemeScript, "--quiet", "mode", "set", next]
+                running = true
+                return
+            }
+            if (root.zenAutoRestart && !zenThemeReload.running)
+                zenThemeReload.running = true
+        }
+    }
+
+    Process {
+        id: zenThemeReload
+
+        running: false
+        command: [root.zenLiveScript, "--debounced"]
+        onExited: running = false
+    }
+
+    Process {
+        id: spotifyModeLoad
+
+        running: false
+        command: [root.spotifyThemeScript, "mode", "get"]
+
+        stdout: SplitParser {
+            onRead: function(data) {
+                root.spotifyAutoRestart = String(data || "").trim() !== "off"
+            }
+        }
+
+        onExited: running = false
+    }
+
+    Process {
+        id: spotifyModeSave
+
+        property string pendingMode: ""
+        running: false
+        command: [root.spotifyThemeScript, "mode", "set", "restart"]
+        onExited: {
+            running = false
+            if (pendingMode.length > 0) {
+                const next = pendingMode
+                pendingMode = ""
+                command = [root.spotifyThemeScript, "mode", "set", next]
                 running = true
             }
         }
@@ -594,7 +760,12 @@ Item {
             }
         }
 
+        NewSettingsView {
+            anchors.fill: parent
+        }
+
         Rectangle {
+            visible: false
             x: 200
             y: 0
             width: 1
@@ -605,6 +776,7 @@ Item {
         Column {
             id: navColumn
 
+            visible: false
             x: 22
             y: 26
             width: 154
@@ -628,6 +800,7 @@ Item {
         Item {
             id: mainArea
 
+            visible: false
             x: 230
             y: 35
             width: parent.width - x - 34
@@ -640,7 +813,7 @@ Item {
                 visible: root.activeNav <= 2
                 clip: true
                 contentWidth: width
-                contentHeight: root.activeNav === 0 ? 780 : height
+                contentHeight: root.activeNav === 0 ? 840 : height
                 boundsBehavior: Flickable.StopAtBounds
 
                 Item {
@@ -710,22 +883,50 @@ Item {
                     LayoutPreviewButton {
                         width: 104
                         side: "left"
-                        active: root.theme ? root.theme.barPosition === "left" : true
+                        label: root.tr("layoutLeft")
+                        active: root.theme ? !root.theme.topBarEnabled && root.theme.barPosition === "left" : true
                         onClicked: {
-                            if (root.theme)
+                            if (root.theme) {
+                                root.theme.setTopBarEnabled(false)
                                 root.theme.setBarPosition("left")
+                            }
                         }
                     }
 
                     LayoutPreviewButton {
                         width: 104
                         side: "right"
-                        active: root.theme ? root.theme.barPosition === "right" : false
+                        label: root.tr("layoutRight")
+                        active: root.theme ? !root.theme.topBarEnabled && root.theme.barPosition === "right" : false
                         onClicked: {
-                            if (root.theme)
+                            if (root.theme) {
+                                root.theme.setTopBarEnabled(false)
                                 root.theme.setBarPosition("right")
+                            }
                         }
                     }
+
+                    LayoutPreviewButton {
+                        width: 104
+                        side: "top"
+                        label: root.tr("layoutTop")
+                        active: root.theme ? root.theme.topBarEnabled : false
+                        onClicked: {
+                            if (root.theme)
+                                root.theme.setTopBarEnabled(true)
+                        }
+                    }
+
+                }
+
+                Row {
+                    id: appSyncRow
+
+                    x: 0
+                    y: 242
+                    width: mainArea.width
+                    visible: root.activeNav === 0
+                    spacing: 10
 
                     LayoutToggleButton {
                         width: 142
@@ -743,11 +944,18 @@ Item {
                         active: root.zenAutoRestart
                         onClicked: root.setZenAutoRestart(!root.zenAutoRestart)
                     }
+
+                    LayoutToggleButton {
+                        width: 172
+                        label: root.spotifyAutoRestart ? root.tr("spotifyRestartOn") : root.tr("spotifyRestartOff")
+                        active: root.spotifyAutoRestart
+                        onClicked: root.setSpotifyAutoRestart(!root.spotifyAutoRestart)
+                    }
                 }
 
                 Text {
                     x: 0
-                    y: 256
+                    y: 306
                     visible: root.activeNav === 0
                     text: root.tr("opacity")
                     color: root.c("textPrimary", "#4d3f63")
@@ -762,7 +970,7 @@ Item {
 	                    id: opacityRow
 
 	                    x: 0
-	                    y: 286
+	                    y: 336
 	                    width: mainArea.width
 	                    visible: root.activeNav === 0
 	                    spacing: 12
@@ -867,7 +1075,7 @@ Item {
                     id: barOpacityRow
 
                     x: 0
-                    y: 346
+                    y: 396
                     width: mainArea.width
                     visible: root.activeNav === 0
                     spacing: 12
@@ -887,7 +1095,7 @@ Item {
 
                 Text {
                     x: 0
-                    y: 656
+                    y: 706
                     visible: root.activeNav === 0
                     text: root.tr("visualizer")
                     color: root.c("textPrimary", "#4d3f63")
@@ -902,7 +1110,7 @@ Item {
                     id: visualizerRow
 
                     x: 0
-                    y: 686
+                    y: 736
                     width: mainArea.width
                     visible: root.activeNav === 0
                     spacing: 12
@@ -922,7 +1130,7 @@ Item {
 
                 Text {
                     x: 0
-	                    y: 406
+	                    y: 456
 	                    visible: root.activeNav === 0
 	                    text: root.tr("glow")
                     color: root.c("textPrimary", "#4d3f63")
@@ -937,7 +1145,7 @@ Item {
 	                    id: glowRow
 
 	                    x: 0
-	                    y: 436
+	                    y: 486
 	                    width: mainArea.width
                     visible: root.activeNav === 0
 
@@ -956,7 +1164,7 @@ Item {
 
 	                Text {
 	                    x: 0
-	                    y: 496
+	                    y: 546
 	                    visible: root.activeNav === 0
 	                    text: root.tr("border")
                     color: root.c("textPrimary", "#4d3f63")
@@ -971,7 +1179,7 @@ Item {
 	                    id: borderRow
 
 	                    x: 0
-	                    y: 526
+	                    y: 576
 	                    width: mainArea.width
                     visible: root.activeNav === 0
                     spacing: 14
@@ -1257,13 +1465,432 @@ Item {
         }
     }
 
+    component NewSettingsView: Rectangle {
+        id: settingsView
+
+        readonly property color bg: Qt.rgba(1.0, 0.965, 0.995, 0.84)
+        readonly property color panel: Qt.rgba(1, 1, 1, 0.54)
+        readonly property color panelStrong: Qt.rgba(1, 1, 1, 0.70)
+        readonly property color text: Qt.rgba(0.27, 0.21, 0.39, 0.94)
+        readonly property color textSoft: Qt.rgba(0.39, 0.32, 0.52, 0.70)
+        readonly property color pink: root.accentPrimary()
+        readonly property color line: Qt.rgba(0.42, 0.31, 0.53, 0.10)
+
+        radius: root.cornerRadius
+        color: bg
+        clip: true
+
+        Image {
+            anchors.fill: parent
+            source: root.currentWallpaperPreview()
+            fillMode: Image.PreserveAspectCrop
+            opacity: 0.12
+            asynchronous: true
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            color: Qt.rgba(1, 1, 1, 0.42)
+        }
+
+        Rectangle {
+            x: 18
+            y: 18
+            width: parent.width - 36
+            height: parent.height - 36
+            radius: 20
+            color: Qt.rgba(1, 1, 1, 0.36)
+            border.width: 1
+            border.color: Qt.rgba(1, 1, 1, 0.62)
+        }
+
+        Rectangle {
+            x: 292
+            y: 34
+            width: 1
+            height: parent.height - 98
+            color: line
+        }
+
+        ColumnLayout {
+            x: 42
+            y: 48
+            width: 210
+            height: parent.height - 96
+            spacing: 16
+
+            Text {
+                Layout.fillWidth: true
+                text: "Settings"
+                color: settingsView.text
+                font.family: root.uiFont
+                font.pixelSize: 25
+                font.weight: Font.Bold
+            }
+
+            Text {
+                Layout.fillWidth: true
+                text: "Customize your experience"
+                color: settingsView.textSoft
+                font.family: root.uiFont
+                font.pixelSize: 12
+            }
+
+            ColumnLayout {
+                Layout.fillWidth: true
+                Layout.topMargin: 16
+                spacing: 10
+
+                Repeater {
+                    model: [
+                        ["General", "home"],
+                        ["Appearance", "palette"],
+                        ["Themes", "palette"],
+                        ["Workspaces", "display"],
+                        ["Apps", "box"],
+                        ["Notifications", "bell"],
+                        ["Sound", "volume"],
+                        ["Network", "wifi"],
+                        ["Battery", "battery"],
+                        ["Bluetooth", "bluetooth"],
+                        ["Privacy", "lock"],
+                        ["About", "memo"]
+                    ]
+
+                    SettingsNavPill {
+                        Layout.fillWidth: true
+                        label: modelData[0]
+                        iconName: modelData[1]
+                        active: index === 0
+                    }
+                }
+            }
+
+            Item { Layout.fillHeight: true }
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 86
+                radius: 14
+                color: settingsView.panel
+                border.width: 1
+                border.color: settingsView.line
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.margins: 14
+                    spacing: 12
+
+                    Rectangle {
+                        Layout.preferredWidth: 48
+                        Layout.preferredHeight: 48
+                        radius: 24
+                        color: Qt.rgba(1, 1, 1, 0.70)
+                        clip: true
+                        Image { anchors.fill: parent; anchors.margins: 3; source: Qt.resolvedUrl("../assets/profile-avatar.png"); fillMode: Image.PreserveAspectCrop }
+                    }
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 2
+                        Text { Layout.fillWidth: true; text: "Starlight"; color: settingsView.text; font.family: root.uiFont; font.pixelSize: 13; font.weight: Font.Bold }
+                        Text { Layout.fillWidth: true; text: "starlight@elysium.dev"; color: settingsView.textSoft; font.family: root.uiFont; font.pixelSize: 10; elide: Text.ElideRight }
+                    }
+
+                    Text { text: "›"; color: settingsView.textSoft; font.pixelSize: 22 }
+                }
+            }
+        }
+
+        ColumnLayout {
+            x: 332
+            y: 46
+            width: parent.width - x - 40
+            height: parent.height - 92
+            spacing: 18
+
+            RowLayout {
+                Layout.fillWidth: true
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 4
+                    Text { text: "General"; color: settingsView.text; font.family: root.uiFont; font.pixelSize: 23; font.weight: Font.Bold }
+                    Text { text: "Basic settings and preferences"; color: settingsView.textSoft; font.family: root.uiFont; font.pixelSize: 12 }
+                }
+
+                WindowButton { label: "-" }
+                WindowButton { label: "□" }
+                WindowButton { label: "×"; onClicked: root.closeRequested() }
+            }
+
+            GridLayout {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                columns: 3
+                columnSpacing: 14
+                rowSpacing: 14
+
+                SettingsCard {
+                    title: "Language"
+                    subtitle: "Choose your preferred language"
+                    ComboField { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; anchors.margins: 18; label: "English (US)"; iconName: "globe" }
+                }
+
+                SettingsCard {
+                    title: "Time & Date"
+                    subtitle: "Set time format and date preferences"
+                    RowLayout { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; anchors.margins: 18; spacing: 10
+                        ComboField { Layout.fillWidth: true; label: "24-hour"; iconName: "clock" }
+                        ComboField { Layout.fillWidth: true; label: "YYYY-MM-DD"; iconName: "calendar" }
+                    }
+                }
+
+                SettingsCard {
+                    title: root.tr("webTheme")
+                    subtitle: root.tr("webThemeHint")
+                    ColumnLayout { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; anchors.margins: 18; spacing: 12
+                        RowLayout { Layout.fillWidth: true; spacing: 10
+                            RectButton { Layout.fillWidth: true; widthHint: 118; label: root.tr("webBalanceOn"); primary: root.webThemeBalance; onClicked: root.setWebThemeBalance(true) }
+                            RectButton { Layout.fillWidth: true; widthHint: 96; label: root.tr("webBalanceOff"); primary: !root.webThemeBalance; onClicked: root.setWebThemeBalance(false) }
+                        }
+                        Text {
+                            Layout.fillWidth: true
+                            text: root.webThemeBalance ? root.tr("webBalanceStateOn") : root.tr("webBalanceStateOff")
+                            color: settingsView.textSoft
+                            font.family: root.uiFont
+                            font.pixelSize: 11
+                            wrapMode: Text.WordWrap
+                        }
+                    }
+                }
+
+                SettingsCard {
+                    title: "Appearance"
+                    subtitle: "Customize how the interface looks"
+                    ColumnLayout { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; anchors.margins: 18; spacing: 16
+                        RowLayout { Layout.fillWidth: true; spacing: 14
+                            AppearanceModeButton { Layout.fillWidth: true; label: "Light"; iconName: "sun"; active: true; onClicked: if (root.theme) root.theme.applyTheme("default") }
+                            AppearanceModeButton { Layout.fillWidth: true; label: "Dark"; iconName: "moon"; onClicked: if (root.theme) root.theme.applyTheme("dark") }
+                            AppearanceModeButton { Layout.fillWidth: true; label: "Auto"; iconName: "display"; onClicked: if (root.theme) root.theme.applyTheme("pywal16") }
+                        }
+                        Text { text: "Accent Color"; color: settingsView.textSoft; font.family: root.uiFont; font.pixelSize: 12; font.weight: Font.Bold }
+                        RowLayout { Layout.fillWidth: true; spacing: 13
+                            Repeater { model: ["#e78ac3", "#9d6bd6", "#66a6ee", "#40c2c5", "#68cd6c", "#f0b849", "#f47361"]
+                                Rectangle { Layout.preferredWidth: 25; Layout.preferredHeight: 25; radius: 13; color: modelData; border.width: index === 0 ? 6 : 1; border.color: index === 0 ? Qt.rgba(1, 1, 1, 0.72) : settingsView.line }
+                            }
+                        }
+                    }
+                }
+
+                SettingsCard {
+                    title: "Transparency"
+                    subtitle: "Adjust background blur and transparency"
+                    ColumnLayout { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; anchors.margins: 18; spacing: 14
+                        SettingsSlider { Layout.fillWidth: true; value: root.theme ? root.theme.sidebarOpacity : 0.55; onMoved: function(v) { if (root.theme) root.theme.applyOpacity(v, v, root.theme.cardOpacity) } }
+                        RowLayout { Layout.fillWidth: true; Text { Layout.fillWidth: true; text: "20%"; color: settingsView.textSoft; font.family: root.uiFont; font.pixelSize: 11 } Text { text: "100%"; color: settingsView.textSoft; font.family: root.uiFont; font.pixelSize: 11 } }
+                        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 58; radius: 8; clip: true; Image { anchors.fill: parent; source: root.currentWallpaperPreview(); fillMode: Image.PreserveAspectCrop; opacity: 0.55 } }
+                    }
+                }
+
+                SettingsCard {
+                    title: "Corner Radius"
+                    subtitle: "Adjust the roundness of UI elements"
+                    ColumnLayout { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; anchors.margins: 18; spacing: 14
+                        SettingsSlider { Layout.fillWidth: true; value: 0.42 }
+                        RowLayout { Layout.fillWidth: true; Text { Layout.fillWidth: true; text: "4px"; color: settingsView.textSoft; font.family: root.uiFont; font.pixelSize: 11 } Text { text: "24px"; color: settingsView.textSoft; font.family: root.uiFont; font.pixelSize: 11 } }
+                        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 58; radius: 8; color: Qt.rgba(1, 1, 1, 0.38)
+                            Rectangle { x: 30; y: 15; width: 58; height: 36; radius: 12; color: "transparent"; border.width: 1; border.color: Qt.rgba(1, 1, 1, 0.70) }
+                            Rectangle { x: 110; y: 15; width: 166; height: 36; radius: 12; color: Qt.rgba(1, 1, 1, 0.30); Rectangle { anchors.verticalCenter: parent.verticalCenter; x: 26; width: 14; height: 14; radius: 7; color: settingsView.pink } }
+                        }
+                    }
+                }
+
+                SettingsCard {
+                    title: "Animations"
+                    subtitle: "Control interface animations"
+                    ColumnLayout { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; anchors.margins: 18; spacing: 0
+                        SettingsToggleRow { Layout.fillWidth: true; label: "Enable animations"; checked: true }
+                        SettingsToggleRow { Layout.fillWidth: true; label: "Reduce motion"; checked: false }
+                        ComboField { Layout.fillWidth: true; label: "Normal"; iconName: "clock" }
+                    }
+                }
+
+                SettingsCard {
+                    title: "Interface Scale"
+                    subtitle: "Adjust the size of interface elements"
+                    ColumnLayout { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; anchors.margins: 18; spacing: 18
+                        SettingsSlider { Layout.fillWidth: true; value: 0.50 }
+                        RowLayout { Layout.fillWidth: true; Text { Layout.fillWidth: true; text: "80%"; color: settingsView.textSoft; font.family: root.uiFont; font.pixelSize: 11 } Text { Layout.fillWidth: true; text: "100%"; color: settingsView.text; horizontalAlignment: Text.AlignHCenter; font.family: root.uiFont; font.pixelSize: 11; font.weight: Font.Bold } Text { Layout.fillWidth: true; text: "120%"; color: settingsView.textSoft; horizontalAlignment: Text.AlignRight; font.family: root.uiFont; font.pixelSize: 11 } }
+                    }
+                }
+
+                SettingsCard {
+                    title: "Wallpaper"
+                    subtitle: "Choose your background"
+                    RowLayout { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; anchors.margins: 18; spacing: 14
+                        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 108; radius: 9; clip: true; Image { anchors.fill: parent; source: root.currentWallpaperPreview(); fillMode: Image.PreserveAspectCrop } }
+                        ColumnLayout { Layout.preferredWidth: 92; spacing: 12
+                            RectButton { Layout.fillWidth: true; label: "Change"; onClicked: if (!customWallpaperChooser.running) customWallpaperChooser.running = true }
+                            ComboField { Layout.fillWidth: true; label: "Fit"; iconName: "display" }
+                        }
+                    }
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 14
+                RectButton { label: "Reset to Defaults"; widthHint: 150; onClicked: { if (root.theme) { root.theme.resetOpacity(); root.theme.resetGlow(); root.theme.resetBorderAccent(); } } }
+                Item { Layout.fillWidth: true }
+                RectButton { label: "Cancel"; widthHint: 110; onClicked: root.closeRequested() }
+                RectButton { label: "Apply Changes"; widthHint: 150; primary: true }
+            }
+        }
+    }
+
+    component SettingsNavPill: Rectangle {
+        property string label: ""
+        property string iconName: "box"
+        property bool active: false
+
+        Layout.preferredHeight: 50
+        radius: 11
+        color: active ? Qt.rgba(0.96, 0.72, 0.88, 0.32) : "transparent"
+        border.width: active ? 1 : 0
+        border.color: Qt.rgba(0.90, 0.52, 0.74, 0.24)
+
+        RowLayout {
+            anchors.fill: parent
+            anchors.leftMargin: 18
+            anchors.rightMargin: 14
+            spacing: 12
+            SmallIcon { Layout.preferredWidth: 18; Layout.preferredHeight: 18; iconName: parent.parent.iconName; colorOverride: parent.parent.active ? root.settingsLightAccent : root.settingsLightTextSoft }
+            Text { Layout.fillWidth: true; text: parent.parent.label; color: parent.parent.active ? root.settingsLightAccent : root.settingsLightTextSoft; font.family: root.uiFont; font.pixelSize: 13; font.weight: Font.DemiBold }
+        }
+    }
+
+    component SettingsCard: Rectangle {
+        property string title: ""
+        property string subtitle: ""
+
+        Layout.fillWidth: true
+        Layout.fillHeight: true
+        Layout.minimumHeight: 170
+        radius: 13
+        color: Qt.rgba(1, 1, 1, 0.46)
+        border.width: 1
+        border.color: Qt.rgba(0.38, 0.28, 0.50, 0.08)
+
+        Text { x: 18; y: 18; width: parent.width - 36; text: parent.title; color: root.settingsLightText; font.family: root.uiFont; font.pixelSize: 14; font.weight: Font.Bold; elide: Text.ElideRight }
+        Text { x: 18; y: 44; width: parent.width - 36; text: parent.subtitle; color: root.settingsLightTextSoft; font.family: root.uiFont; font.pixelSize: 11; elide: Text.ElideRight }
+    }
+
+    component ComboField: Rectangle {
+        property string label: ""
+        property string iconName: "box"
+
+        height: 42
+        radius: 8
+        color: Qt.rgba(1, 1, 1, 0.40)
+        border.width: 1
+        border.color: Qt.rgba(0.36, 0.26, 0.50, 0.12)
+        RowLayout { anchors.fill: parent; anchors.leftMargin: 12; anchors.rightMargin: 12; spacing: 10
+            SmallIcon { Layout.preferredWidth: 18; Layout.preferredHeight: 18; iconName: parent.parent.iconName; colorOverride: root.settingsLightTextSoft }
+            Text { Layout.fillWidth: true; text: parent.parent.label; color: root.settingsLightText; font.family: root.uiFont; font.pixelSize: 12 }
+            Text { text: "⌄"; color: root.settingsLightTextSoft; font.pixelSize: 17 }
+        }
+    }
+
+    component SettingsToggleRow: Rectangle {
+        property string label: ""
+        property bool checked: false
+        property string buttonLabel: ""
+
+        Layout.preferredHeight: 42
+        radius: 8
+        color: "transparent"
+        Text { anchors.left: parent.left; anchors.leftMargin: 14; anchors.verticalCenter: parent.verticalCenter; text: parent.label; color: root.settingsLightText; font.family: root.uiFont; font.pixelSize: 12 }
+        Rectangle {
+            anchors.right: parent.right
+            anchors.rightMargin: 12
+            anchors.verticalCenter: parent.verticalCenter
+            width: parent.buttonLabel.length > 0 ? 52 : 38
+            height: 24
+            radius: 12
+            color: parent.buttonLabel.length > 0 ? Qt.rgba(0.95, 0.68, 0.86, 0.22) : (parent.checked ? root.settingsLightAccent : Qt.rgba(0.50, 0.43, 0.57, 0.14))
+            Text { anchors.centerIn: parent; visible: parent.parent.buttonLabel.length > 0; text: parent.parent.buttonLabel; color: root.settingsLightAccent; font.family: root.uiFont; font.pixelSize: 10; font.weight: Font.Bold }
+            Rectangle { visible: parent.parent.buttonLabel.length <= 0; x: parent.parent.checked ? parent.width - width - 3 : 3; anchors.verticalCenter: parent.verticalCenter; width: 18; height: 18; radius: 9; color: "white" }
+        }
+    }
+
+    component SettingsSlider: Item {
+        property real value: 0.5
+        signal moved(real value)
+
+        height: 24
+        Rectangle { id: sliderTrack; anchors.left: parent.left; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; height: 5; radius: 3; color: Qt.rgba(0.50, 0.42, 0.58, 0.14) }
+        Rectangle { anchors.left: sliderTrack.left; anchors.verticalCenter: sliderTrack.verticalCenter; width: sliderTrack.width * Math.max(0, Math.min(1, parent.value)); height: sliderTrack.height; radius: 3; color: root.settingsLightAccent }
+        Rectangle { x: sliderTrack.x + sliderTrack.width * Math.max(0, Math.min(1, parent.value)) - width / 2; anchors.verticalCenter: sliderTrack.verticalCenter; width: 18; height: 18; radius: 9; color: root.settingsLightAccent }
+        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onPressed: function(mouse) { parent.moved(Math.max(0, Math.min(1, mouse.x / Math.max(1, parent.width)))) } onPositionChanged: function(mouse) { if (pressed) parent.moved(Math.max(0, Math.min(1, mouse.x / Math.max(1, parent.width)))) } }
+    }
+
+    component AppearanceModeButton: Rectangle {
+        property string label: ""
+        property string iconName: "sun"
+        property bool active: false
+        signal clicked()
+
+        Layout.preferredHeight: 78
+        radius: 9
+        color: active ? Qt.rgba(0.98, 0.78, 0.91, 0.30) : Qt.rgba(1, 1, 1, 0.28)
+        border.width: 1
+        border.color: active ? Qt.rgba(0.91, 0.48, 0.72, 0.44) : Qt.rgba(0.37, 0.26, 0.50, 0.10)
+        ColumnLayout { anchors.centerIn: parent; spacing: 8
+            SmallIcon { Layout.alignment: Qt.AlignHCenter; Layout.preferredWidth: 24; Layout.preferredHeight: 24; iconName: parent.parent.iconName; colorOverride: parent.parent.active ? root.settingsLightAccent : root.settingsLightTextSoft }
+            Text { text: parent.parent.label; color: parent.parent.active ? root.settingsLightAccent : root.settingsLightText; font.family: root.uiFont; font.pixelSize: 12; font.weight: Font.DemiBold }
+        }
+        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: parent.clicked() }
+    }
+
+    component RectButton: Rectangle {
+        property string label: ""
+        property bool primary: false
+        property int widthHint: 92
+        signal clicked()
+
+        Layout.preferredWidth: widthHint
+        Layout.preferredHeight: 40
+        radius: 8
+        color: primary ? root.accentPrimary() : Qt.rgba(1, 1, 1, 0.52)
+        border.width: primary ? 0 : 1
+        border.color: Qt.rgba(0.36, 0.26, 0.50, 0.10)
+        Text { anchors.centerIn: parent; text: parent.label; color: parent.primary ? "white" : Qt.rgba(0.31, 0.25, 0.43, 0.92); font.family: root.uiFont; font.pixelSize: 12; font.weight: Font.Bold }
+        MouseArea { anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: parent.clicked() }
+    }
+
+    component WindowButton: Rectangle {
+        property string label: ""
+        signal clicked()
+        Layout.preferredWidth: 42
+        Layout.preferredHeight: 34
+        radius: 8
+        color: Qt.rgba(1, 1, 1, 0.36)
+        border.width: 1
+        border.color: Qt.rgba(0.36, 0.26, 0.50, 0.08)
+        Text { anchors.centerIn: parent; text: parent.label; color: Qt.rgba(0.31, 0.25, 0.43, 0.82); font.family: root.uiFont; font.pixelSize: 14 }
+        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: parent.clicked() }
+    }
+
     component LayoutPreviewButton: Rectangle {
         id: button
 
         property string side: "left"
+        property string label: ""
         property bool active: false
         property bool hovered: false
         readonly property bool rightSide: side === "right"
+        readonly property bool topSide: side === "top"
         signal clicked()
 
         height: 58
@@ -1308,10 +1935,10 @@ Item {
             }
 
             Rectangle {
-                width: 13
-                height: parent.height - 8
-                x: button.rightSide ? parent.width - width - 4 : 4
-                y: 4
+                width: button.topSide ? parent.width - 12 : 13
+                height: button.topSide ? 8 : parent.height - 8
+                x: button.topSide ? 6 : (button.rightSide ? parent.width - width - 4 : 4)
+                y: button.topSide ? 4 : 4
                 radius: 6
                 color: root.alpha(root.c("surfaceSidebar", Qt.rgba(1, 1, 1, 0.78)), button.active ? 0.96 : 0.74)
                 border.width: 1
@@ -1319,6 +1946,7 @@ Item {
                 antialiasing: true
 
                 Column {
+                    visible: !button.topSide
                     anchors.centerIn: parent
                     spacing: 3
 
@@ -1336,22 +1964,38 @@ Item {
             }
 
             Rectangle {
-                x: button.rightSide ? 6 : 21
-                y: 9
-                width: Math.max(10, parent.width - 34)
+                x: button.topSide ? 13 : (button.rightSide ? 6 : 21)
+                y: button.topSide ? 18 : 9
+                width: button.topSide ? Math.max(10, parent.width - 26) : Math.max(10, parent.width - 34)
                 height: 3
                 radius: 2
                 color: root.alpha(root.c("textSecondary", "#8d7ca3"), 0.22)
             }
 
             Rectangle {
-                x: button.rightSide ? 6 : 21
-                y: 17
-                width: Math.max(10, parent.width - 44)
-                height: 18
+                x: button.topSide ? 13 : (button.rightSide ? 6 : 21)
+                y: button.topSide ? 26 : 17
+                width: button.topSide ? Math.max(10, parent.width - 34) : Math.max(10, parent.width - 44)
+                height: button.topSide ? 9 : 18
                 radius: 4
                 color: root.alpha(root.accentSecondary(), button.active ? 0.24 : 0.12)
             }
+        }
+
+        Text {
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: 5
+            text: button.label
+            color: button.active ? root.c("textPrimary", "#4d3f63") : root.c("textSecondary", "#8d7ca3")
+            font.family: root.uiFont
+            font.pixelSize: 9
+            font.weight: Font.Bold
+            elide: Text.ElideRight
+            width: parent.width - 12
+            horizontalAlignment: Text.AlignHCenter
+            layer.enabled: root.fontGlowEnabled()
+            layer.effect: FontGlowEffect {}
         }
 
         MouseArea {
@@ -2133,6 +2777,82 @@ Item {
                 ctx.bezierCurveTo(cx - s * 0.16, cy - s * 0.12, cx - s * 0.16, cy + s * 0.12, cx, cy + s * 0.35)
                 ctx.moveTo(cx, cy - s * 0.35)
                 ctx.bezierCurveTo(cx + s * 0.16, cy - s * 0.12, cx + s * 0.16, cy + s * 0.12, cx, cy + s * 0.35)
+                ctx.stroke()
+            } else if (iconName === "sun") {
+                ctx.beginPath()
+                ctx.arc(cx, cy, s * 0.16, 0, Math.PI * 2)
+                ctx.stroke()
+                for (let j = 0; j < 8; j += 1) {
+                    const a = j / 8 * Math.PI * 2
+                    ctx.beginPath()
+                    ctx.moveTo(cx + Math.cos(a) * s * 0.28, cy + Math.sin(a) * s * 0.28)
+                    ctx.lineTo(cx + Math.cos(a) * s * 0.40, cy + Math.sin(a) * s * 0.40)
+                    ctx.stroke()
+                }
+            } else if (iconName === "moon") {
+                ctx.beginPath()
+                ctx.arc(cx, cy, s * 0.30, Math.PI * 0.35, Math.PI * 1.70)
+                ctx.quadraticCurveTo(s * 0.62, s * 0.56, s * 0.69, s * 0.28)
+                ctx.stroke()
+            } else if (iconName === "wifi") {
+                for (let i = 0; i < 3; i += 1) {
+                    ctx.beginPath()
+                    ctx.arc(cx, cy + s * 0.20, s * (0.16 + i * 0.13), Math.PI * 1.18, Math.PI * 1.82)
+                    ctx.stroke()
+                }
+                ctx.beginPath()
+                ctx.arc(cx, cy + s * 0.22, s * 0.035, 0, Math.PI * 2)
+                ctx.fill()
+            } else if (iconName === "battery") {
+                ctx.strokeRect(s * 0.23, s * 0.30, s * 0.48, s * 0.42)
+                ctx.strokeRect(s * 0.40, s * 0.22, s * 0.14, s * 0.08)
+            } else if (iconName === "bluetooth") {
+                ctx.beginPath()
+                ctx.moveTo(cx, s * 0.18)
+                ctx.lineTo(s * 0.68, s * 0.34)
+                ctx.lineTo(cx, s * 0.50)
+                ctx.lineTo(s * 0.68, s * 0.66)
+                ctx.lineTo(cx, s * 0.82)
+                ctx.lineTo(cx, s * 0.18)
+                ctx.moveTo(cx, s * 0.50)
+                ctx.lineTo(s * 0.32, s * 0.34)
+                ctx.moveTo(cx, s * 0.50)
+                ctx.lineTo(s * 0.32, s * 0.66)
+                ctx.stroke()
+            } else if (iconName === "volume") {
+                ctx.beginPath()
+                ctx.moveTo(s * 0.18, s * 0.44)
+                ctx.lineTo(s * 0.32, s * 0.44)
+                ctx.lineTo(s * 0.52, s * 0.28)
+                ctx.lineTo(s * 0.52, s * 0.72)
+                ctx.lineTo(s * 0.32, s * 0.56)
+                ctx.lineTo(s * 0.18, s * 0.56)
+                ctx.closePath()
+                ctx.stroke()
+            } else if (iconName === "bell") {
+                ctx.beginPath()
+                ctx.moveTo(s * 0.30, s * 0.64)
+                ctx.lineTo(s * 0.70, s * 0.64)
+                ctx.quadraticCurveTo(s * 0.64, s * 0.54, s * 0.64, s * 0.42)
+                ctx.quadraticCurveTo(s * 0.64, s * 0.25, cx, s * 0.25)
+                ctx.quadraticCurveTo(s * 0.36, s * 0.25, s * 0.36, s * 0.42)
+                ctx.quadraticCurveTo(s * 0.36, s * 0.54, s * 0.30, s * 0.64)
+                ctx.stroke()
+            } else if (iconName === "clock" || iconName === "calendar") {
+                ctx.beginPath()
+                ctx.arc(cx, cy, s * 0.32, 0, Math.PI * 2)
+                ctx.stroke()
+                ctx.beginPath()
+                ctx.moveTo(cx, cy)
+                ctx.lineTo(cx, s * 0.32)
+                ctx.moveTo(cx, cy)
+                ctx.lineTo(s * 0.62, s * 0.58)
+                ctx.stroke()
+            } else if (iconName === "display" || iconName === "box" || iconName === "memo" || iconName === "lock" || iconName === "home" || iconName === "globe") {
+                ctx.strokeRect(s * 0.22, s * 0.26, s * 0.56, s * 0.44)
+                ctx.beginPath()
+                ctx.moveTo(s * 0.36, s * 0.80)
+                ctx.lineTo(s * 0.64, s * 0.80)
                 ctx.stroke()
             }
         }

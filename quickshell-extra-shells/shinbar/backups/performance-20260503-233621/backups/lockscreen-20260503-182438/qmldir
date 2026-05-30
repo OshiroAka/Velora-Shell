@@ -1,0 +1,23 @@
+module shinbar
+singleton ShinConfig 1.0 ShinConfig.qml
+singleton ShinColors 1.0 ShinColors.qml
+ShinBar 1.0 ShinBar.qml
+ShinPill 1.0 ShinPill.qml
+ShinLauncher 1.0 ShinLauncher.qml
+ShinWorkspaces 1.0 ShinWorkspaces.qml
+ShinSearch 1.0 ShinSearch.qml
+ShinWallpapers 1.0 ShinWallpapers.qml
+ShinClock 1.0 ShinClock.qml
+ShinWeather 1.0 ShinWeather.qml
+ShinProfile 1.0 ShinProfile.qml
+ShinMedia 1.0 ShinMedia.qml
+ShinNotifications 1.0 ShinNotifications.qml
+ShinNotifyButton 1.0 ShinNotifyButton.qml
+ShinBluetooth 1.0 ShinBluetooth.qml
+ShinWifi 1.0 ShinWifi.qml
+ShinVolume 1.0 ShinVolume.qml
+ShinBattery 1.0 ShinBattery.qml
+ShinSettings 1.0 ShinSettings.qml
+singleton ShinPopup 1.0 ShinPopup.qml
+SeasonScene 1.0 SeasonScene.qml
+singleton ShinData 1.0 ShinData.qml

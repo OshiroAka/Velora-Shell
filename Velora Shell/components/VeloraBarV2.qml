@@ -140,12 +140,17 @@ Item {
     function popupProbeAt(y) {
         const pad = Math.round(4 * root.uiScale)
         const probes = [
+            { item: slotClock, type: "time" },
             { item: slotSearch, type: "search" },
+            { item: slotFiles, type: "files" },
+            { item: slotBrowser, type: "browser" },
             { item: slotVolume, type: "volume" },
             { item: slotWifi, type: "wifi" },
             { item: slotBrightness, type: "brightness" },
             { item: slotNotifications, type: "notifications" },
-            { item: slotBluetooth, type: "bluetooth" }
+            { item: slotBluetooth, type: "bluetooth" },
+            { item: slotBattery, type: "battery" },
+            { item: slotAvatar, type: "profile" }
         ]
 
         for (let i = 0; i < probes.length; i += 1) {
@@ -438,12 +443,12 @@ Item {
         }
 
         if (focusTarget === "files") {
-            runFocusCommand(filesCommand)
+            root.quickPopupRequested("files", root.itemCenterY(slotFiles))
             return
         }
 
         if (focusTarget === "browser") {
-            runFocusCommand(browserCommand)
+            root.quickPopupRequested("browser", root.itemCenterY(slotBrowser))
             return
         }
 
@@ -474,6 +479,16 @@ Item {
 
         if (focusTarget === "bluetooth") {
             root.quickPopupRequested("bluetooth", root.itemCenterY(slotBluetooth))
+            return
+        }
+
+        if (focusTarget === "avatar") {
+            root.quickPopupRequested("profile", root.itemCenterY(slotAvatar))
+            return
+        }
+
+        if (focusTarget === "clock") {
+            root.quickPopupRequested("time", root.itemCenterY(slotClock))
             return
         }
     }
@@ -932,7 +947,8 @@ Item {
 
                 iconName: "folder"
                 tint: root.theme ? root.theme.accentTertiary : Qt.rgba(0.46, 0.64, 0.90, 0.94)
-                command: root.filesCommand
+                hoverPopupType: "files"
+                selected: root.activePopupType === "files"
             }
 
             AppButton {
@@ -940,7 +956,8 @@ Item {
 
                 iconName: "browser"
                 tint: root.theme ? root.theme.accentPrimary : Qt.rgba(0.91, 0.46, 0.36, 0.90)
-                command: root.browserCommand
+                hoverPopupType: "browser"
+                selected: root.activePopupType === "browser"
             }
 
             AppButton {
@@ -1018,8 +1035,10 @@ Item {
             UtilityButton {
                 id: slotBattery
 
-                passive: true
+                hoverPopupType: "battery"
+                selected: root.activePopupType === "battery"
                 iconName: "battery"
+                onTriggered: root.quickPopupRequested("battery", root.itemCenterY(slotBattery))
             }
         }
 
@@ -1180,6 +1199,8 @@ Item {
     }
 
     component ClockBlock: Item {
+        property bool hovered: false
+
         ColumnLayout {
             anchors.fill: parent
             anchors.margins: 0
@@ -1214,6 +1235,22 @@ Item {
                 layer.enabled: root.fontGlowEnabled()
                 layer.effect: FontGlowEffect {}
             }
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            hoverEnabled: true
+            acceptedButtons: Qt.LeftButton
+            cursorShape: Qt.PointingHandCursor
+            onEntered: {
+                parent.hovered = true
+                root.quickPopupHovered("time", root.itemCenterY(parent))
+            }
+            onExited: {
+                parent.hovered = false
+                root.quickPopupHoverEnded("time")
+            }
+            onClicked: root.quickPopupRequested("time", root.itemCenterY(parent))
         }
     }
 
@@ -1383,15 +1420,16 @@ Item {
         property string command: ""
         property color tint: root.lilac
         property bool hovered: false
+        property bool selected: false
         property string hoverPopupType: ""
 
         Layout.alignment: Qt.AlignHCenter
         Layout.preferredWidth: Math.round(34 * root.uiScale)
         Layout.preferredHeight: Math.round(34 * root.uiScale)
         radius: Math.round(8 * root.uiScale)
-        color: hovered ? root.alpha(root.card, 0.84) : root.alpha(root.card, 0.58)
+        color: selected ? root.alpha(root.pink, 0.30) : (hovered ? root.alpha(root.card, 0.84) : root.alpha(root.card, 0.58))
         border.width: 1
-        border.color: root.darkSoft ? Qt.rgba(1, 1, 1, 0.14) : root.alpha(root.borderSoft, 0.76)
+        border.color: selected ? root.alpha(root.pink, 0.34) : (root.darkSoft ? Qt.rgba(1, 1, 1, 0.14) : root.alpha(root.borderSoft, 0.76))
         layer.enabled: true
         layer.effect: DropShadow {
             transparentBorder: true
@@ -1429,13 +1467,21 @@ Item {
             anchors.fill: parent
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
-            onEntered: button.hovered = true
+            onEntered: {
+                button.hovered = true
+                if (button.hoverPopupType.length > 0)
+                    root.quickPopupHovered(button.hoverPopupType, root.itemCenterY(button))
+            }
             onExited: {
                 button.hovered = false
                 if (button.hoverPopupType.length > 0)
                     root.quickPopupHoverEnded(button.hoverPopupType)
             }
             onClicked: {
+                if (button.hoverPopupType.length > 0) {
+                    root.quickPopupRequested(button.hoverPopupType, root.itemCenterY(button))
+                    return
+                }
                 if (button.command.length > 0 && !appProcess.running)
                     appProcess.running = true
             }
@@ -1560,6 +1606,8 @@ Item {
     }
 
     component UserAvatar: Rectangle {
+        property bool hovered: false
+
         radius: width / 2
         color: root.alpha(root.card, 0.62)
         border.width: 1
@@ -1603,6 +1651,22 @@ Item {
             anchors.fill: avatarImage
             source: avatarImage
             maskSource: avatarMask
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            hoverEnabled: true
+            acceptedButtons: Qt.LeftButton
+            cursorShape: Qt.PointingHandCursor
+            onEntered: {
+                parent.hovered = true
+                root.quickPopupHovered("profile", root.itemCenterY(parent))
+            }
+            onExited: {
+                parent.hovered = false
+                root.quickPopupHoverEnded("profile")
+            }
+            onClicked: root.quickPopupRequested("profile", root.itemCenterY(parent))
         }
     }
 

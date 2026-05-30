@@ -1,0 +1,83 @@
+#!/usr/bin/env python3
+import os
+import shutil
+import time
+
+def read_cpu():
+    with open("/proc/stat", "r", encoding="utf-8") as f:
+        parts = f.readline().split()[1:]
+    vals = [int(v) for v in parts[:8]]
+    idle = vals[3] + vals[4]
+    total = sum(vals)
+    return idle, total
+
+def cpu_percent():
+    idle1, total1 = read_cpu()
+    time.sleep(0.12)
+    idle2, total2 = read_cpu()
+    idle = idle2 - idle1
+    total = total2 - total1
+    if total <= 0:
+        return 0
+    return round(max(0, min(100, (1 - idle / total) * 100)))
+
+def meminfo():
+    data = {}
+    with open("/proc/meminfo", "r", encoding="utf-8") as f:
+        for line in f:
+            key, value = line.split(":", 1)
+            data[key] = int(value.strip().split()[0])
+    total = data.get("MemTotal", 0)
+    available = data.get("MemAvailable", 0)
+    used = max(0, total - available)
+    swap_total = data.get("SwapTotal", 0)
+    swap_free = data.get("SwapFree", 0)
+    swap_used = max(0, swap_total - swap_free)
+    return total, used, swap_total, swap_used
+
+def pct(used, total):
+    if total <= 0:
+        return 0
+    return round(max(0, min(100, used * 100 / total)))
+
+def gib(kib):
+    return round(kib / 1024 / 1024, 1)
+
+def cpu_temp():
+    paths = [
+        "/sys/class/thermal/thermal_zone0/temp",
+        "/sys/class/hwmon/hwmon0/temp1_input",
+        "/sys/class/hwmon/hwmon1/temp1_input",
+    ]
+    for path in paths:
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                raw = int(f.read().strip())
+            if raw > 1000:
+                raw = raw / 1000
+            return round(raw)
+        except Exception:
+            pass
+    return 0
+
+cpu = cpu_percent()
+mem_total, mem_used, swap_total, swap_used = meminfo()
+disk = shutil.disk_usage(os.path.expanduser("~"))
+load1, load5, load15 = os.getloadavg()
+proc_count = len([p for p in os.listdir("/proc") if p.isdigit()])
+
+print(f"CPU={cpu}")
+print(f"RAM_USED={gib(mem_used)}")
+print(f"RAM_TOTAL={gib(mem_total)}")
+print(f"RAM_PCT={pct(mem_used, mem_total)}")
+print(f"SWAP_USED={gib(swap_used)}")
+print(f"SWAP_TOTAL={gib(swap_total)}")
+print(f"SWAP_PCT={pct(swap_used, swap_total)}")
+print(f"DISK_USED={round(disk.used / 1024 / 1024 / 1024, 1)}")
+print(f"DISK_TOTAL={round(disk.total / 1024 / 1024 / 1024, 1)}")
+print(f"DISK_PCT={pct(disk.used, disk.total)}")
+print(f"LOAD={load1:.2f}")
+print(f"LOAD5={load5:.2f}")
+print(f"LOAD15={load15:.2f}")
+print(f"TEMP={cpu_temp()}")
+print(f"PROCS={proc_count}")

@@ -1,0 +1,145 @@
+#!/usr/bin/env python3
+import json
+import math
+import os
+import sys
+
+
+ROOT = os.path.expanduser("~/.config/quickshell/shinbar")
+DEFAULT_INPUT = "/tmp/ne_110m_land.geojson"
+OUT_DIR = os.path.join(ROOT, "assets")
+BASE_OUT = os.path.join(OUT_DIR, "world-map-dots.svg")
+HIGHLIGHT_OUT = os.path.join(OUT_DIR, "world-map-dots-south-america.svg")
+
+
+def mercator_y(lat):
+    lat = max(-84.0, min(84.0, lat))
+    rad = math.radians(lat)
+    return math.log(math.tan(math.pi / 4.0 + rad / 2.0))
+
+
+def project(lon, lat, width, height):
+    x = (lon + 180.0) / 360.0 * width
+    y_min = mercator_y(-62.0)
+    y_max = mercator_y(84.0)
+    y = (y_max - mercator_y(lat)) / (y_max - y_min) * height
+    return x, y
+
+
+def ring_contains(point, ring):
+    px, py = point
+    inside = False
+    n = len(ring)
+    if n < 3:
+        return False
+    j = n - 1
+    for i in range(n):
+        xi, yi = ring[i]
+        xj, yj = ring[j]
+        crosses = (yi > py) != (yj > py)
+        if crosses:
+            x_at_y = (xj - xi) * (py - yi) / ((yj - yi) or 1e-9) + xi
+            if px < x_at_y:
+                inside = not inside
+        j = i
+    return inside
+
+
+def polygon_contains(point, rings):
+    if not rings or not ring_contains(point, rings[0]):
+        return False
+    for hole in rings[1:]:
+        if ring_contains(point, hole):
+            return False
+    return True
+
+
+def land_contains(point, polygons):
+    for rings in polygons:
+        min_lon, min_lat, max_lon, max_lat = rings["bbox"]
+        lon, lat = point
+        if lon < min_lon or lon > max_lon or lat < min_lat or lat > max_lat:
+            continue
+        if polygon_contains(point, rings["rings"]):
+            return True
+    return False
+
+
+def normalize_polygons(geojson):
+    polygons = []
+    for feature in geojson.get("features", []):
+        geom = feature.get("geometry") or {}
+        coords = geom.get("coordinates") or []
+        if geom.get("type") == "Polygon":
+            groups = [coords]
+        elif geom.get("type") == "MultiPolygon":
+            groups = coords
+        else:
+            continue
+
+        for rings in groups:
+            flat = [p for ring in rings for p in ring]
+            if not flat:
+                continue
+            lons = [p[0] for p in flat]
+            lats = [p[1] for p in flat]
+            polygons.append({
+                "bbox": (min(lons), min(lats), max(lons), max(lats)),
+                "rings": rings,
+            })
+    return polygons
+
+
+def south_america(lon, lat):
+    return -84.0 <= lon <= -32.0 and -58.0 <= lat <= 14.0
+
+
+def make_circles(polygons, highlight=False):
+    width = 420
+    height = 205
+    dots = []
+    # Even lon/lat sampling keeps the map crisp and intentionally pixel-like.
+    for lat in [80 - i * 3.1 for i in range(45)]:
+        row_offset = 1.6 if int((80 - lat) / 3.1) % 2 else 0.0
+        for lon in [-176 + row_offset + i * 3.2 for i in range(111)]:
+            if not land_contains((lon, lat), polygons):
+                continue
+            is_hi = south_america(lon, lat)
+            if highlight != is_hi:
+                continue
+            x, y = project(lon, lat, width, height)
+            if x < 0 or y < 0 or x > width or y > height:
+                continue
+            r = 1.25 if highlight else 0.88
+            dots.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{r:.2f}"/>')
+    return width, height, dots
+
+
+def write_svg(path, width, height, dots):
+    body = "\n  ".join(dots)
+    svg = f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" width="{width}" height="{height}">
+  <!-- Generated from Natural Earth 110m land, public domain. -->
+  <g fill="#ffffff">
+  {body}
+  </g>
+</svg>
+'''
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(svg)
+
+
+def main():
+    src = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_INPUT
+    with open(src, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    polygons = normalize_polygons(data)
+    os.makedirs(OUT_DIR, exist_ok=True)
+    write_svg(BASE_OUT, *make_circles(polygons, highlight=False))
+    write_svg(HIGHLIGHT_OUT, *make_circles(polygons, highlight=True))
+    print(BASE_OUT)
+    print(HIGHLIGHT_OUT)
+
+
+if __name__ == "__main__":
+    main()

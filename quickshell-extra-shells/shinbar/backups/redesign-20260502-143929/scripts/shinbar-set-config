@@ -1,0 +1,47 @@
+#!/usr/bin/env python3
+from pathlib import Path
+import sys, re, json
+
+if len(sys.argv) < 3:
+    raise SystemExit(0)
+
+key = sys.argv[1]
+value = " ".join(sys.argv[2:])
+
+base = Path.home() / ".config/quickshell/shinbar"
+path = base / "ShinConfig.qml"
+
+type_map = {
+    "barH": "int",
+    "pillH": "int",
+    "pillR": "int",
+    "pillPadH": "int",
+    "pillSpacing": "int",
+    "barMarginT": "int",
+    "barMarginH": "int",
+    "fontSize": "int",
+    "fontSizeSm": "int",
+    "pillOpacity": "real",
+    "popupOpacity": "real",
+    "fontFamily": "string",
+    "weatherCity": "string",
+}
+
+if key not in type_map:
+    raise SystemExit(0)
+
+kind = type_map[key]
+
+if kind == "string":
+    qval = json.dumps(value)
+else:
+    qval = value
+
+text = path.read_text()
+pattern = rf"property\s+{kind}\s+{re.escape(key)}:\s*.*"
+replacement = f"property {kind} {key}: {qval}"
+
+text2 = re.sub(pattern, replacement, text)
+
+if text2 != text:
+    path.write_text(text2)

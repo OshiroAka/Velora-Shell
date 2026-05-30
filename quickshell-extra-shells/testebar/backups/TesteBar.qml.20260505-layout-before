@@ -1,0 +1,351 @@
+import QtQuick
+import Qt5Compat.GraphicalEffects
+import Quickshell.Io
+import Quickshell.Services.Notifications
+import Quickshell.Services.UPower
+
+Item {
+    id: bar
+
+    property int cornerRadius: 18
+    property string clockText: Qt.formatDateTime(new Date(), "HH:mm")
+    property var batteryDevice: null
+    property int volume: 70
+    property bool muted: false
+    readonly property int notificationCount: Number(NotificationServer.trackedCount || 0)
+
+    function pickBattery() {
+        batteryDevice = null
+
+        for (let i = 0; i < UPower.devices.count; i += 1) {
+            let dev = UPower.devices.get(i)
+
+            if (dev && dev.isLaptopBattery) {
+                batteryDevice = dev
+                return
+            }
+        }
+    }
+
+    Timer {
+        interval: 1000
+        running: true
+        repeat: true
+        onTriggered: bar.clockText = Qt.formatDateTime(new Date(), "HH:mm")
+    }
+
+    Timer {
+        interval: 5000
+        running: true
+        repeat: true
+        triggeredOnStart: true
+        onTriggered: {
+            bar.pickBattery()
+
+            if (!volumeQuery.running)
+                volumeQuery.running = true
+        }
+    }
+
+    Process {
+        id: volumeQuery
+
+        running: false
+        command: ["bash", "-lc", "wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null || echo 'Volume: 0.70'"]
+
+        stdout: SplitParser {
+            onRead: function(data) {
+                var text = data.trim()
+                var match = text.match(/[0-9]+\.?[0-9]*/)
+
+                bar.muted = text.indexOf("MUTED") >= 0
+
+                if (match)
+                    bar.volume = Math.max(0, Math.min(100, Math.round(parseFloat(match[0]) * 100)))
+            }
+        }
+
+        onExited: running = false
+    }
+
+    Rectangle {
+        x: 2
+        y: 4
+        width: Math.max(0, parent.width - 1)
+        height: Math.max(0, parent.height - 3)
+        radius: bar.cornerRadius
+        color: Qt.rgba(0.0, 0.0, 0.0, 0.24)
+    }
+
+    Rectangle {
+        x: -1
+        y: -1
+        width: parent.width + 2
+        height: parent.height + 2
+        radius: bar.cornerRadius + 1
+        color: "transparent"
+        border.width: 1
+        border.color: Qt.rgba(0.88, 0.95, 1.0, 0.10)
+    }
+
+    Rectangle {
+        id: surface
+
+        anchors.fill: parent
+        radius: bar.cornerRadius
+        color: Qt.rgba(0.07, 0.09, 0.12, 0.54)
+        border.width: 1
+        border.color: Qt.rgba(0.68, 0.77, 0.88, 0.20)
+    }
+
+    Rectangle {
+        anchors {
+            left: surface.left
+            right: surface.right
+            top: surface.top
+            leftMargin: 5
+            rightMargin: 5
+            topMargin: 2
+        }
+
+        height: 1
+        color: Qt.rgba(1.0, 1.0, 1.0, 0.18)
+    }
+
+    Rectangle {
+        anchors {
+            left: surface.left
+            top: surface.top
+            bottom: surface.bottom
+            leftMargin: 2
+            topMargin: 7
+            bottomMargin: 7
+        }
+
+        width: 1
+        color: Qt.rgba(1.0, 1.0, 1.0, 0.12)
+    }
+
+    Rectangle {
+        anchors {
+            left: surface.left
+            right: surface.right
+            bottom: surface.bottom
+            leftMargin: 6
+            rightMargin: 6
+            bottomMargin: 2
+        }
+
+        height: 1
+        color: Qt.rgba(0.0, 0.0, 0.0, 0.32)
+    }
+
+    Rectangle {
+        anchors {
+            right: surface.right
+            top: surface.top
+            bottom: surface.bottom
+            rightMargin: 2
+            topMargin: 7
+            bottomMargin: 7
+        }
+
+        width: 1
+        color: Qt.rgba(0.0, 0.0, 0.0, 0.22)
+    }
+
+    Rectangle {
+        id: clockBubbleShadow
+
+        width: Math.min(surface.width - 10, 48)
+        height: 30
+        x: Math.round((surface.width - width) / 2) + 1
+        y: 18
+        radius: 10
+        color: Qt.rgba(0.0, 0.0, 0.0, 0.18)
+    }
+
+    Rectangle {
+        id: clockBubble
+
+        width: clockBubbleShadow.width
+        height: clockBubbleShadow.height
+        x: Math.round((surface.width - width) / 2)
+        y: 17
+        radius: 10
+        color: Qt.rgba(0.13, 0.16, 0.21, 0.62)
+        border.width: 1
+        border.color: Qt.rgba(0.80, 0.88, 1.0, 0.16)
+
+        Rectangle {
+            anchors {
+                left: parent.left
+                right: parent.right
+                top: parent.top
+                leftMargin: 5
+                rightMargin: 5
+                topMargin: 2
+            }
+
+            height: 1
+            color: Qt.rgba(1.0, 1.0, 1.0, 0.12)
+        }
+    }
+
+    Text {
+        anchors {
+            fill: clockBubble
+            leftMargin: 4
+            rightMargin: 4
+        }
+
+        text: bar.clockText
+        color: Qt.rgba(0.94, 0.97, 1.0, 0.92)
+        horizontalAlignment: Text.AlignHCenter
+        verticalAlignment: Text.AlignVCenter
+        font.family: "JetBrainsMono Nerd Font"
+        font.pixelSize: 13
+        font.weight: Font.DemiBold
+        elide: Text.ElideNone
+    }
+
+    Column {
+        id: statusStack
+
+        anchors {
+            horizontalCenter: surface.horizontalCenter
+            bottom: profileFrame.top
+            bottomMargin: 12
+        }
+
+        spacing: 8
+
+        Rectangle {
+            width: 34
+            height: 34
+            radius: 11
+            color: Qt.rgba(0.13, 0.16, 0.21, 0.55)
+            border.width: 1
+            border.color: Qt.rgba(0.80, 0.88, 1.0, 0.13)
+
+            Rectangle {
+                anchors.fill: parent
+                anchors.margins: 1
+                radius: 10
+                color: "transparent"
+                border.width: 1
+                border.color: Qt.rgba(1.0, 1.0, 1.0, 0.06)
+            }
+
+            Text {
+                anchors.centerIn: parent
+                text: bar.notificationCount > 0 ? "N" + Math.min(bar.notificationCount, 9) : "N"
+                color: bar.notificationCount > 0 ? Qt.rgba(0.72, 0.86, 1.0, 0.98) : Qt.rgba(0.88, 0.93, 1.0, 0.62)
+                font.family: "JetBrainsMono Nerd Font"
+                font.pixelSize: bar.notificationCount > 0 ? 11 : 13
+                font.weight: Font.DemiBold
+            }
+        }
+
+        Rectangle {
+            width: 34
+            height: 34
+            radius: 11
+            color: Qt.rgba(0.13, 0.16, 0.21, 0.55)
+            border.width: 1
+            border.color: Qt.rgba(0.80, 0.88, 1.0, 0.13)
+
+            Text {
+                anchors.centerIn: parent
+                text: "||||}"
+                color: bar.batteryDevice && bar.batteryDevice.ready && bar.batteryDevice.percentage <= 20
+                    ? Qt.rgba(1.0, 0.48, 0.45, 0.95)
+                    : Qt.rgba(0.87, 0.93, 1.0, 0.86)
+                font.family: "JetBrainsMono Nerd Font"
+                font.pixelSize: 10
+                font.weight: Font.DemiBold
+            }
+        }
+
+        Rectangle {
+            width: 34
+            height: 34
+            radius: 11
+            color: Qt.rgba(0.13, 0.16, 0.21, 0.55)
+            border.width: 1
+            border.color: Qt.rgba(0.80, 0.88, 1.0, 0.13)
+
+            Text {
+                anchors.centerIn: parent
+                text: bar.muted ? "M" : "V"
+                color: bar.muted ? Qt.rgba(1.0, 0.48, 0.45, 0.92) : Qt.rgba(0.88, 0.93, 1.0, 0.82)
+                font.family: "JetBrainsMono Nerd Font"
+                font.pixelSize: 13
+                font.weight: Font.DemiBold
+            }
+
+            Rectangle {
+                anchors {
+                    horizontalCenter: parent.horizontalCenter
+                    bottom: parent.bottom
+                    bottomMargin: 5
+                }
+
+                width: Math.max(5, Math.round(20 * bar.volume / 100))
+                height: 2
+                radius: 1
+                color: bar.muted ? Qt.rgba(1.0, 0.48, 0.45, 0.70) : Qt.rgba(0.72, 0.86, 1.0, 0.58)
+            }
+        }
+    }
+
+    Rectangle {
+        id: profileShadow
+
+        width: 40
+        height: 40
+        x: Math.round((surface.width - width) / 2) + 1
+        y: surface.height - height - 13
+        radius: width / 2
+        color: Qt.rgba(0.0, 0.0, 0.0, 0.26)
+    }
+
+    Rectangle {
+        id: profileFrame
+
+        width: 40
+        height: 40
+        x: Math.round((surface.width - width) / 2)
+        y: surface.height - height - 15
+        radius: width / 2
+        color: Qt.rgba(0.14, 0.18, 0.24, 0.68)
+        border.width: 1
+        border.color: Qt.rgba(0.84, 0.91, 1.0, 0.22)
+
+        Image {
+            id: profileImage
+
+            anchors.fill: parent
+            anchors.margins: 4
+            source: "file:///home/shira/.face"
+            visible: false
+            fillMode: Image.PreserveAspectCrop
+            asynchronous: true
+            cache: false
+        }
+
+        Rectangle {
+            id: profileMask
+
+            anchors.fill: profileImage
+            radius: width / 2
+            visible: false
+        }
+
+        OpacityMask {
+            anchors.fill: profileImage
+            source: profileImage
+            maskSource: profileMask
+        }
+    }
+}

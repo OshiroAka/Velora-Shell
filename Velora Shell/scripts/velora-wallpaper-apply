@@ -21,8 +21,12 @@ theme_path="$path"
 base_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 theme_state_script="${base_dir}/scripts/velora-theme-state"
 pywal_theme_script="${base_dir}/scripts/velora-pywal-theme.py"
+desktop_theme_script="${base_dir}/scripts/velora-desktop-theme.py"
 discord_theme_script="${base_dir}/scripts/velora-discord-theme.py"
 zen_theme_script="${base_dir}/scripts/velora-zen-theme.py"
+vscode_theme_script="${base_dir}/scripts/velora-vscode-theme.py"
+obsidian_theme_script="${base_dir}/scripts/velora-obsidian-theme.py"
+spotify_theme_script="${base_dir}/scripts/velora-spotify-theme.py"
 zen_live_script="${base_dir}/scripts/velora-zen-live-apply"
 
 mkdir -p "$HOME/.cache/velora-shell"
@@ -158,8 +162,24 @@ apply_theme() {
     "$pywal_theme_script" >/dev/null 2>&1 || true
   fi
 
+  if [ -x "$desktop_theme_script" ]; then
+    "$desktop_theme_script" --quiet >/dev/null 2>&1 || true
+  fi
+
   if [ -x "$zen_theme_script" ]; then
     "$zen_theme_script" --quiet >/dev/null 2>&1 || true
+  fi
+
+  if [ -x "$vscode_theme_script" ]; then
+    "$vscode_theme_script" --quiet >/dev/null 2>&1 || true
+  fi
+
+  if [ -x "$obsidian_theme_script" ]; then
+    "$obsidian_theme_script" --quiet >/dev/null 2>&1 || true
+  fi
+
+  if [ -x "$spotify_theme_script" ]; then
+    "$spotify_theme_script" --quiet >/dev/null 2>&1 || true
   fi
 
   if [ -x "$discord_theme_script" ]; then

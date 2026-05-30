@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+kind="${1:-}"
+path="${2:-}"
+preview="${3:-}"
+transition="${4:-fade}"
+duration="${5:-1}"
+
+[ -n "$kind" ] || exit 2
+[ -n "$path" ] || exit 2
+
+cache_dir="$HOME/.cache/testebar"
+mkdir -p "$cache_dir"
+
+case "$duration" in
+  ''|*[!0-9.]*|*.*.*) duration=1 ;;
+esac
+
+theme_path="$path"
+[ -n "$preview" ] && [ -f "$preview" ] && theme_path="$preview"
+
+start_awww() {
+  if ! pgrep -x awww-daemon >/dev/null 2>&1; then
+    nohup awww-daemon -q >/dev/null 2>&1 &
+    sleep 0.15
+  fi
+}
+
+apply_pywal() {
+  local img="$1"
+  [ -f "$img" ] || return 0
+  command -v wal >/dev/null 2>&1 || return 0
+  wal -i "$img" -n -q >/dev/null 2>&1 || true
+  [ -x "$HOME/.config/cava/sync-pywal16" ] && "$HOME/.config/cava/sync-pywal16" >/dev/null 2>&1 || true
+}
+
+persist_current_wallpaper() {
+  printf '%s|%s|%s\n' "$kind" "$path" "$theme_path" > "$cache_dir/current_wallpaper"
+}
+
+stop_mpvpaper() {
+  pkill -x mpvpaper >/dev/null 2>&1 || true
+}
+
+stop_wallpaperengine() {
+  pkill -f '[l]inux-wallpaperengine' >/dev/null 2>&1 || true
+}
+
+monitors() {
+  hyprctl monitors -j 2>/dev/null | python3 -c '
+import json, sys
+try:
+    data = json.load(sys.stdin)
+    out = [m.get("name", "") for m in data if m.get("name")]
+    print(" ".join(out))
+except Exception:
+    print("")
+' 2>/dev/null || true
+}
+
+case "$kind" in
+  static)
+    start_awww
+    awww img "$path" \
+      --transition-type "$transition" \
+      --transition-duration "$duration" \
+      --transition-fps 60
+    apply_pywal "$path"
+    persist_current_wallpaper
+    stop_mpvpaper
+    stop_wallpaperengine
+    ;;
+  live)
+    mons="$(monitors)"
+    [ -n "$mons" ] || mons="eDP-1"
+    stop_mpvpaper
+    stop_wallpaperengine
+    sleep 0.10
+    : > /tmp/testebar-mpvpaper.log
+    for mon in $mons; do
+      nohup mpvpaper -o 'no-audio loop-file=inf panscan=1.0 video-unscaled=no hwdec=auto-safe scale=bilinear cscale=bilinear dscale=bilinear interpolation=no deband=no' "$mon" "$path" >>/tmp/testebar-mpvpaper.log 2>&1 &
+    done
+    apply_pywal "$theme_path"
+    persist_current_wallpaper
+    (sleep 0.85; awww kill >/dev/null 2>&1 || true) >/dev/null 2>&1 &
+    ;;
+  engine)
+    previous_theme=""
+    if [ -f "$cache_dir/current_wallpaper" ]; then
+      previous_theme="$(awk -F'|' 'NR == 1 { print $3 }' "$cache_dir/current_wallpaper" 2>/dev/null || true)"
+    fi
+
+    hold_path="$previous_theme"
+    [ -f "$hold_path" ] || hold_path="$theme_path"
+
+    if [ -f "$hold_path" ]; then
+      start_awww
+      awww img "$hold_path" \
+        --transition-type fade \
+        --transition-duration 0.01 \
+        --transition-fps 60 >/dev/null 2>&1 || true
+    fi
+
+    stop_wallpaperengine
+    stop_mpvpaper
+    sleep 0.12
+
+    if [ -f "$theme_path" ]; then
+      start_awww
+      awww img "$theme_path" \
+        --transition-type wave \
+        --transition-duration "$duration" \
+        --transition-fps 60 >/dev/null 2>&1 || true
+    fi
+
+    nohup linux-wallpaperengine --screen-root eDP-1 --bg "$path" --scaling fill --clamp border --disable-mouse --disable-parallax >/tmp/testebar-wallpaperengine.log 2>&1 &
+    apply_pywal "$theme_path"
+    persist_current_wallpaper
+    (sleep 2.8; pgrep -f '[l]inux-wallpaperengine' >/dev/null 2>&1 && awww kill >/dev/null 2>&1 || true) >/dev/null 2>&1 &
+    ;;
+  *)
+    exit 2
+    ;;
+esac

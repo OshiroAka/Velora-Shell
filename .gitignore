@@ -37,3 +37,10 @@ qmlcache/
 # Repository noise
 .DS_Store
 Thumbs.db
+
+# Explicit archive for preserving other Quickshell configs in this repo.
+!quickshell-extra-shells/
+!quickshell-extra-shells/**
+quickshell-extra-shells/**/__pycache__/
+quickshell-extra-shells/**/*.py[cod]
+quickshell-extra-shells/**/.qmlcache/

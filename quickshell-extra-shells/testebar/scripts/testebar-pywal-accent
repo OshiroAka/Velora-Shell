@@ -1,0 +1,68 @@
+#!/usr/bin/env python3
+import colorsys
+import json
+import os
+import sys
+
+path = os.path.expanduser("~/.cache/wal/colors.json")
+
+try:
+    with open(path, "r", encoding="utf-8") as handle:
+        data = json.load(handle)
+except Exception:
+    print("#9cd1ff")
+    sys.exit(0)
+
+colors = data.get("colors", {})
+preferred = [
+    "color4",
+    "color6",
+    "color5",
+    "color2",
+    "color3",
+    "color12",
+    "color14",
+    "color13",
+    "color10",
+    "color11",
+]
+
+
+def parse_hex(value):
+    value = str(value or "").strip()
+    if value.startswith("#"):
+        value = value[1:]
+    if len(value) != 6:
+        return None
+    try:
+        return tuple(int(value[i:i + 2], 16) / 255 for i in (0, 2, 4))
+    except ValueError:
+        return None
+
+
+def score(rgb, rank):
+    r, g, b = rgb
+    h, lightness, saturation = colorsys.rgb_to_hls(r, g, b)
+    return saturation * 2.4 - abs(lightness - 0.55) * 1.2 - rank * 0.03
+
+
+candidates = []
+for rank, key in enumerate(preferred):
+    rgb = parse_hex(colors.get(key))
+    if rgb:
+        candidates.append((score(rgb, rank), rgb))
+
+if not candidates:
+    print("#9cd1ff")
+    sys.exit(0)
+
+_, rgb = max(candidates, key=lambda item: item[0])
+hue, lightness, saturation = colorsys.rgb_to_hls(*rgb)
+
+# Pywal can produce very muted palettes; lift the accent so selected controls
+# remain readable while preserving the wallpaper hue.
+lightness = min(0.72, max(0.48, lightness + 0.10))
+saturation = min(0.82, max(0.34, saturation + 0.18))
+r, g, b = colorsys.hls_to_rgb(hue, lightness, saturation)
+
+print("#{:02x}{:02x}{:02x}".format(round(r * 255), round(g * 255), round(b * 255)))

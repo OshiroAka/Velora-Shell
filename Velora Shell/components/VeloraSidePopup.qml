@@ -5,6 +5,7 @@ import Quickshell
 import Quickshell.Bluetooth
 import Quickshell.Io
 import Quickshell.Services.Notifications
+import Quickshell.Services.UPower
 
 Item {
     id: root
@@ -17,12 +18,24 @@ Item {
     property bool interactiveFocus: false
     property string attachSide: "left"
     property real volumePercent: 0.60
+    property real micVolumePercent: 0.00
     property real brightnessPercent: 0.86
     property bool muted: false
+    property bool micMuted: false
     property bool wifiEnabled: true
     property bool nightLightEnabled: true
     property bool bluetoothPowered: false
     property bool bluetoothAvailable: false
+    property string audioOutputName: "Default output"
+    property string audioInputName: "Default input"
+    property string brightnessDevice: ""
+    property string diskUsageText: "Loading..."
+    property real diskUsagePercent: 0
+    property string diskMountPoint: ""
+    property string batteryStateText: "unknown"
+    property string batteryTimeText: ""
+    property string powerProfile: "unknown"
+    property bool acOnline: false
     property string pendingCommand: ""
     property string activeCommand: ""
     property string searchQuery: ""
@@ -30,7 +43,7 @@ Item {
     property int searchSelectedIndex: 0
     property var searchResults: []
     property bool searchReady: false
-    readonly property int cornerRadius: 13
+    readonly property int cornerRadius: 18
     readonly property int arrowCenterY: {
         if (popupType === "volume")
             return 78
@@ -57,12 +70,20 @@ Item {
     readonly property color card: theme ? theme.surfaceCard : Qt.rgba(1, 1, 1, 0.70)
     readonly property color line: theme ? theme.alpha(theme.borderActive, 0.18) : Qt.rgba(0.70, 0.52, 0.64, 0.18)
     readonly property color borderSoft: theme ? theme.borderSoft : Qt.rgba(1, 1, 1, 0.78)
+    readonly property color winSurface: theme ? alpha(theme.surfacePopup, theme.themeMode === "dark" ? 0.88 : 0.78) : Qt.rgba(0.035, 0.075, 0.12, 0.88)
+    readonly property color winSurfaceDeep: theme ? alpha(theme.surfaceBase, theme.themeMode === "dark" ? 0.76 : 0.62) : Qt.rgba(0.015, 0.045, 0.075, 0.76)
+    readonly property color winCard: theme ? alpha(theme.surfaceCard, theme.themeMode === "dark" ? 0.42 : 0.54) : Qt.rgba(0.12, 0.20, 0.29, 0.48)
+    readonly property color winCardHover: theme ? alpha(theme.surfaceCard, theme.themeMode === "dark" ? 0.58 : 0.72) : Qt.rgba(0.16, 0.26, 0.36, 0.62)
+    readonly property color winLine: theme ? alpha(theme.borderSoft, theme.themeMode === "dark" ? 0.24 : 0.34) : Qt.rgba(1, 1, 1, 0.14)
+    readonly property color winAccent: theme ? (pywalStyle ? theme.accentPrimary : theme.accentSecondary) : Qt.rgba(0.10, 0.70, 0.94, 1)
+    readonly property color winAccent2: theme ? (pywalStyle ? theme.accentSecondary : theme.accentPrimary) : Qt.rgba(0.17, 0.86, 0.92, 1)
     readonly property string uiFont: "Noto Sans CJK JP"
     readonly property string monoFont: "JetBrainsMono Nerd Font"
     readonly property string homeDir: Quickshell.env("HOME") || ""
     readonly property string wallpaperDir: homeDir + "/Pictures/Wallpapers"
     readonly property string scanScript: Quickshell.shellDir + "/scripts/velora-wallpaper-scan"
     readonly property string visibilityScript: Quickshell.shellDir + "/scripts/velora-wallpaper-visibility"
+    readonly property string popupStatusScript: Quickshell.shellDir + "/scripts/velora-popup-status"
     readonly property string bluetoothCommand: "if ! command -v bluetoothctl >/dev/null 2>&1; then printf 'POWER|unavailable\\n'; exit 0; fi; power=$(bluetoothctl show 2>/dev/null | awk -F': ' '/Powered/ {print $2; exit}'); [ -z \"$power\" ] && power=unknown; printf 'POWER|%s\\n' \"$power\"; bluetoothctl devices Connected 2>/dev/null | sed -n 's/^Device \\([^ ]*\\) \\(.*\\)$/CONNECTED|\\1|\\2/p'; bluetoothctl devices Paired 2>/dev/null | sed -n 's/^Device \\([^ ]*\\) \\(.*\\)$/PAIRED|\\1|\\2/p'; bluetoothctl devices 2>/dev/null | sed -n 's/^Device \\([^ ]*\\) \\(.*\\)$/KNOWN|\\1|\\2/p'"
     readonly property bool nativeBluetoothAvailable: Bluetooth.defaultAdapter !== null
     readonly property bool bluetoothIsAvailable: nativeBluetoothAvailable || bluetoothAvailable
@@ -81,6 +102,7 @@ Item {
     property var hiddenWallpapers: []
     property bool wallpaperVisibilityLoaded: false
     property bool wallpaperVisibilitySaveQueued: false
+    property var batteryDevice: null
     property real revealProgress: 0
     property real entryProgress: 0
     property real arrowVisualCenterY: arrowCenterY
@@ -236,6 +258,10 @@ Item {
             notificationQuery.running = true
         if (!root.nativeBluetoothAvailable && !bluetoothQuery.running)
             bluetoothQuery.running = true
+        if ((popupType === "files" || popupType === "profile") && !filesQuery.running)
+            filesQuery.running = true
+        if ((popupType === "battery" || popupType === "notifications") && !batteryQuery.running)
+            batteryQuery.running = true
     }
 
     HoverHandler {
@@ -287,6 +313,81 @@ Item {
 
         root.pendingCommand = command
         commandDebounce.restart()
+    }
+
+    function runDetached(command) {
+        if (!command || command.length <= 0)
+            return
+
+        runCommand(command + " >/dev/null 2>&1 &")
+    }
+
+    function openPath(path) {
+        const target = textOf(path)
+        if (target.length <= 0)
+            return
+
+        runDetached("xdg-open " + shellQuote(target))
+    }
+
+    function openUrl(url) {
+        const target = textOf(url)
+        if (target.length <= 0)
+            return
+
+        runDetached("(command -v zen-browser >/dev/null 2>&1 && zen-browser " + shellQuote(target) + " || xdg-open " + shellQuote(target) + ")")
+    }
+
+    function openSettings(module) {
+        const suffix = textOf(module)
+        var command = "if command -v systemsettings >/dev/null 2>&1; then systemsettings"
+        if (suffix.length > 0)
+            command += " " + suffix
+        command += "; elif command -v gnome-control-center >/dev/null 2>&1; then gnome-control-center"
+        command += "; elif command -v nwg-look >/dev/null 2>&1; then nwg-look"
+        command += "; fi"
+        runDetached(command)
+    }
+
+    function openFileSearch() {
+        runDetached("if command -v fsearch >/dev/null 2>&1; then fsearch; elif command -v dolphin >/dev/null 2>&1; then dolphin --new-window " + shellQuote(homeDir) + "; else xdg-open " + shellQuote(homeDir) + "; fi")
+    }
+
+    function openTrash() {
+        runDetached("xdg-open trash:/// || xdg-open " + shellQuote(homeDir + "/.local/share/Trash/files"))
+    }
+
+    function browserSearch() {
+        const query = searchQuery.trim().length > 0 ? searchQuery.trim() : "Velora Shell"
+        openUrl("https://www.google.com/search?q=" + encodeURIComponent(query))
+    }
+
+    function browserCommand(action) {
+        if (action === "new-window") {
+            runDetached("if command -v zen-browser >/dev/null 2>&1; then zen-browser --new-window about:newtab; else xdg-open about:blank; fi")
+            return
+        }
+        if (action === "private") {
+            runDetached("if command -v zen-browser >/dev/null 2>&1; then zen-browser --private-window; elif command -v firefox >/dev/null 2>&1; then firefox --private-window; else xdg-open about:blank; fi")
+            return
+        }
+        if (action === "downloads") {
+            runDetached("if command -v zen-browser >/dev/null 2>&1; then zen-browser about:downloads; else xdg-open " + shellQuote(homeDir + "/Downloads") + "; fi")
+            return
+        }
+        if (action === "bookmarks") {
+            runDetached("if command -v zen-browser >/dev/null 2>&1; then zen-browser about:preferences#search; else xdg-open about:blank; fi")
+            return
+        }
+        openUrl("about:newtab")
+    }
+
+    function openCalendarApp() {
+        runDetached("if command -v kalendar >/dev/null 2>&1; then kalendar; elif command -v gnome-calendar >/dev/null 2>&1; then gnome-calendar; else xdg-open https://calendar.google.com; fi")
+    }
+
+    function openClockApp() {
+        runDetached("if command -v kclock >/dev/null 2>&1; then kclock; elif command -v gnome-clocks >/dev/null 2>&1; then gnome-clocks; fi")
     }
 
     function textOf(value) {
@@ -395,9 +496,19 @@ Item {
         runCommand("wpctl set-volume @DEFAULT_AUDIO_SINK@ " + Math.round(root.volumePercent * 100) + "%")
     }
 
+    function setMicVolume(value) {
+        root.micVolumePercent = Math.max(0, Math.min(1, value))
+        runCommand("wpctl set-volume @DEFAULT_AUDIO_SOURCE@ " + Math.round(root.micVolumePercent * 100) + "%")
+    }
+
     function toggleMute() {
         root.muted = !root.muted
         runCommand("wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle")
+    }
+
+    function toggleMicMute() {
+        root.micMuted = !root.micMuted
+        runCommand("wpctl set-mute @DEFAULT_AUDIO_SOURCE@ toggle")
     }
 
     function setBrightness(value) {
@@ -423,6 +534,42 @@ Item {
         const quotedSsid = shellQuote(ssid)
         runCommand("if nmcli -t -f NAME connection show | grep -Fx -- " + quotedSsid + " >/dev/null 2>&1; then nmcli connection up id " + quotedSsid + " >/dev/null 2>&1 || nmcli dev wifi connect " + quotedSsid + " >/dev/null 2>&1 || true; else nmcli dev wifi connect " + quotedSsid + " >/dev/null 2>&1 || (command -v nm-connection-editor >/dev/null 2>&1 && nm-connection-editor >/dev/null 2>&1 &); fi")
         wifiRefresh.restart()
+    }
+
+    function toggleAirplaneMode() {
+        root.wifiEnabled = false
+        runCommand("nmcli radio all off >/dev/null 2>&1 || nmcli radio wifi off >/dev/null 2>&1 || true")
+        wifiRefresh.restart()
+        bluetoothRefresh.restart()
+    }
+
+    function toggleHotspot() {
+        runDetached("if command -v nm-connection-editor >/dev/null 2>&1; then nm-connection-editor; elif command -v systemsettings >/dev/null 2>&1; then systemsettings kcm_networkmanagement; fi")
+    }
+
+    function setPowerProfile(profile) {
+        const value = textOf(profile)
+        if (value.length <= 0)
+            return
+
+        powerProfile = value
+        runCommand("powerprofilesctl set " + shellQuote(value) + " >/dev/null 2>&1 || true")
+    }
+
+    function togglePowerSaver() {
+        setPowerProfile(powerProfile === "power-saver" ? "balanced" : "power-saver")
+    }
+
+    function openDisplaySettings() {
+        openSettings("kcm_kscreen")
+    }
+
+    function openAudioSettings() {
+        runDetached("if command -v pavucontrol >/dev/null 2>&1; then pavucontrol; else " + "systemsettings kcm_pulseaudio 2>/dev/null || gnome-control-center sound 2>/dev/null || true; fi")
+    }
+
+    function openNetworkSettings() {
+        runDetached("if command -v nm-connection-editor >/dev/null 2>&1; then nm-connection-editor; elif command -v systemsettings >/dev/null 2>&1; then systemsettings kcm_networkmanagement; elif command -v gnome-control-center >/dev/null 2>&1; then gnome-control-center wifi; fi")
     }
 
     function deviceKnown(address) {
@@ -474,7 +621,7 @@ Item {
     }
 
     function toggleBluetoothPower() {
-        setBluetoothPower(!bluetoothPowered)
+        setBluetoothPower(!bluetoothIsPowered)
     }
 
     function setBluetoothDeviceConnection(address, active) {
@@ -560,6 +707,33 @@ Item {
         if (signal >= 25)
             return 2
         return 1
+    }
+
+    function refreshBatteryDevice() {
+        batteryDevice = null
+        for (const dev of UPower.devices.values) {
+            if (dev && dev.isLaptopBattery) {
+                batteryDevice = dev
+                return
+            }
+        }
+    }
+
+    function batteryAvailable() {
+        return batteryDevice && batteryDevice.ready
+    }
+
+    function batteryPercent() {
+        if (!batteryAvailable())
+            return 0
+        const value = Number(batteryDevice.percentage)
+        if (isNaN(value))
+            return 0
+        return Math.max(0, Math.min(1, value > 1 ? value / 100 : value))
+    }
+
+    function batteryText() {
+        return batteryAvailable() ? Math.round(batteryPercent() * 100) + "%" : "N/A"
     }
 
     function wallpaperKey(entry) {
@@ -796,10 +970,19 @@ Item {
     }
 
     Component.onCompleted: {
+        refreshBatteryDevice()
         syncTrackedNotifications()
         if (open && popupType === "search")
             ensureSearchReady()
         refreshStatusQueries()
+    }
+
+    Connections {
+        target: UPower.devices
+
+        function onValuesChanged() {
+            root.refreshBatteryDevice()
+        }
     }
 
     onSearchQueryChanged: {
@@ -926,6 +1109,10 @@ Item {
                     brightnessQuery.running = true
                 wifiRefresh.restart()
                 bluetoothRefresh.restart()
+                if ((root.popupType === "files" || root.popupType === "profile") && !filesQuery.running)
+                    filesQuery.running = true
+                if ((root.popupType === "battery" || root.popupType === "notifications") && !batteryQuery.running)
+                    batteryQuery.running = true
             }
         }
     }
@@ -934,16 +1121,27 @@ Item {
         id: volumeQuery
 
         running: false
-        command: ["bash", "-lc", "wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null || echo 'Volume: 0.60'"]
+        command: [root.popupStatusScript, "audio"]
 
         stdout: SplitParser {
             onRead: function(data) {
-                var text = data.trim()
-                var match = text.match(/[0-9]+\\.?[0-9]*/)
+                var parts = data.trim().split("|")
+                if (parts.length < 3)
+                    return
 
-                root.muted = text.indexOf("MUTED") >= 0
-                if (match)
-                    root.volumePercent = Math.max(0, Math.min(1, parseFloat(match[0])))
+                if (parts[0] === "AUDIO_SINK") {
+                    var sinkValue = parseFloat(parts[1])
+                    if (!isNaN(sinkValue))
+                        root.volumePercent = Math.max(0, Math.min(1, sinkValue))
+                    root.muted = parts[2] === "1"
+                    root.audioOutputName = parts.length > 3 && parts[3].length > 0 ? parts[3] : "Default output"
+                } else if (parts[0] === "AUDIO_SOURCE") {
+                    var sourceValue = parseFloat(parts[1])
+                    if (!isNaN(sourceValue))
+                        root.micVolumePercent = Math.max(0, Math.min(1, sourceValue))
+                    root.micMuted = parts[2] === "1"
+                    root.audioInputName = parts.length > 3 && parts[3].length > 0 ? parts[3] : "Default input"
+                }
             }
         }
 
@@ -954,13 +1152,16 @@ Item {
         id: brightnessQuery
 
         running: false
-        command: ["bash", "-lc", "brightnessctl -m 2>/dev/null | awk -F, '{gsub(/%/,\"\",$4); print $4/100}' || echo 0.86"]
+        command: ["bash", "-lc", "brightnessctl -m 2>/dev/null | awk -F, '{gsub(/%/,\"\",$4); printf \"BRIGHTNESS|%s|%s\\n\", $4/100, $1}' || printf 'BRIGHTNESS|0.86|\\n'"]
 
         stdout: SplitParser {
             onRead: function(data) {
-                var value = parseFloat(data.trim())
+                var parts = data.trim().split("|")
+                var value = parseFloat(parts.length > 1 ? parts[1] : data.trim())
                 if (!isNaN(value))
                     root.brightnessPercent = Math.max(0.05, Math.min(1, value))
+                if (parts.length > 2)
+                    root.brightnessDevice = parts[2]
             }
         }
 
@@ -977,6 +1178,14 @@ Item {
 
     ListModel {
         id: deviceModel
+    }
+
+    ListModel {
+        id: recentFolderModel
+    }
+
+    ListModel {
+        id: recentFileModel
     }
 
     Process {
@@ -1118,6 +1327,80 @@ Item {
             for (var i = 0; i < stagedDevices.length; ++i)
                 deviceModel.append(stagedDevices[i])
         }
+    }
+
+    Process {
+        id: filesQuery
+
+        running: false
+        command: [root.popupStatusScript, "files"]
+
+        onStarted: {
+            recentFolderModel.clear()
+            recentFileModel.clear()
+        }
+
+        stdout: SplitParser {
+            onRead: function(lineRaw) {
+                var parts = lineRaw.trim().split("|")
+                if (parts.length <= 0 || parts[0].length <= 0)
+                    return
+
+                if (parts[0] === "DISK") {
+                    root.diskUsageText = parts.length > 1 ? parts[1] : ""
+                    var pct = parseFloat(parts.length > 2 ? parts[2] : "0")
+                    root.diskUsagePercent = isNaN(pct) ? 0 : Math.max(0, Math.min(1, pct))
+                    root.diskMountPoint = parts.length > 3 ? parts[3] : ""
+                    return
+                }
+
+                if (parts.length < 5)
+                    return
+
+                var item = {
+                    icon: parts[1],
+                    title: parts[2],
+                    subtitle: parts[3],
+                    path: parts.slice(4).join("|")
+                }
+
+                if (parts[0] === "FOLDER" && recentFolderModel.count < 8)
+                    recentFolderModel.append(item)
+                else if (parts[0] === "FILE" && recentFileModel.count < 8)
+                    recentFileModel.append(item)
+            }
+        }
+
+        onExited: running = false
+    }
+
+    Process {
+        id: batteryQuery
+
+        running: false
+        command: [root.popupStatusScript, "battery"]
+
+        stdout: SplitParser {
+            onRead: function(lineRaw) {
+                var parts = lineRaw.trim().split("|")
+                if (parts.length <= 0)
+                    return
+
+                if (parts[0] === "BATTERY") {
+                    var value = parseFloat(parts.length > 1 ? parts[1] : "0")
+                    if (!isNaN(value) && value > 0)
+                        root.batteryDevice = { ready: true, percentage: value }
+                    root.batteryStateText = parts.length > 2 && parts[2].length > 0 ? parts[2] : "unknown"
+                    root.batteryTimeText = parts.length > 3 ? parts[3] : ""
+                } else if (parts[0] === "POWER") {
+                    root.powerProfile = parts.length > 1 && parts[1].length > 0 ? parts[1] : "unknown"
+                    var online = parts.length > 2 ? parts[2].toLowerCase() : "unknown"
+                    root.acOnline = online === "yes" || online === "1" || online === "true" || online === "online"
+                }
+            }
+        }
+
+        onExited: running = false
     }
 
     Process {
@@ -1284,9 +1567,9 @@ Item {
         width: root.width - x
         height: root.height
         radius: root.cornerRadius
-        color: root.externalSurface ? "transparent" : root.glass
+        color: root.externalSurface ? "transparent" : root.winSurface
         border.width: root.externalSurface ? 0 : 1
-        border.color: root.neon && root.theme ? root.theme.popupBorderGlow : root.borderSoft
+        border.color: root.neon && root.theme ? root.alpha(root.theme.popupBorderGlow, 0.62) : root.winLine
         clip: true
         antialiasing: true
         layer.enabled: !root.externalSurface
@@ -1310,9 +1593,9 @@ Item {
             radius: parent.radius
             visible: !root.externalSurface
             gradient: Gradient {
-                GradientStop { position: 0.0; color: root.alpha(root.card, root.neon ? 0.28 : 0.48) }
-                GradientStop { position: 0.55; color: root.alpha(root.card, root.neon ? 0.16 : 0.24) }
-                GradientStop { position: 1.0; color: root.alpha(root.pink, root.neon ? 0.10 : 0.16) }
+                GradientStop { position: 0.0; color: root.winSurface }
+                GradientStop { position: 0.62; color: root.winSurfaceDeep }
+                GradientStop { position: 1.0; color: root.alpha(root.winAccent, 0.08) }
             }
         }
 
@@ -1329,10 +1612,34 @@ Item {
             border.color: root.alpha(root.theme ? root.theme.borderSoft : Qt.rgba(1, 1, 1, 1), root.neon ? 0.22 : 0.18)
         }
 
+        ProfileView {
+            anchors.fill: parent
+            anchors.margins: 18
+            visible: root.popupType === "profile"
+        }
+
+        TimeView {
+            anchors.fill: parent
+            anchors.margins: 18
+            visible: root.popupType === "time"
+        }
+
         SearchView {
             anchors.fill: parent
             anchors.margins: 18
             visible: root.popupType === "search"
+        }
+
+        FilesView {
+            anchors.fill: parent
+            anchors.margins: 18
+            visible: root.popupType === "files"
+        }
+
+        BrowserView {
+            anchors.fill: parent
+            anchors.margins: 22
+            visible: root.popupType === "browser"
         }
 
         VolumeView {
@@ -1359,6 +1666,12 @@ Item {
             visible: root.popupType === "notifications"
         }
 
+        BatteryView {
+            anchors.fill: parent
+            anchors.margins: 18
+            visible: root.popupType === "battery"
+        }
+
         BluetoothView {
             anchors.fill: parent
             anchors.margins: 16
@@ -1369,6 +1682,1260 @@ Item {
             anchors.fill: parent
             anchors.margins: 15
             visible: root.popupType === "wallpaperVisibility"
+        }
+    }
+
+    component WinCard: Rectangle {
+        radius: 12
+        color: root.alpha(root.winCard, 0.82)
+        border.width: 1
+        border.color: root.alpha(root.winAccent, 0.18)
+        antialiasing: true
+    }
+
+    component WinLabel: Text {
+        color: root.ink
+        font.family: root.uiFont
+        font.pixelSize: 13
+        font.weight: Font.DemiBold
+        elide: Text.ElideRight
+    }
+
+    component WinSubLabel: Text {
+        color: root.inkSoft
+        font.family: root.uiFont
+        font.pixelSize: 10
+        font.weight: Font.Medium
+        elide: Text.ElideRight
+    }
+
+    component WinIconTile: Rectangle {
+        id: iconTile
+
+        property string iconName: "box"
+        property string label: ""
+        property bool active: false
+        property bool hovered: false
+        signal clicked()
+
+        radius: 10
+        color: active ? root.alpha(root.winAccent, hovered ? 0.32 : 0.24) : root.alpha(root.winCardHover, hovered ? 0.72 : 0.52)
+        border.width: 1
+        border.color: active ? root.alpha(root.winAccent, 0.54) : root.alpha(root.winAccent, hovered ? 0.32 : 0.16)
+
+        Behavior on color { ColorAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
+        Behavior on border.color { ColorAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
+
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 10
+            spacing: 6
+
+            PopupIcon {
+                Layout.alignment: Qt.AlignHCenter
+                Layout.preferredWidth: 24
+                Layout.preferredHeight: 24
+                iconName: parent.parent.iconName
+                lineColor: parent.parent.active ? root.winAccent2 : root.inkSoft
+            }
+
+            Text {
+                Layout.fillWidth: true
+                text: parent.parent.label
+                color: parent.parent.active ? root.winAccent2 : root.ink
+                horizontalAlignment: Text.AlignHCenter
+                font.family: root.uiFont
+                font.pixelSize: 10
+                font.weight: Font.Bold
+                elide: Text.ElideRight
+            }
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            acceptedButtons: Qt.LeftButton
+            hoverEnabled: true
+            preventStealing: true
+            cursorShape: Qt.PointingHandCursor
+            onEntered: iconTile.hovered = true
+            onExited: iconTile.hovered = false
+            onClicked: function(mouse) {
+                mouse.accepted = true
+                iconTile.clicked()
+            }
+        }
+    }
+
+    component WinActionRow: Rectangle {
+        id: row
+
+        property string iconName: "box"
+        property string title: ""
+        property string subtitle: ""
+        property bool accent: false
+        property bool hovered: false
+        property bool showArrow: true
+        signal clicked()
+
+        height: 44
+        implicitHeight: height
+        radius: 8
+        color: hovered ? root.winCardHover : (accent ? root.alpha(root.winAccent, 0.18) : root.alpha(root.winCardHover, 0.40))
+        border.width: 1
+        border.color: accent ? root.alpha(root.winAccent, 0.48) : root.alpha(root.winAccent, 0.12)
+
+        RowLayout {
+            anchors.fill: parent
+            anchors.leftMargin: 12
+            anchors.rightMargin: 10
+            spacing: 10
+
+            PopupIcon {
+                Layout.preferredWidth: 20
+                Layout.preferredHeight: 20
+                iconName: row.iconName
+                lineColor: row.accent ? root.winAccent2 : root.inkSoft
+            }
+
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 0
+
+                WinLabel {
+                    Layout.fillWidth: true
+                    text: row.title
+                    font.pixelSize: 12
+                }
+
+                WinSubLabel {
+                    Layout.fillWidth: true
+                    visible: row.subtitle.length > 0
+                    text: row.subtitle
+                }
+            }
+
+            Text {
+                visible: row.showArrow
+                text: "›"
+                color: root.inkSoft
+                font.family: root.uiFont
+                font.pixelSize: 20
+            }
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onEntered: row.hovered = true
+            onExited: row.hovered = false
+            onClicked: row.clicked()
+        }
+    }
+
+    component ProfileView: Item {
+        opacity: root.stageOpacity(35, 220)
+        transform: Translate { y: root.stageTranslateY(35, 10) }
+
+        RowLayout {
+            anchors.fill: parent
+            spacing: 20
+
+            WinCard {
+                Layout.preferredWidth: 292
+                Layout.fillHeight: true
+                clip: true
+
+                Image {
+                    anchors.fill: parent
+                    source: Qt.resolvedUrl("../assets/profile-avatar.png")
+                    fillMode: Image.PreserveAspectCrop
+                    opacity: 0.36
+                    smooth: true
+                }
+
+                Rectangle {
+                    anchors.fill: parent
+                    color: Qt.rgba(0.03, 0.07, 0.11, 0.54)
+                }
+
+                Rectangle {
+                    x: 28
+                    y: parent.height * 0.36
+                    width: 58
+                    height: 58
+                    radius: 29
+                    color: root.alpha(root.winCardHover, 0.82)
+                    border.width: 2
+                    border.color: root.alpha(root.borderSoft, 0.78)
+                    clip: true
+
+                    Image {
+                        anchors.fill: parent
+                        anchors.margins: 3
+                        source: Qt.resolvedUrl("../assets/profile-avatar.png")
+                        fillMode: Image.PreserveAspectCrop
+                    }
+                }
+
+                Column {
+                    x: 28
+                    y: parent.height * 0.56
+                    width: parent.width - 56
+                    spacing: 8
+
+                    Text {
+                        width: parent.width
+                        text: "レイ"
+                        color: root.ink
+                        font.family: root.uiFont
+                        font.pixelSize: 22
+                        font.weight: Font.Bold
+                    }
+
+                    Row {
+                        spacing: 6
+                        Rectangle { width: 8; height: 8; radius: 4; color: "#36d66b"; anchors.verticalCenter: parent.verticalCenter }
+                        WinSubLabel { text: "オンライン"; font.pixelSize: 11 }
+                    }
+
+                    Rectangle { width: parent.width; height: 1; color: root.winLine }
+
+                    WinSubLabel {
+                        width: parent.width
+                        text: "“静寂の中で、自分だけの答えを見つける。”"
+                        wrapMode: Text.WordWrap
+                        font.pixelSize: 11
+                    }
+
+                    Item { width: 1; height: 10 }
+
+                    WinSubLabel { text: "テーマ概要"; color: root.winAccent2; font.weight: Font.Bold }
+                    WinSubLabel {
+                        width: parent.width
+                        text: "青空と静寂を基調にした、集中と癒しのためのワークスペースです。"
+                        wrapMode: Text.WordWrap
+                    }
+
+                    Row {
+                        spacing: 7
+                        Repeater {
+                            model: ["集中", "ミニマル", "ブルー", "癒し"]
+                            Rectangle {
+                                width: label.implicitWidth + 16
+                                height: 24
+                                radius: 7
+                                color: root.alpha(root.winAccent, 0.13)
+                                Text {
+                                    id: label
+                                    anchors.centerIn: parent
+                                    text: modelData
+                                    color: root.winAccent2
+                                    font.family: root.uiFont
+                                    font.pixelSize: 10
+                                    font.weight: Font.Bold
+                                }
+                            }
+                        }
+                    }
+
+                    Item { width: 1; height: 8 }
+
+                    WinSubLabel { text: "ストレージ使用状況"; color: root.winAccent2; font.weight: Font.Bold }
+                    SliderBar { width: parent.width; value: root.diskUsagePercent; entryDelay: 120 }
+                    Row {
+                        width: parent.width
+                        WinSubLabel { text: root.diskUsageText; width: parent.width - 42 }
+                        WinSubLabel { text: Math.round(root.diskUsagePercent * 100) + "%" }
+                    }
+                }
+            }
+
+            ColumnLayout {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                spacing: 14
+
+                WinSubLabel {
+                    Layout.fillWidth: true
+                    text: "ショートカット"
+                    color: root.winAccent2
+                    font.pixelSize: 12
+                    font.weight: Font.Bold
+                }
+
+                Repeater {
+                    model: [
+                        { icon: "download", title: "ダウンロード", cmd: "xdg-open \"$HOME/Downloads\"" },
+                        { icon: "memo", title: "ドキュメント", cmd: "xdg-open \"$HOME/Documents\"" },
+                        { icon: "image", title: "ピクチャ", cmd: "xdg-open \"$HOME/Pictures\"" },
+                        { icon: "volume", title: "ミュージック", cmd: "xdg-open \"$HOME/Music\"" },
+                        { icon: "display", title: "ビデオ", cmd: "xdg-open \"$HOME/Videos\"" }
+                    ]
+
+                    WinActionRow {
+                        Layout.fillWidth: true
+                        iconName: modelData.icon
+                        title: modelData.title
+                        onClicked: root.runCommand(modelData.cmd + " >/dev/null 2>&1 &")
+                    }
+                }
+
+                Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: root.winLine }
+
+                WinSubLabel { text: "クイックアクション"; color: root.winAccent2; font.pixelSize: 12; font.weight: Font.Bold }
+
+                Repeater {
+                    model: [
+                        { icon: "palette", title: "外観のカスタマイズ" },
+                        { icon: "box", title: "ウィジェットを管理" },
+                        { icon: "display", title: "デスクトップ設定" },
+                        { icon: "memo", title: "システム情報" }
+                    ]
+                    WinActionRow {
+                        Layout.fillWidth: true
+                        iconName: modelData.icon
+                        title: modelData.title
+                        accent: index === 0
+                        onClicked: {
+                            if (modelData.icon === "palette")
+                                root.openSettings("")
+                            else if (modelData.icon === "box")
+                                root.openPath(root.homeDir + "/.config/quickshell/velora-shell")
+                            else if (modelData.icon === "display")
+                                root.openDisplaySettings()
+                            else
+                                root.runDetached("if command -v kinfocenter >/dev/null 2>&1; then kinfocenter; elif command -v hardinfo2 >/dev/null 2>&1; then hardinfo2; else uname -a | wl-copy 2>/dev/null || true; fi")
+                        }
+                    }
+                }
+
+                Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: root.winLine }
+
+                WinSubLabel { text: "アカウント"; color: root.winAccent2; font.pixelSize: 12; font.weight: Font.Bold }
+                WinActionRow { Layout.fillWidth: true; iconName: "user"; title: "アカウント設定"; onClicked: root.openSettings("kcm_users") }
+                WinActionRow {
+                    Layout.fillWidth: true
+                    iconName: "logout"
+                    title: "サインアウト"
+                    subtitle: "logout menu"
+                    onClicked: root.runDetached("if command -v wlogout >/dev/null 2>&1; then wlogout; elif command -v nwg-bar >/dev/null 2>&1; then nwg-bar; fi")
+                }
+            }
+        }
+    }
+
+    component TimeView: Item {
+        id: timeView
+        property date now: new Date()
+        property int currentDay: Number(Qt.formatDateTime(now, "d"))
+        readonly property var weekdays: ["日", "月", "火", "水", "木", "金", "土"]
+
+        function localTime(offsetHours) {
+            const utc = now.getTime() + now.getTimezoneOffset() * 60000
+            return Qt.formatTime(new Date(utc + offsetHours * 3600000), "HH:mm")
+        }
+
+        function calendarCells() {
+            const year = now.getFullYear()
+            const month = now.getMonth()
+            const first = new Date(year, month, 1)
+            const start = new Date(year, month, 1 - first.getDay())
+            var cells = []
+
+            for (var i = 0; i < 49; ++i) {
+                if (i < 7) {
+                    cells.push({ label: weekdays[i], header: true, currentMonth: true, today: false })
+                    continue
+                }
+
+                const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i - 7)
+                cells.push({
+                    label: String(d.getDate()),
+                    header: false,
+                    currentMonth: d.getMonth() === month,
+                    today: d.getFullYear() === year && d.getMonth() === month && d.getDate() === now.getDate()
+                })
+            }
+
+            return cells
+        }
+
+        Timer {
+            interval: 1000
+            running: timeView.visible
+            repeat: true
+            onTriggered: timeView.now = new Date()
+        }
+
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 12
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 8
+
+                PopupIcon {
+                    Layout.preferredWidth: 20
+                    Layout.preferredHeight: 20
+                    iconName: "clock"
+                    lineColor: root.winAccent2
+                }
+
+                WinLabel {
+                    Layout.fillWidth: true
+                    text: "時刻と予定"
+                    color: root.winAccent2
+                    font.pixelSize: 13
+                }
+            }
+
+            GridLayout {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                columns: 2
+                columnSpacing: 12
+                rowSpacing: 12
+
+            ColumnLayout {
+                Layout.preferredWidth: 292
+                Layout.fillHeight: true
+                spacing: 12
+
+                WinCard {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 270
+
+                    ColumnLayout {
+                        anchors.fill: parent
+                        anchors.margins: 22
+                        spacing: 12
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 4
+
+                            Text {
+                                text: Qt.formatDateTime(timeView.now, "HH:mm")
+                                color: root.ink
+                                font.family: root.monoFont
+                                font.pixelSize: 56
+                                font.weight: Font.Light
+                            }
+
+                            Text {
+                                text: ":" + Qt.formatDateTime(timeView.now, "ss")
+                                color: root.winAccent2
+                                font.family: root.monoFont
+                                font.pixelSize: 38
+                                font.weight: Font.Light
+                                Layout.alignment: Qt.AlignBottom
+                                Layout.bottomMargin: 8
+                            }
+                        }
+
+                        WinLabel {
+                            Layout.fillWidth: true
+                            text: Qt.formatDateTime(timeView.now, "yyyy年M月d日 ddd")
+                            font.pixelSize: 16
+                        }
+
+                        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: root.winLine }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 14
+                            WinSubLabel { text: "日の出\n04:42"; color: root.ink; lineHeight: 1.45 }
+                            Item { Layout.fillWidth: true }
+                            PopupIcon { Layout.preferredWidth: 76; Layout.preferredHeight: 46; iconName: "sun"; lineColor: root.winAccent2 }
+                            Item { Layout.fillWidth: true }
+                            WinSubLabel { text: "日の入り\n19:03"; color: root.ink; horizontalAlignment: Text.AlignRight; lineHeight: 1.45 }
+                        }
+                    }
+                }
+
+                WinCard {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+
+                    ColumnLayout {
+                        anchors.fill: parent
+                        anchors.margins: 16
+                        spacing: 10
+
+                        WinSubLabel { text: "世界時計"; color: root.winAccent2; font.pixelSize: 12; font.weight: Font.Bold }
+                        Repeater {
+                            model: [
+                                ["東京", "日本", timeView.localTime(9)],
+                                ["ニューヨーク", "アメリカ", timeView.localTime(-4)],
+                                ["ロンドン", "イギリス", timeView.localTime(1)],
+                                ["パリ", "フランス", timeView.localTime(2)]
+                            ]
+                            WinActionRow {
+                                Layout.fillWidth: true
+                                iconName: "clock"
+                                title: modelData[0]
+                                subtitle: modelData[1]
+                                Text {
+                                    anchors.right: parent.right
+                                    anchors.rightMargin: 16
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: modelData[2]
+                                    color: root.ink
+                                    font.family: root.monoFont
+                                    font.pixelSize: 16
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            ColumnLayout {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                spacing: 12
+
+                WinCard {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 420
+
+                    ColumnLayout {
+                        anchors.fill: parent
+                        anchors.margins: 18
+                        spacing: 14
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            WinLabel { Layout.fillWidth: true; text: Qt.formatDateTime(timeView.now, "yyyy年M月"); font.pixelSize: 17 }
+                            WinLabel { text: "‹"; font.pixelSize: 24 }
+                            WinLabel { text: "›"; font.pixelSize: 24 }
+                        }
+
+                        GridLayout {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            columns: 7
+                            columnSpacing: 4
+                            rowSpacing: 6
+                            Repeater {
+                                model: timeView.calendarCells()
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    Layout.fillHeight: true
+                                    radius: 10
+                                    color: modelData.today ? root.alpha(root.winAccent, 0.70) : "transparent"
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: modelData.label
+                                        color: modelData.header ? root.inkSoft : (modelData.currentMonth ? root.ink : root.alpha(root.inkSoft, 0.48))
+                                        font.family: root.uiFont
+                                        font.pixelSize: modelData.header ? 12 : 13
+                                        font.weight: modelData.today ? Font.Bold : Font.Medium
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    spacing: 12
+
+                    WinCard {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        ColumnLayout {
+                            anchors.fill: parent
+                            anchors.margins: 16
+                            spacing: 10
+                            WinSubLabel { text: "タイマー"; color: root.winAccent2; font.weight: Font.Bold }
+                            Repeater {
+                                model: [["06:30", "平日", true], ["07:00", "土・日", false], ["08:00", "毎日", true]]
+                                WinActionRow { Layout.fillWidth: true; title: modelData[0]; subtitle: modelData[1]; iconName: "clock"; accent: modelData[2]; onClicked: root.openClockApp() }
+                            }
+                        }
+                    }
+
+                    WinCard {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        ColumnLayout {
+                            anchors.fill: parent
+                            anchors.margins: 16
+                            spacing: 10
+                            WinSubLabel { text: "今日の予定"; color: root.winAccent2; font.weight: Font.Bold }
+                            Repeater {
+                                model: [["09:00", "チームミーティング"], ["11:00", "プロジェクトレビュー"], ["13:00", "ランチ"], ["15:30", "デザインチェック"], ["17:00", "ジム"]]
+                                WinActionRow { Layout.fillWidth: true; title: modelData[0]; subtitle: modelData[1]; iconName: "calendar"; accent: index === 0; onClicked: root.openCalendarApp() }
+                            }
+                        }
+                    }
+                }
+            }
+
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 34
+                radius: 9
+                color: root.alpha(root.winCardHover, 0.30)
+                border.width: 1
+                border.color: root.alpha(root.winAccent, 0.12)
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 12
+                    anchors.rightMargin: 12
+                    spacing: 8
+
+                    PopupIcon {
+                        Layout.preferredWidth: 16
+                        Layout.preferredHeight: 16
+                        iconName: "clock"
+                        lineColor: root.winAccent2
+                    }
+
+                    WinSubLabel {
+                        Layout.fillWidth: true
+                        text: "ヒント: 予定をカレンダーに追加して、効率的な一日を計画しましょう。"
+                    }
+
+                    Text {
+                        text: "↗"
+                        color: root.inkSoft
+                        font.family: root.uiFont
+                        font.pixelSize: 15
+                    }
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.openCalendarApp()
+                }
+            }
+        }
+    }
+
+    component FilesView: Item {
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 12
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 8
+
+                WinLabel {
+                    Layout.fillWidth: true
+                    text: "ファイルセンター"
+                    color: root.ink
+                    font.pixelSize: 16
+                }
+
+                WinSubLabel {
+                    text: "−"
+                    color: root.winAccent2
+                    font.pixelSize: 18
+                }
+
+                WinSubLabel {
+                    text: "↗"
+                    color: root.winAccent2
+                    font.pixelSize: 15
+                }
+
+                WinSubLabel {
+                    text: "×"
+                    color: root.winAccent2
+                    font.pixelSize: 17
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                spacing: 12
+
+            WinCard {
+                Layout.preferredWidth: 168
+                Layout.fillHeight: true
+                ColumnLayout {
+                    anchors.fill: parent
+                    anchors.margins: 14
+                    spacing: 8
+                    WinSubLabel { text: "最近使用したフォルダー"; color: root.winAccent2; font.weight: Font.Bold }
+                    Repeater {
+                        model: Math.min(recentFolderModel.count, 4)
+                        WinActionRow {
+                            Layout.fillWidth: true
+                            iconName: recentFolderModel.get(index).icon
+                            title: recentFolderModel.get(index).title
+                            subtitle: recentFolderModel.get(index).subtitle
+                            onClicked: root.openPath(recentFolderModel.get(index).path)
+                        }
+                    }
+                    WinActionRow {
+                        visible: recentFolderModel.count <= 0
+                        Layout.fillWidth: true
+                        iconName: "folder"
+                        title: "読み込み中"
+                        subtitle: "フォルダーをスキャンしています"
+                    }
+                    Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: root.winLine }
+                    WinSubLabel { text: "お気に入り"; color: root.winAccent2; font.weight: Font.Bold }
+                    Repeater {
+                        model: [
+                            ["home", "ホーム", root.homeDir],
+                            ["display", "デスクトップ", root.homeDir + "/Desktop"],
+                            ["memo", "ドキュメント", root.homeDir + "/Documentos"],
+                            ["download", "ダウンロード", root.homeDir + "/Downloads"],
+                            ["image", "ピクチャ", root.homeDir + "/Pictures"],
+                            ["volume", "ミュージック", root.homeDir + "/Music"]
+                        ]
+                        WinActionRow {
+                            Layout.fillWidth: true
+                            iconName: modelData[0]
+                            title: modelData[1]
+                            onClicked: root.openPath(modelData[2])
+                        }
+                    }
+                }
+            }
+
+            ColumnLayout {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                spacing: 12
+
+                WinSubLabel { text: "ファイルセンター"; color: root.winAccent2; font.pixelSize: 15; font.weight: Font.Bold }
+                GridLayout {
+                    Layout.fillWidth: true
+                    columns: 2
+                    columnSpacing: 8
+                    rowSpacing: 8
+                    WinActionRow { Layout.fillWidth: true; iconName: "folder"; title: "新しいフォルダー"; onClicked: root.runDetached("mkdir -p " + root.shellQuote(root.homeDir + "/New Folder") + "; xdg-open " + root.shellQuote(root.homeDir)) }
+                    WinActionRow { Layout.fillWidth: true; iconName: "search"; title: "ファイルを検索"; onClicked: root.openFileSearch() }
+                    WinActionRow { Layout.fillWidth: true; iconName: "box"; title: "ごみ箱"; onClicked: root.openTrash() }
+                    WinActionRow { Layout.fillWidth: true; iconName: "settings"; title: "設定"; onClicked: root.openSettings("") }
+                }
+                WinCard {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 140
+                    ColumnLayout {
+                        anchors.fill: parent
+                        anchors.margins: 14
+                        spacing: 12
+                        WinSubLabel { text: "ストレージ"; color: root.winAccent2; font.weight: Font.Bold }
+                        WinActionRow {
+                            Layout.fillWidth: true
+                            iconName: "drive"
+                            title: root.diskMountPoint.length > 0 ? root.diskMountPoint : "Home"
+                            subtitle: root.diskUsageText + " 使用中 (" + Math.round(root.diskUsagePercent * 100) + "%)"
+                            accent: true
+                            onClicked: root.openPath(root.diskMountPoint.length > 0 ? root.diskMountPoint : root.homeDir)
+                        }
+                        SliderBar { Layout.fillWidth: true; value: root.diskUsagePercent; entryDelay: 120 }
+                    }
+                }
+                WinCard {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    ColumnLayout {
+                        anchors.fill: parent
+                        anchors.margins: 14
+                        spacing: 8
+                        WinSubLabel { text: "最近のファイル"; color: root.winAccent2; font.weight: Font.Bold }
+                        Repeater {
+                            model: Math.min(recentFileModel.count, 4)
+                            WinActionRow {
+                                Layout.fillWidth: true
+                                iconName: recentFileModel.get(index).icon
+                                title: recentFileModel.get(index).title
+                                subtitle: recentFileModel.get(index).subtitle
+                                onClicked: root.openPath(recentFileModel.get(index).path)
+                            }
+                        }
+                        WinActionRow {
+                            visible: recentFileModel.count <= 0
+                            Layout.fillWidth: true
+                            iconName: "memo"
+                            title: "ファイルなし"
+                            subtitle: "最近のファイルが見つかりません"
+                        }
+                    }
+                }
+            }
+        }
+        }
+    }
+
+    component BrowserView: Item {
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 18
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 18
+                Rectangle {
+                    Layout.preferredWidth: 64
+                    Layout.preferredHeight: 64
+                    radius: 32
+                    color: root.alpha(root.winAccent, 0.18)
+                    PopupIcon { anchors.centerIn: parent; width: 38; height: 38; iconName: "globe"; lineColor: root.winAccent2 }
+                }
+                ColumnLayout {
+                    Layout.preferredWidth: 260
+                    WinLabel { text: "おはようございます"; font.pixelSize: 22 }
+                    WinSubLabel { text: "集中できる一日になりますように。"; font.pixelSize: 12 }
+                }
+                SearchBox { Layout.fillWidth: true; Layout.preferredHeight: 58 }
+                Rectangle {
+                    Layout.preferredWidth: 54
+                    Layout.preferredHeight: 54
+                    radius: 27
+                    color: root.alpha(root.winAccent, 0.72)
+                    Text { anchors.centerIn: parent; text: "→"; color: "white"; font.pixelSize: 27; font.weight: Font.Bold }
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.browserSearch()
+                    }
+                }
+            }
+
+            GridLayout {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                columns: 3
+                columnSpacing: 18
+                rowSpacing: 18
+
+                WinCard {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    ColumnLayout { anchors.fill: parent; anchors.margins: 16; spacing: 12
+                        WinSubLabel { text: "お気に入り"; color: root.winAccent2; font.pixelSize: 13; font.weight: Font.Bold }
+                        GridLayout { Layout.fillWidth: true; columns: 4; columnSpacing: 10; rowSpacing: 10
+                            Repeater { model: [["globe", "ポータル", "https://www.google.com"], ["memo", "ドキュメント", "https://docs.google.com"], ["box", "コミュニティ", "https://github.com"], ["memo", "ニュース", "https://news.google.com"], ["palette", "クリエイティブ", "https://dribbble.com"], ["bell", "学習リソース", "https://developer.mozilla.org"], ["box", "ツール", "https://www.perplexity.ai"], ["plus", "追加", "about:preferences"]]
+                                WinIconTile { Layout.preferredWidth: 74; Layout.preferredHeight: 74; iconName: modelData[0]; label: modelData[1]; onClicked: root.openUrl(modelData[2]) }
+                            }
+                        }
+                    }
+                }
+
+                WinCard {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    ColumnLayout { anchors.fill: parent; anchors.margins: 18; spacing: 12
+                        RowLayout { Layout.fillWidth: true; WinSubLabel { Layout.fillWidth: true; text: "最近のタブ"; color: root.winAccent2; font.pixelSize: 13; font.weight: Font.Bold } WinSubLabel { text: "すべて表示"; color: root.winAccent2 } }
+                        Repeater { model: [["デザインシステム・ダッシュボード", "https://www.figma.com"], ["プロジェクト進捗レポート", "https://github.com"], ["API ドキュメント | 開発者ガイド", "https://developer.mozilla.org"], ["インスピレーションギャラリー", "https://dribbble.com"], ["クラウドストレージ", "https://drive.google.com"]]
+                            WinActionRow { Layout.fillWidth: true; iconName: "memo"; title: modelData[0]; subtitle: modelData[1]; onClicked: root.openUrl(modelData[1]) }
+                        }
+                    }
+                }
+
+                WinCard {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    ColumnLayout { anchors.fill: parent; anchors.margins: 16; spacing: 12
+                        WinSubLabel { text: "検索ショートカット"; color: root.winAccent2; font.pixelSize: 13; font.weight: Font.Bold }
+                        GridLayout { Layout.fillWidth: true; columns: 2; columnSpacing: 10; rowSpacing: 10
+                            Repeater { model: [["image", "画像を検索", "https://images.google.com"], ["play", "動画を検索", "https://www.youtube.com"], ["memo", "ニュースを検索", "https://news.google.com"], ["globe", "地図を検索", "https://maps.google.com"], ["lock", "ショッピング", "https://shopping.google.com"], ["language", "翻訳", "https://translate.google.com"]]
+                                WinIconTile { Layout.fillWidth: true; Layout.preferredHeight: 70; iconName: modelData[0]; label: modelData[1]; onClicked: root.openUrl(modelData[2]) }
+                            }
+                        }
+                    }
+                }
+
+                WinCard {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    ColumnLayout { anchors.fill: parent; anchors.margins: 16; spacing: 8
+                        WinSubLabel { text: "クイックアクション"; color: root.winAccent2; font.weight: Font.Bold }
+                        Repeater { model: [["clock", "新しいタブ", "Ctrl + T", "new-tab"], ["box", "新しいウィンドウ", "Ctrl + N", "new-window"], ["lock", "シークレットウィンドウ", "Ctrl + Shift + N", "private"], ["memo", "ブックマークを管理", "", "bookmarks"], ["download", "ダウンロード", "", "downloads"]]
+                            WinActionRow { Layout.fillWidth: true; iconName: modelData[0]; title: modelData[1]; subtitle: modelData[2]; onClicked: root.browserCommand(modelData[3]) }
+                        }
+                    }
+                }
+
+                WinCard {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    ColumnLayout { anchors.fill: parent; anchors.margins: 16; spacing: 10
+                        RowLayout { Layout.fillWidth: true; WinSubLabel { Layout.fillWidth: true; text: "リーディングリスト"; color: root.winAccent2; font.weight: Font.Bold } WinSubLabel { text: "すべて表示"; color: root.winAccent2 } }
+                        Repeater { model: [["未来のインターフェースデザイン", "https://designjournal.dev"], ["人工知能が変える創造のかたち", "https://insights.tech"], ["ミニマルな暮らしのすすめ", "https://life-studies.jp"]]
+                            WinActionRow { Layout.fillWidth: true; iconName: "image"; title: modelData[0]; subtitle: modelData[1]; onClicked: root.openUrl(modelData[1]) }
+                        }
+                    }
+                }
+
+                WinCard {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    ColumnLayout { anchors.centerIn: parent; spacing: 18
+                        WinSubLabel { text: "ヒント"; color: root.winAccent2; font.pixelSize: 14; font.weight: Font.Bold }
+                        WinLabel { text: "小さな積み重ねが、\n大きな未来をつくります。"; horizontalAlignment: Text.AlignHCenter; lineHeight: 1.6 }
+                    }
+                }
+            }
+        }
+    }
+
+    component BatteryView: Item {
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 13
+
+            RowLayout {
+                Layout.fillWidth: true
+
+                WinLabel {
+                    Layout.fillWidth: true
+                    text: "通知センター"
+                    font.pixelSize: 16
+                }
+
+                Rectangle {
+                    Layout.preferredWidth: clearLabel.implicitWidth + 18
+                    Layout.preferredHeight: 28
+                    radius: 14
+                    color: clearMouse.containsMouse ? root.alpha(root.winAccent, 0.16) : "transparent"
+
+                    WinSubLabel {
+                        id: clearLabel
+                        anchors.centerIn: parent
+                        text: "すべてクリア"
+                        color: root.winAccent2
+                        font.pixelSize: 12
+                        font.weight: Font.Bold
+                    }
+
+                    MouseArea {
+                        id: clearMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.clearNotifications()
+                    }
+                }
+            }
+
+            WinCard {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 214
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    anchors.margins: 10
+                    spacing: 8
+
+                    Repeater {
+                        model: Math.min(notificationModel.count, 3)
+                        WinActionRow {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 58
+                            iconName: "bell"
+                            title: notificationModel.get(index).summary
+                            subtitle: notificationModel.get(index).body.length > 0 ? notificationModel.get(index).body : notificationModel.get(index).app
+                            accent: index === 0
+                            showArrow: false
+                            onClicked: root.dismissNotification(notificationModel.get(index).id)
+                            Text {
+                                anchors.right: parent.right
+                                anchors.rightMargin: 34
+                                anchors.top: parent.top
+                                anchors.topMargin: 12
+                                text: notificationModel.get(index).timeText
+                                color: root.winAccent2
+                                font.family: root.monoFont
+                                font.pixelSize: 11
+                            }
+                            Rectangle {
+                                anchors.right: parent.right
+                                anchors.rightMargin: 14
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: 7
+                                height: 7
+                                radius: 4
+                                color: root.winAccent2
+                            }
+                        }
+                    }
+
+                    WinActionRow {
+                        visible: notificationModel.count <= 0
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 58
+                        iconName: "bell"
+                        title: "通知なし"
+                        subtitle: "新しい通知はありません"
+                        showArrow: false
+                    }
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.topMargin: 4
+
+                WinLabel {
+                    Layout.fillWidth: true
+                    text: "Bluetooth デバイス"
+                    font.pixelSize: 16
+                }
+
+                WinSubLabel {
+                    text: "ペアリング済みデバイス"
+                    color: root.winAccent2
+                    font.pixelSize: 11
+                    font.weight: Font.Bold
+                }
+            }
+
+            WinCard {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 204
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    anchors.margins: 10
+                    spacing: 7
+
+                    Repeater {
+                        model: Math.min(root.bluetoothDeviceCount(), 3)
+                        WinActionRow {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 56
+                            iconName: root.bluetoothDeviceAt(index).iconName
+                            title: root.bluetoothDeviceAt(index).name
+                            subtitle: root.bluetoothDeviceAt(index).detail
+                            accent: root.bluetoothDeviceAt(index).active
+                            showArrow: false
+                            onClicked: {
+                                const item = root.bluetoothDeviceAt(index)
+                                root.setBluetoothDeviceConnection(item.address, item.active)
+                            }
+                            Text {
+                                anchors.right: batteryGlyph.left
+                                anchors.rightMargin: 12
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: root.bluetoothDeviceAt(index).active ? "ON" : ""
+                                color: root.ink
+                                font.family: root.monoFont
+                                font.pixelSize: 12
+                            }
+                            PopupIcon {
+                                id: batteryGlyph
+                                anchors.right: menuDots.left
+                                anchors.rightMargin: 12
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: 24
+                                height: 16
+                                iconName: "battery"
+                                lineColor: root.inkSoft
+                            }
+                            Text {
+                                id: menuDots
+                                anchors.right: parent.right
+                                anchors.rightMargin: 13
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: "⋮"
+                                color: root.inkSoft
+                                font.pixelSize: 18
+                            }
+                        }
+                    }
+
+                    WinActionRow {
+                        visible: root.bluetoothDeviceCount() <= 0
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 56
+                        iconName: "bluetooth"
+                        title: root.bluetoothIsAvailable ? "デバイスなし" : "Bluetooth unavailable"
+                        subtitle: root.bluetoothIsPowered ? "pair a device" : "powered off"
+                        showArrow: false
+                        onClicked: root.toggleBluetoothPower()
+                    }
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.topMargin: 4
+
+                WinLabel {
+                    Layout.fillWidth: true
+                    text: "電源とバッテリー"
+                    font.pixelSize: 16
+                }
+
+                WinSubLabel {
+                    text: "電源モード: " + root.powerProfile
+                    color: root.winAccent2
+                    font.pixelSize: 11
+                    font.weight: Font.Bold
+                }
+            }
+
+            WinCard {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 150
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.margins: 18
+                    spacing: 18
+
+                    PopupIcon {
+                        Layout.preferredWidth: 56
+                        Layout.preferredHeight: 86
+                        iconName: "battery"
+                        lineColor: root.winAccent2
+                    }
+
+                    ColumnLayout {
+                        Layout.preferredWidth: 114
+                        spacing: 2
+
+                        Text {
+                            text: root.batteryText()
+                            color: root.ink
+                            font.family: root.monoFont
+                            font.pixelSize: 42
+                            font.weight: Font.Light
+                        }
+
+                        WinSubLabel {
+                            text: root.batteryAvailable()
+                                ? (root.batteryStateText + (root.batteryTimeText.length > 0 ? " · " + root.batteryTimeText : ""))
+                                : (root.acOnline ? "AC connected" : "battery unavailable")
+                            color: root.winAccent2
+                        }
+                    }
+
+                    WinCard {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        color: root.alpha(root.winCardHover, 0.30)
+
+                        ColumnLayout {
+                            anchors.fill: parent
+                            anchors.margins: 10
+                            spacing: 4
+
+                            WinSubLabel {
+                                Layout.fillWidth: true
+                                text: "バッテリー使用量（過去 24 時間）"
+                                color: root.winAccent2
+                                font.weight: Font.Bold
+                            }
+
+                            BatteryChart {
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                            }
+                        }
+                    }
+                }
+            }
+
+            GridLayout {
+                Layout.fillWidth: true
+                columns: 4
+                columnSpacing: 10
+                rowSpacing: 10
+                Repeater {
+                    model: [["battery", "省電力モード"], ["moon", "夜間モード"], ["sun", "画面の明るさ"], ["settings", "設定"]]
+                    WinIconTile {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 96
+                        iconName: modelData[0]
+                        label: modelData[1]
+                        active: index === 0 ? root.powerProfile === "power-saver" : (index === 1 ? root.nightLightEnabled : false)
+                        onClicked: {
+                            if (index === 0)
+                                root.togglePowerSaver()
+                            else if (index === 1)
+                                root.toggleNightLight()
+                            else if (index === 2)
+                                root.openDisplaySettings()
+                            else
+                                root.openSettings("powerdevilprofilesconfig")
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    component BatteryChart: Canvas {
+        id: batteryChart
+
+        Connections {
+            target: root
+            function onBatteryDeviceChanged() { batteryChart.requestPaint() }
+            function onBatteryStateTextChanged() { batteryChart.requestPaint() }
+        }
+
+        onPaint: {
+            const ctx = getContext("2d")
+            ctx.reset()
+            ctx.clearRect(0, 0, width, height)
+            ctx.strokeStyle = root.alpha(root.winAccent2, 0.88)
+            ctx.lineWidth = 2
+            ctx.beginPath()
+            const current = root.batteryAvailable() ? root.batteryPercent() : 0.0
+            const charging = root.batteryStateText.toLowerCase().indexOf("charg") >= 0
+            var pts = []
+            for (let i = 0; i < 11; i += 1) {
+                const t = i / 10
+                const slope = charging ? (t - 1) * 0.18 : (1 - t) * 0.18
+                pts.push(Math.max(0.04, Math.min(1, current + slope)))
+            }
+            for (let i = 0; i < pts.length; i += 1) {
+                const x = i * width / Math.max(1, pts.length - 1)
+                const y = height - pts[i] * height
+                if (i === 0) ctx.moveTo(x, y)
+                else ctx.lineTo(x, y)
+            }
+            ctx.stroke()
+        }
+    }
+
+    component AudioBars: Canvas {
+        id: audioBars
+
+        Timer {
+            interval: 140
+            running: audioBars.visible
+            repeat: true
+            onTriggered: audioBars.requestPaint()
+        }
+
+        onWidthChanged: requestPaint()
+        onHeightChanged: requestPaint()
+
+        onPaint: {
+            const ctx = getContext("2d")
+            ctx.reset()
+            ctx.clearRect(0, 0, width, height)
+            const count = 28
+            const gap = 5
+            const barW = Math.max(3, (width - gap * (count - 1)) / count)
+            for (let i = 0; i < count; i += 1) {
+                const seed = (i * 37 + Math.floor(Date.now() / 140) * 11) % 100
+                const h = Math.max(8, height * (0.18 + (seed / 100) * 0.72))
+                ctx.fillStyle = i % 3 === 0 ? root.winAccent2 : root.winAccent
+                roundRect(ctx, i * (barW + gap), height - h, barW, h, barW / 2)
+                ctx.fill()
+            }
         }
     }
 
@@ -1620,76 +3187,167 @@ Item {
 
         ColumnLayout {
             anchors.fill: parent
-            spacing: 11
+            spacing: 18
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 12
+
+                Repeater {
+                    model: [["すべて", "apps"], ["アプリ", "apps"], ["ファイル", "files"], ["設定", "settings"], ["Web", "apps"], ["ドキュメント", "files"], ["画像", "files"], ["フォルダー", "files"]]
+                    Rectangle {
+                        Layout.preferredWidth: Math.max(66, tabLabel.implicitWidth + 26)
+                        Layout.preferredHeight: 32
+                        radius: 16
+                        color: index === 0 || root.searchMode === modelData[1] ? root.alpha(root.winAccent, 0.72) : "transparent"
+                        border.width: index === 0 || root.searchMode === modelData[1] ? 0 : 1
+                        border.color: root.winLine
+                        Text {
+                            id: tabLabel
+                            anchors.centerIn: parent
+                            text: modelData[0]
+                            color: index === 0 || root.searchMode === modelData[1] ? "white" : root.inkSoft
+                            font.family: root.uiFont
+                            font.pixelSize: 12
+                            font.weight: Font.Bold
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.setSearchMode(modelData[1])
+                        }
+                    }
+                }
+            }
 
             SearchBox {
                 id: searchBox
 
                 Layout.fillWidth: true
-                Layout.preferredHeight: 42
+                Layout.preferredHeight: 56
             }
 
-            HeaderText {
+            WinSubLabel {
                 Layout.fillWidth: true
-                text: root.searchQuery.length > 0 ? "アプリ" : "最近のアプリ"
-            }
-
-            Repeater {
-                model: root.searchResults
-
-                SearchResultRow {
-                    Layout.fillWidth: true
-                    entry: modelData
-                    selected: index === root.searchSelectedIndex
-                    onClicked: root.launchSearchEntry(entry)
-                }
-            }
-
-            Text {
-                visible: root.searchResults.length <= 0
-                Layout.fillWidth: true
-                Layout.preferredHeight: 78
-                text: "見つかりません"
-                color: root.inkSoft
-                horizontalAlignment: Text.AlignHCenter
-                verticalAlignment: Text.AlignVCenter
-                font.family: root.uiFont
+                text: "最近の検索"
                 font.pixelSize: 12
-                font.weight: Font.DemiBold
-            }
-
-            DividerLine {
-                Layout.fillWidth: true
-                Layout.topMargin: 2
-                Layout.bottomMargin: 2
-            }
-
-            HeaderText {
-                Layout.fillWidth: true
-                text: "カテゴリ"
             }
 
             RowLayout {
                 Layout.fillWidth: true
                 spacing: 10
+                Repeater {
+                    model: ["コントロールパネル", "システム情報", "壁紙", "ネットワーク設定", "電源オプション"]
+                    Rectangle {
+                        Layout.preferredWidth: chipText.implicitWidth + 24
+                        Layout.preferredHeight: 30
+                        radius: 15
+                        color: root.alpha(root.winCard, 0.42)
+                        border.width: 1
+                        border.color: root.winLine
+                        Text { id: chipText; anchors.centerIn: parent; text: modelData; color: root.ink; font.family: root.uiFont; font.pixelSize: 11; font.weight: Font.DemiBold }
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                root.searchQuery = modelData
+                                root.rebuildSearch()
+                            }
+                        }
+                    }
+                }
+            }
 
-                PopupChip {
-                    text: "アプリ"
-                    active: root.searchMode === "apps"
-                    onClicked: root.setSearchMode("apps")
+            WinSubLabel {
+                Layout.fillWidth: true
+                text: "クイック結果"
+                font.pixelSize: 12
+            }
+
+            GridLayout {
+                Layout.fillWidth: true
+                columns: 3
+                columnSpacing: 10
+                rowSpacing: 10
+                Repeater {
+                    model: [
+                        ["display", "コントロールパネル", "システム"],
+                        ["folder", "エクスプローラー", "ファイル エクスプローラー"],
+                        ["box", "デバイス マネージャー", "コントロール パネル"],
+                        ["settings", "設定", "システム設定"],
+                        ["display", "タスク マネージャー", "システム"],
+                        ["drive", "ディスクのクリーンアップ", "システム"]
+                    ]
+                    WinActionRow {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 62
+                        iconName: modelData[0]
+                        title: modelData[1]
+                        subtitle: modelData[2]
+                        accent: index === 0
+                        onClicked: {
+                            if (modelData[0] === "settings" || modelData[0] === "display")
+                                root.openSettings("")
+                            else if (modelData[0] === "folder")
+                                root.openPath(root.homeDir)
+                            else
+                                root.openFileSearch()
+                        }
+                    }
+                }
+            }
+
+            WinSubLabel {
+                Layout.fillWidth: true
+                text: "アプリ・ファイルの候補"
+                font.pixelSize: 12
+            }
+
+            GridLayout {
+                Layout.fillWidth: true
+                columns: 2
+                columnSpacing: 8
+                rowSpacing: 8
+
+                Repeater {
+                    model: root.searchResults.length > 0 ? root.searchResults : []
+
+                    SearchResultRow {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 56
+                        entry: modelData
+                        selected: index === root.searchSelectedIndex
+                        onClicked: root.launchSearchEntry(entry)
+                    }
                 }
 
-                PopupChip {
-                    text: "設定"
-                    active: root.searchMode === "settings"
-                    onClicked: root.setSearchMode("settings")
+                Repeater {
+                    model: root.searchResults.length > 0 ? [] : [["browser", "Microsoft Edge", "アプリ"], ["settings", "設定", "アプリ"], ["memo", "企画書_最終版.pptx", "ドキュメント"], ["memo", "週次レポート.xlsx", "ドキュメント"]]
+                    WinActionRow {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 56
+                        iconName: modelData[0]
+                        title: modelData[1]
+                        subtitle: modelData[2]
+                        onClicked: {
+                            if (modelData[0] === "browser")
+                                root.browserCommand("new-window")
+                            else if (modelData[0] === "settings")
+                                root.openSettings("")
+                            else
+                                root.openFileSearch()
+                        }
+                    }
                 }
+            }
 
-                PopupChip {
-                    text: "ファイル"
-                    active: root.searchMode === "files"
-                    onClicked: root.setSearchMode("files")
-                }
+            Item { Layout.fillHeight: true }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 8
+                WinSubLabel { Layout.fillWidth: true; text: "ヒント:「設定を開く」と入力して設定をすばやく開けます。" }
+                WinSubLabel { text: "詳細検索を開く ›"; color: root.winAccent2; font.weight: Font.Bold }
             }
         }
 
@@ -1713,11 +3371,11 @@ Item {
     component VolumeView: Item {
         ColumnLayout {
             anchors.fill: parent
-            spacing: 18
+            spacing: 16
 
             RowLayout {
                 Layout.fillWidth: true
-                spacing: 12
+                spacing: 10
 
                 PopupIcon {
                     Layout.preferredWidth: 22
@@ -1728,14 +3386,25 @@ Item {
 
                 TitleText {
                     Layout.fillWidth: true
-                    text: "ボリューム"
+                    text: "サウンド"
                     entryDelay: 45
                 }
             }
 
+            Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: root.winLine }
+
+            WinSubLabel { Layout.fillWidth: true; text: "マスター音量"; color: root.ink; font.pixelSize: 12; font.weight: Font.Bold }
+
             RowLayout {
                 Layout.fillWidth: true
                 spacing: 14
+
+                PopupIcon {
+                    Layout.preferredWidth: 20
+                    Layout.preferredHeight: 20
+                    iconName: root.muted ? "volume-muted" : "volume"
+                    lineColor: root.ink
+                }
 
                 SliderBar {
                     Layout.fillWidth: true
@@ -1755,34 +3424,69 @@ Item {
                 }
             }
 
-            HeaderText {
-                Layout.fillWidth: true
-                text: "出力デバイス"
-            }
+            Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: root.winLine }
+
+            WinSubLabel { Layout.fillWidth: true; text: "出力デバイス"; color: root.ink; font.pixelSize: 12; font.weight: Font.Bold }
 
             SelectRow {
                 Layout.fillWidth: true
-                text: "スピーカー (Realtek(R) Audio)"
+                text: root.audioOutputName
+                onClicked: root.openAudioSettings()
             }
 
-            Item {
-                Layout.fillHeight: true
+            Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: root.winLine }
+
+            WinSubLabel { Layout.fillWidth: true; text: "マイク音量"; color: root.ink; font.pixelSize: 12; font.weight: Font.Bold }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 12
+
+                PopupIcon { Layout.preferredWidth: 20; Layout.preferredHeight: 20; iconName: "memo"; lineColor: root.ink }
+                SliderBar {
+                    Layout.fillWidth: true
+                    value: root.micVolumePercent
+                    entryDelay: 140
+                    onMoved: function(value) {
+                        root.setMicVolume(value)
+                    }
+                }
+                Text { text: Math.round(root.micVolumePercent * 100) + "%"; color: root.inkSoft; font.family: root.monoFont; font.pixelSize: 13 }
             }
 
             RowLayout {
                 Layout.fillWidth: true
                 spacing: 12
 
-                HeaderText {
-                    Layout.fillWidth: true
-                    text: "ミュート"
+                PopupIcon { Layout.preferredWidth: 20; Layout.preferredHeight: 20; iconName: "settings"; lineColor: root.inkSoft }
+                WinLabel { Layout.fillWidth: true; text: root.audioInputName.length > 0 ? root.audioInputName : "マイクをミュート"; font.pixelSize: 12 }
+                SoftToggle {
+                    checked: root.micMuted
+                    entryDelay: 180
+                    onClicked: root.toggleMicMute()
                 }
+            }
 
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 12
+
+                PopupIcon { Layout.preferredWidth: 20; Layout.preferredHeight: 20; iconName: root.muted ? "volume-muted" : "volume"; lineColor: root.inkSoft }
+                WinLabel { Layout.fillWidth: true; text: "出力をミュート"; font.pixelSize: 12 }
                 SoftToggle {
                     checked: root.muted
-                    entryDelay: 180
+                    entryDelay: 195
                     onClicked: root.toggleMute()
                 }
+            }
+
+            Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: root.winLine }
+
+            WinSubLabel { Layout.fillWidth: true; text: "オーディオ ビジュアライザー"; color: root.ink; font.pixelSize: 12; font.weight: Font.Bold }
+
+            AudioBars {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
             }
         }
     }
@@ -1790,14 +3494,22 @@ Item {
     component WifiView: Item {
         ColumnLayout {
             anchors.fill: parent
-            spacing: 13
+            spacing: 12
 
             RowLayout {
                 Layout.fillWidth: true
+                spacing: 10
+
+                PopupIcon {
+                    Layout.preferredWidth: 24
+                    Layout.preferredHeight: 24
+                    iconName: "wifi"
+                    lineColor: root.ink
+                }
 
                 TitleText {
                     Layout.fillWidth: true
-                    text: "インターネット"
+                    text: "ネットワーク"
                     entryDelay: 40
                 }
 
@@ -1808,93 +3520,77 @@ Item {
                 }
             }
 
-            HeaderText {
+            WinSubLabel {
                 Layout.fillWidth: true
-                text: "接続中のネットワーク"
+                text: root.wifiEnabled ? "接続中" : "Wi-Fi オフ"
+                color: root.ink
+                font.weight: Font.Bold
             }
 
             ConnectedWifiCard {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 66
+                Layout.preferredHeight: 86
                 ssid: root.activeWifi() ? root.activeWifi().ssid : "ネットワークなし"
                 signal: root.activeWifi() ? root.activeWifi().signal : 0
                 secure: root.activeWifi() ? root.activeWifi().secure : false
             }
 
-            HeaderText {
+            WinSubLabel {
                 Layout.fillWidth: true
                 Layout.topMargin: 4
                 text: "利用可能なネットワーク"
+                color: root.ink
+                font.weight: Font.Bold
             }
 
-            ColumnLayout {
+            WinCard {
                 Layout.fillWidth: true
-                spacing: 0
+                Layout.preferredHeight: 210
 
-                Repeater {
-                    model: Math.min(wifiModel.count, 4)
+                ColumnLayout {
+                    anchors.fill: parent
+                    anchors.margins: 8
+                    spacing: 0
 
-                    WifiRow {
-                        Layout.fillWidth: true
-                        name: wifiModel.get(index).ssid
-                        bars: root.signalBars(wifiModel.get(index).signal)
-                        secure: wifiModel.get(index).secure
-                        active: wifiModel.get(index).active
-                        entryDelay: 140 + index * 38
-                        onClicked: root.connectWifi(name)
+                    Repeater {
+                        model: Math.min(wifiModel.count, 4)
+
+                        WifiRow {
+                            Layout.fillWidth: true
+                            name: wifiModel.get(index).ssid
+                            bars: root.signalBars(wifiModel.get(index).signal)
+                            secure: wifiModel.get(index).secure
+                            active: wifiModel.get(index).active
+                            entryDelay: 140 + index * 38
+                            onClicked: root.connectWifi(name)
+                        }
                     }
                 }
             }
 
-            Item {
-                Layout.fillHeight: true
+            WinActionRow {
+                Layout.fillWidth: true
+                iconName: "wifi"
+                title: "その他のネットワークを表示"
+                onClicked: root.openNetworkSettings()
             }
 
-            DividerLine {
+            GridLayout {
                 Layout.fillWidth: true
+                columns: 2
+                columnSpacing: 10
+                rowSpacing: 10
+                WinIconTile { Layout.fillWidth: true; Layout.preferredHeight: 92; iconName: "wifi"; label: "モバイル ホットスポット"; onClicked: root.toggleHotspot() }
+                WinIconTile { Layout.fillWidth: true; Layout.preferredHeight: 92; iconName: "play"; label: "機内モード"; active: !root.wifiEnabled; onClicked: root.toggleAirplaneMode() }
             }
 
-            Rectangle {
+            WinActionRow {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 38
-                radius: 9
-                color: settingsMouse.containsMouse ? root.alpha(root.pink, 0.10) : "transparent"
-
-                RowLayout {
-                    anchors.fill: parent
-                    anchors.leftMargin: 10
-                    anchors.rightMargin: 6
-                    spacing: 12
-
-                    Text {
-                        Layout.fillWidth: true
-                        text: "ネットワーク設定"
-                        color: root.ink
-                        font.family: root.uiFont
-                        font.pixelSize: 12
-                        font.weight: Font.DemiBold
-                    }
-
-                    Text {
-                        text: "›"
-                        color: root.lilac
-                        font.pixelSize: 24
-                        font.family: root.uiFont
-                    }
-                }
-
-                MouseArea {
-                    id: settingsMouse
-
-                    anchors.fill: parent
-                    acceptedButtons: Qt.LeftButton
-                    hoverEnabled: true
-                    preventStealing: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: function(mouse) {
-                        mouse.accepted = true
-                        root.runCommand("if command -v nm-connection-editor >/dev/null 2>&1; then nm-connection-editor >/dev/null 2>&1 & elif command -v systemsettings >/dev/null 2>&1; then systemsettings kcm_networkmanagement >/dev/null 2>&1 & fi")
-                    }
+                iconName: "settings"
+                title: "ネットワーク設定"
+                subtitle: "Wi-Fi、機内モード、プロキシ、データ使用状況などを管理します"
+                onClicked: {
+                    root.runCommand("if command -v nm-connection-editor >/dev/null 2>&1; then nm-connection-editor >/dev/null 2>&1 & elif command -v systemsettings >/dev/null 2>&1; then systemsettings kcm_networkmanagement >/dev/null 2>&1 & fi")
                 }
             }
         }
@@ -1903,7 +3599,7 @@ Item {
     component BrightnessView: Item {
         ColumnLayout {
             anchors.fill: parent
-            spacing: 16
+            spacing: 18
 
             RowLayout {
                 Layout.fillWidth: true
@@ -1921,17 +3617,28 @@ Item {
 
                 TitleText {
                     Layout.fillWidth: true
-                    text: "明るさ"
+                    text: "ディスプレイ"
                     entryDelay: 50
                 }
             }
 
-            SliderBar {
+            RowLayout {
                 Layout.fillWidth: true
-                value: root.brightnessPercent
-                entryDelay: 80
-                onMoved: function(value) {
-                    root.setBrightness(value)
+                WinLabel { Layout.fillWidth: true; text: "明るさ"; font.pixelSize: 13 }
+                WinLabel { text: Math.round(root.brightnessPercent * 100) + "%"; font.pixelSize: 13 }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 12
+                PopupIcon { Layout.preferredWidth: 22; Layout.preferredHeight: 22; iconName: "sun"; lineColor: root.inkSoft }
+                SliderBar {
+                    Layout.fillWidth: true
+                    value: root.brightnessPercent
+                    entryDelay: 80
+                    onMoved: function(value) {
+                        root.setBrightness(value)
+                    }
                 }
             }
 
@@ -1944,26 +3651,10 @@ Item {
                 Layout.fillWidth: true
                 spacing: 10
 
-                PopupIcon {
-                    Layout.preferredWidth: 22
-                    Layout.preferredHeight: 22
-                    iconName: "sun"
-                    entryDelay: 110
-                    entryRotate: -12
-                    entryStartScale: 0.85
-                    entryPeakScale: 1.025
-                }
-
                 TitleText {
                     Layout.fillWidth: true
-                    text: "ナイトライト"
+                    text: "色の温かみ"
                     entryDelay: 120
-                }
-
-                SoftToggle {
-                    checked: root.nightLightEnabled
-                    entryDelay: 125
-                    onClicked: root.toggleNightLight()
                 }
             }
 
@@ -1982,12 +3673,28 @@ Item {
 
                 SmallText {
                     Layout.fillWidth: true
-                    text: "暖色"
+                    text: "寒色"
                 }
 
                 SmallText {
-                    text: "寒色"
+                    text: "暖色"
                 }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                WinLabel { Layout.fillWidth: true; text: "ナイトライト"; font.pixelSize: 13 }
+                SoftToggle {
+                    checked: root.nightLightEnabled
+                    entryDelay: 180
+                    onClicked: root.toggleNightLight()
+                }
+            }
+
+            WinSubLabel {
+                Layout.fillWidth: true
+                text: "目の負担を軽減するために画面を暖色に調整します"
+                wrapMode: Text.WordWrap
             }
 
             DividerLine {
@@ -1995,155 +3702,78 @@ Item {
                 Layout.topMargin: 4
             }
 
+            TitleText {
+                Layout.fillWidth: true
+                text: "ディスプレイモード"
+                entryDelay: 215
+            }
+
             RowLayout {
                 Layout.fillWidth: true
                 spacing: 10
 
-                PopupIcon {
-                    Layout.preferredWidth: 22
-                    Layout.preferredHeight: 22
-                    iconName: "display"
-                    entryDelay: 210
+                ModeButton {
+                    Layout.fillWidth: true
+                    label: "標準"
+                    active: true
+                    entryDelay: 240
+                    onClicked: {
+                        root.brightnessPercent = 0.70
+                        root.runCommand("brightnessctl set 70% >/dev/null 2>&1; hyprctl hyprsunset identity >/dev/null 2>&1 || true")
+                    }
                 }
 
-                TitleText {
+                ModeButton {
                     Layout.fillWidth: true
-                    text: "ディスプレイモード"
-                    entryDelay: 215
+                    label: "鮮やか"
+                    entryDelay: 280
+                    onClicked: {
+                        root.brightnessPercent = 0.90
+                        root.runCommand("brightnessctl set 90% >/dev/null 2>&1; hyprctl hyprsunset temperature 6200 >/dev/null 2>&1 || true")
+                    }
+                }
+
+                ModeButton {
+                    Layout.fillWidth: true
+                    label: "映画"
+                    entryDelay: 320
+                    onClicked: {
+                        root.brightnessPercent = 0.45
+                        root.runCommand("brightnessctl set 45% >/dev/null 2>&1; hyprctl hyprsunset temperature 4200 >/dev/null 2>&1 || true")
+                    }
                 }
             }
+
+            WinSubLabel { Layout.fillWidth: true; text: "プレビュー"; color: root.ink; font.weight: Font.Bold; Layout.topMargin: 4 }
 
             RowLayout {
                 Layout.fillWidth: true
-                spacing: 7
-
-                ModeButton {
-                    Layout.fillWidth: true
-                    label: "明るさ優先"
-                    active: true
-                    entryDelay: 240
-                }
-
-                ModeButton {
-                    Layout.fillWidth: true
-                    label: "バランス"
-                    entryDelay: 280
-                }
-
-                ModeButton {
-                    Layout.fillWidth: true
-                    label: "省エネ"
-                    entryDelay: 320
+                spacing: 10
+                Repeater {
+                    model: [
+                        root.wallpaperDir + "/static/WPP_blue.png",
+                        root.wallpaperDir + "/static/wp15708544.jpg",
+                        root.wallpaperDir + "/static/wp12419427-tokyo-night-4k-wallpapers.jpg"
+                    ]
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 86
+                        radius: 10
+                        clip: true
+                        border.width: index === 0 ? 2 : 1
+                        border.color: index === 0 ? root.winAccent2 : root.winLine
+                        Image { anchors.fill: parent; source: modelData; fillMode: Image.PreserveAspectCrop; asynchronous: true }
+                    }
                 }
             }
+
+            WinActionRow { Layout.fillWidth: true; iconName: "settings"; title: "詳細ディスプレイ設定"; subtitle: root.brightnessDevice; onClicked: root.openDisplaySettings() }
         }
     }
 
     component NotificationsView: Item {
-        ColumnLayout {
+        BatteryView {
             anchors.fill: parent
-            spacing: 12
-
-            RowLayout {
-                Layout.fillWidth: true
-
-                TitleText {
-                    Layout.fillWidth: true
-                    text: "通知"
-                    entryDelay: 40
-                }
-
-                Text {
-                    text: "すべて既読"
-                    color: root.inkSoft
-                    font.family: root.uiFont
-                    font.pixelSize: 11
-                    font.weight: Font.DemiBold
-
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: root.clearNotifications()
-                    }
-                }
-
-                PopupIcon {
-                    Layout.leftMargin: 9
-                    Layout.preferredWidth: 20
-                    Layout.preferredHeight: 20
-                    iconName: "settings"
-                }
-            }
-
-            Repeater {
-                model: Math.min(notificationModel.count, 3)
-
-                NotificationCard {
-                    Layout.fillWidth: true
-                    notificationId: notificationModel.get(index).id
-                    iconName: index === 0 ? "box" : (index === 1 ? "download" : "image")
-                    title: notificationModel.get(index).summary
-                    appName: notificationModel.get(index).app
-                    timeText: notificationModel.get(index).timeText
-                    body: notificationModel.get(index).body
-                    entryDelay: 120 + index * 42
-                    onDismissRequested: root.dismissNotification(notificationId)
-                }
-            }
-
-            Rectangle {
-                visible: notificationModel.count <= 0
-                Layout.fillWidth: true
-                Layout.preferredHeight: 96
-                radius: 10
-                color: root.card
-                border.width: 1
-                border.color: root.line
-
-                Text {
-                    anchors.centerIn: parent
-                    text: "通知はありません"
-                    color: root.inkSoft
-                    font.family: root.uiFont
-                    font.pixelSize: 12
-                    font.weight: Font.DemiBold
-                }
-            }
-
-            Item {
-                Layout.fillHeight: true
-            }
-
-            Rectangle {
-                Layout.fillWidth: true
-                Layout.preferredHeight: 118
-                radius: 10
-                color: root.alpha(root.card, 0.34)
-                border.width: 1
-                border.color: root.line
-
-                ColumnLayout {
-                    anchors.fill: parent
-                    anchors.margins: 12
-                    spacing: 12
-
-                    ToggleRow {
-                        Layout.fillWidth: true
-                        iconName: "moon"
-                        label: "集中モード"
-                    }
-
-                    DividerLine {
-                        Layout.fillWidth: true
-                    }
-
-                    ToggleRow {
-                        Layout.fillWidth: true
-                        iconName: "bell"
-                        label: "通知をミュート"
-                    }
-                }
-            }
         }
     }
 
@@ -2588,6 +4218,8 @@ Item {
 
         property string text: ""
         property int entryDelay: 130
+        property bool hovered: false
+        signal clicked()
 
         Layout.preferredHeight: 42
         radius: 8
@@ -2595,9 +4227,9 @@ Item {
         transform: Translate {
             y: root.stageTranslateY(row.entryDelay, 7)
         }
-        color: root.alpha(root.card, 0.38)
+        color: root.alpha(root.card, hovered ? 0.52 : 0.38)
         border.width: 1
-        border.color: root.line
+        border.color: hovered ? root.alpha(root.pink, 0.24) : root.line
 
         RowLayout {
             anchors.fill: parent
@@ -2626,6 +4258,20 @@ Item {
                 color: root.lilac
                 font.family: root.uiFont
                 font.pixelSize: 16
+            }
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            acceptedButtons: Qt.LeftButton
+            hoverEnabled: true
+            preventStealing: true
+            cursorShape: Qt.PointingHandCursor
+            onEntered: row.hovered = true
+            onExited: row.hovered = false
+            onClicked: function(mouse) {
+                mouse.accepted = true
+                row.clicked()
             }
         }
     }
@@ -2907,6 +4553,8 @@ Item {
         property string label: ""
         property bool active: false
         property int entryDelay: 240
+        property bool hovered: false
+        signal clicked()
 
         Layout.preferredHeight: 46
         radius: 7
@@ -2915,9 +4563,9 @@ Item {
         transform: Translate {
             y: root.stageTranslateY(modeButton.entryDelay, 8)
         }
-        color: active ? root.alpha(root.pink, 0.25) : root.alpha(root.card, 0.36)
+        color: active ? root.alpha(root.pink, hovered ? 0.34 : 0.25) : root.alpha(root.card, hovered ? 0.50 : 0.36)
         border.width: 1
-        border.color: active ? root.alpha(root.pink, 0.30) : root.line
+        border.color: active ? root.alpha(root.pink, 0.30) : (hovered ? root.alpha(root.pink, 0.20) : root.line)
 
         ColumnLayout {
             anchors.centerIn: parent
@@ -2937,6 +4585,20 @@ Item {
                 font.family: root.uiFont
                 font.pixelSize: 9
                 font.weight: Font.Bold
+            }
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            acceptedButtons: Qt.LeftButton
+            hoverEnabled: true
+            preventStealing: true
+            cursorShape: Qt.PointingHandCursor
+            onEntered: modeButton.hovered = true
+            onExited: modeButton.hovered = false
+            onClicked: function(mouse) {
+                mouse.accepted = true
+                modeButton.clicked()
             }
         }
     }
@@ -3227,7 +4889,7 @@ Item {
                 ctx.moveTo(cx + s * 0.13, cy + s * 0.13)
                 ctx.lineTo(cx + s * 0.32, cy + s * 0.32)
                 ctx.stroke()
-            } else if (iconName === "volume" || iconName === "headphones") {
+            } else if (iconName === "volume" || iconName === "volume-muted" || iconName === "headphones") {
                 ctx.beginPath()
                 ctx.moveTo(s * 0.16, s * 0.43)
                 ctx.lineTo(s * 0.32, s * 0.43)
@@ -3240,6 +4902,14 @@ Item {
                 ctx.beginPath()
                 ctx.arc(s * 0.56, s * 0.50, s * 0.20, Math.PI * 1.68, Math.PI * 0.32)
                 ctx.stroke()
+                if (iconName === "volume-muted") {
+                    ctx.beginPath()
+                    ctx.moveTo(s * 0.72, s * 0.36)
+                    ctx.lineTo(s * 0.88, s * 0.64)
+                    ctx.moveTo(s * 0.88, s * 0.36)
+                    ctx.lineTo(s * 0.72, s * 0.64)
+                    ctx.stroke()
+                }
             } else if (iconName === "wifi") {
                 for (let i = 0; i < 3; i += 1) {
                     ctx.globalAlpha = 0.54 + i * 0.15
@@ -3341,6 +5011,14 @@ Item {
                 ctx.moveTo(s * 0.35, s * 0.55)
                 ctx.lineTo(s * 0.58, s * 0.55)
                 ctx.stroke()
+            } else if (iconName === "mail") {
+                roundRect(ctx, s * 0.20, s * 0.30, s * 0.60, s * 0.44, s * 0.05)
+                ctx.stroke()
+                ctx.beginPath()
+                ctx.moveTo(s * 0.23, s * 0.35)
+                ctx.lineTo(cx, s * 0.54)
+                ctx.lineTo(s * 0.77, s * 0.35)
+                ctx.stroke()
             } else if (iconName === "bluetooth") {
                 ctx.beginPath()
                 ctx.moveTo(cx, s * 0.18)
@@ -3354,6 +5032,110 @@ Item {
                 ctx.moveTo(cx, s * 0.50)
                 ctx.lineTo(s * 0.32, s * 0.66)
                 ctx.stroke()
+            } else if (iconName === "battery") {
+                roundRect(ctx, s * 0.24, s * 0.25, s * 0.46, s * 0.50, s * 0.06)
+                ctx.stroke()
+                roundRect(ctx, s * 0.38, s * 0.18, s * 0.18, s * 0.07, s * 0.03)
+                ctx.stroke()
+                roundRect(ctx, s * 0.31, s * 0.52, s * 0.32, s * 0.16, s * 0.03)
+                ctx.fill()
+            } else if (iconName === "clock") {
+                ctx.beginPath()
+                ctx.arc(cx, cy, s * 0.31, 0, Math.PI * 2)
+                ctx.stroke()
+                ctx.beginPath()
+                ctx.moveTo(cx, cy)
+                ctx.lineTo(cx, s * 0.32)
+                ctx.moveTo(cx, cy)
+                ctx.lineTo(s * 0.64, s * 0.58)
+                ctx.stroke()
+            } else if (iconName === "folder" || iconName === "home") {
+                ctx.beginPath()
+                ctx.moveTo(s * 0.18, s * 0.34)
+                ctx.lineTo(s * 0.38, s * 0.34)
+                ctx.lineTo(s * 0.46, s * 0.42)
+                ctx.lineTo(s * 0.82, s * 0.42)
+                ctx.lineTo(s * 0.82, s * 0.74)
+                ctx.lineTo(s * 0.18, s * 0.74)
+                ctx.closePath()
+                ctx.stroke()
+                if (iconName === "home") {
+                    ctx.beginPath()
+                    ctx.moveTo(s * 0.34, s * 0.56)
+                    ctx.lineTo(cx, s * 0.44)
+                    ctx.lineTo(s * 0.66, s * 0.56)
+                    ctx.stroke()
+                }
+            } else if (iconName === "drive") {
+                roundRect(ctx, s * 0.22, s * 0.36, s * 0.56, s * 0.30, s * 0.06)
+                ctx.stroke()
+                ctx.beginPath()
+                ctx.arc(s * 0.66, s * 0.51, s * 0.035, 0, Math.PI * 2)
+                ctx.fill()
+            } else if (iconName === "globe" || iconName === "language") {
+                ctx.beginPath()
+                ctx.arc(cx, cy, s * 0.32, 0, Math.PI * 2)
+                ctx.stroke()
+                ctx.beginPath()
+                ctx.moveTo(s * 0.18, cy)
+                ctx.lineTo(s * 0.82, cy)
+                ctx.moveTo(cx, s * 0.18)
+                ctx.bezierCurveTo(s * 0.38, s * 0.34, s * 0.38, s * 0.66, cx, s * 0.82)
+                ctx.moveTo(cx, s * 0.18)
+                ctx.bezierCurveTo(s * 0.62, s * 0.34, s * 0.62, s * 0.66, cx, s * 0.82)
+                ctx.stroke()
+            } else if (iconName === "user") {
+                ctx.beginPath()
+                ctx.arc(cx, s * 0.36, s * 0.13, 0, Math.PI * 2)
+                ctx.stroke()
+                ctx.beginPath()
+                ctx.arc(cx, s * 0.78, s * 0.28, Math.PI * 1.12, Math.PI * 1.88)
+                ctx.stroke()
+            } else if (iconName === "logout") {
+                roundRect(ctx, s * 0.22, s * 0.26, s * 0.38, s * 0.48, s * 0.05)
+                ctx.stroke()
+                ctx.beginPath()
+                ctx.moveTo(s * 0.48, cy)
+                ctx.lineTo(s * 0.80, cy)
+                ctx.moveTo(s * 0.68, s * 0.38)
+                ctx.lineTo(s * 0.80, cy)
+                ctx.lineTo(s * 0.68, s * 0.62)
+                ctx.stroke()
+            } else if (iconName === "palette") {
+                ctx.beginPath()
+                ctx.arc(cx, cy, s * 0.32, Math.PI * 0.15, Math.PI * 1.85)
+                ctx.quadraticCurveTo(s * 0.72, s * 0.84, s * 0.61, s * 0.60)
+                ctx.stroke()
+                for (let p = 0; p < 4; p += 1) {
+                    const a = Math.PI * (0.78 + p * 0.26)
+                    ctx.beginPath()
+                    ctx.arc(cx + Math.cos(a) * s * 0.18, cy + Math.sin(a) * s * 0.18, s * 0.025, 0, Math.PI * 2)
+                    ctx.fill()
+                }
+            } else if (iconName === "plus") {
+                ctx.beginPath()
+                ctx.moveTo(cx, s * 0.24)
+                ctx.lineTo(cx, s * 0.76)
+                ctx.moveTo(s * 0.24, cy)
+                ctx.lineTo(s * 0.76, cy)
+                ctx.stroke()
+            } else if (iconName === "play") {
+                ctx.beginPath()
+                ctx.moveTo(s * 0.34, s * 0.26)
+                ctx.lineTo(s * 0.74, cy)
+                ctx.lineTo(s * 0.34, s * 0.74)
+                ctx.closePath()
+                ctx.stroke()
+            } else if (iconName === "keyboard") {
+                roundRect(ctx, s * 0.18, s * 0.30, s * 0.64, s * 0.42, s * 0.05)
+                ctx.stroke()
+                for (let ky = 0; ky < 2; ky += 1) {
+                    for (let kx = 0; kx < 4; kx += 1) {
+                        ctx.beginPath()
+                        ctx.arc(s * (0.30 + kx * 0.13), s * (0.43 + ky * 0.14), s * 0.015, 0, Math.PI * 2)
+                        ctx.fill()
+                    }
+                }
             } else if (iconName === "box") {
                 roundRect(ctx, s * 0.24, s * 0.28, s * 0.52, s * 0.44, s * 0.05)
                 ctx.stroke()

@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+fc-list : family 2>/dev/null \
+  | sed 's/,.*//' \
+  | sed 's/^[[:space:]]*//' \
+  | grep -vx 'Arabic Newspaper' \
+  | sort -u \
+  | head -80

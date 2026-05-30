@@ -1,0 +1,174 @@
+#!/usr/bin/env bash
+set -u
+
+mode="${1:-all}"
+
+clean_field() {
+    printf '%s' "${1:-}" | tr '\n\r|' '   ' | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//'
+}
+
+age_label() {
+    local ts="${1:-0}"
+    local now diff
+    now="$(date +%s)"
+    ts="${ts%.*}"
+    [[ "$ts" =~ ^[0-9]+$ ]] || ts="$now"
+    diff=$((now - ts))
+    if (( diff < 60 )); then
+        printf 'now'
+    elif (( diff < 3600 )); then
+        printf '%dm' $((diff / 60))
+    elif (( diff < 86400 )); then
+        printf '%dh' $((diff / 3600))
+    else
+        printf '%dd' $((diff / 86400))
+    fi
+}
+
+icon_for_path() {
+    local path="${1,,}"
+    case "$path" in
+        *download*|*downloads*) printf 'download' ;;
+        *desktop*|*área*|*area*) printf 'display' ;;
+        *picture*|*imagem*|*image*|*.png|*.jpg|*.jpeg|*.webp|*.gif) printf 'image' ;;
+        *music*|*música*|*.mp3|*.flac|*.ogg|*.wav) printf 'volume' ;;
+        *video*|*.mp4|*.mkv|*.webm|*.mov) printf 'play' ;;
+        *document*|*documento*|*.pdf|*.txt|*.md|*.doc*|*.odt|*.ppt*|*.xls*) printf 'memo' ;;
+        *) printf 'folder' ;;
+    esac
+}
+
+wp_volume_line() {
+    local target="$1"
+    wpctl get-volume "$target" 2>/dev/null || true
+}
+
+wp_volume_value() {
+    awk '{ for (i = 1; i <= NF; i++) if ($i ~ /^[0-9]+(\.[0-9]+)?$/) { print $i; exit } }' <<<"${1:-}"
+}
+
+wp_muted_value() {
+    if [[ "${1:-}" == *MUTED* ]]; then
+        printf '1'
+    else
+        printf '0'
+    fi
+}
+
+wp_node_name() {
+    local target="$1"
+    wpctl inspect "$target" 2>/dev/null \
+        | awk -F' = ' '
+            /node.description|device.description|node.nick|media.name/ {
+                gsub(/^"/, "", $2)
+                gsub(/"$/, "", $2)
+                print $2
+                exit
+            }'
+}
+
+emit_audio() {
+    local sink_line source_line sink_vol source_vol sink_name source_name
+    sink_line="$(wp_volume_line '@DEFAULT_AUDIO_SINK@')"
+    source_line="$(wp_volume_line '@DEFAULT_AUDIO_SOURCE@')"
+    sink_vol="$(wp_volume_value "$sink_line")"
+    source_vol="$(wp_volume_value "$source_line")"
+    sink_name="$(wp_node_name '@DEFAULT_AUDIO_SINK@')"
+    source_name="$(wp_node_name '@DEFAULT_AUDIO_SOURCE@')"
+
+    printf 'AUDIO_SINK|%s|%s|%s\n' "${sink_vol:-0.60}" "$(wp_muted_value "$sink_line")" "$(clean_field "${sink_name:-Default output}")"
+    printf 'AUDIO_SOURCE|%s|%s|%s\n' "${source_vol:-0.00}" "$(wp_muted_value "$source_line")" "$(clean_field "${source_name:-Default input}")"
+}
+
+emit_files() {
+    local home_dir used size pct mount pct_num
+    home_dir="${HOME:-/home/shira}"
+    read -r used size pct mount < <(df -hP "$home_dir" 2>/dev/null | awk 'NR == 2 { print $3, $2, $5, $6 }')
+    pct_num="${pct%\%}"
+    [[ "$pct_num" =~ ^[0-9]+$ ]] || pct_num=0
+    printf 'DISK|%s / %s|%s|%s\n' "$(clean_field "${used:-0}")" "$(clean_field "${size:-0}")" "$(awk -v p="$pct_num" 'BEGIN { printf "%.3f", p / 100 }')" "$(clean_field "${mount:-$home_dir}")"
+
+    local dirs=(
+        "$home_dir/Downloads" "$home_dir/Documentos" "$home_dir/Documents"
+        "$home_dir/Desktop" "$home_dir/Área de trabalho"
+        "$home_dir/Pictures" "$home_dir/Imagens" "$home_dir/Music" "$home_dir/Música"
+        "$home_dir/Videos" "$home_dir/Vídeos"
+    )
+
+    {
+        for d in "${dirs[@]}"; do
+            [[ -d "$d" ]] || continue
+            find "$d" -mindepth 0 -maxdepth 2 -type d -printf '%T@|%p\n' 2>/dev/null
+        done
+    } | grep -v '/\.' | sort -t '|' -k1,1nr | awk -F'|' '!seen[$2]++ { print; if (++count >= 8) exit }' \
+        | while IFS='|' read -r ts path; do
+            [[ -n "${path:-}" ]] || continue
+            printf 'FOLDER|%s|%s|%s|%s\n' "$(icon_for_path "$path")" "$(clean_field "$(basename "$path")")" "$(age_label "$ts")" "$(clean_field "$path")"
+        done
+
+    {
+        for d in "${dirs[@]}"; do
+            [[ -d "$d" ]] || continue
+            find "$d" -mindepth 1 -maxdepth 3 -type f -printf '%T@|%p\n' 2>/dev/null
+        done
+    } | grep -v '/\.' | sort -t '|' -k1,1nr | awk -F'|' '!seen[$2]++ { print; if (++count >= 8) exit }' \
+        | while IFS='|' read -r ts path; do
+            [[ -n "${path:-}" ]] || continue
+            printf 'FILE|%s|%s|%s|%s\n' "$(icon_for_path "$path")" "$(clean_field "$(basename "$path")")" "$(age_label "$ts")" "$(clean_field "$path")"
+        done
+}
+
+emit_battery() {
+    local bat pct state time_text profile ac online
+    bat="$(upower -e 2>/dev/null | grep -m1 -E 'BAT|battery' || true)"
+    if [[ -n "$bat" ]]; then
+        pct="$(upower -i "$bat" 2>/dev/null | awk -F: '/percentage/ { gsub(/[%[:space:]]/, "", $2); print $2 / 100; exit }')"
+        state="$(upower -i "$bat" 2>/dev/null | awk -F: '/state/ { gsub(/^[[:space:]]+/, "", $2); print $2; exit }')"
+        time_text="$(upower -i "$bat" 2>/dev/null | awk -F: '/time to empty|time to full/ { gsub(/^[[:space:]]+/, "", $2); print $2; exit }')"
+    fi
+    if [[ -z "${pct:-}" || "$pct" == "0" ]]; then
+        for cap in /sys/class/power_supply/BAT*/capacity; do
+            [[ -r "$cap" ]] || continue
+            pct="$(awk '{ print $1 / 100 }' "$cap" 2>/dev/null)"
+            break
+        done
+    fi
+    if [[ -z "${state:-}" ]]; then
+        for status in /sys/class/power_supply/BAT*/status; do
+            [[ -r "$status" ]] || continue
+            state="$(cat "$status" 2>/dev/null)"
+            break
+        done
+    fi
+
+    ac="$(upower -e 2>/dev/null | grep -m1 -E 'line_power|AC' || true)"
+    if [[ -n "$ac" ]]; then
+        online="$(upower -i "$ac" 2>/dev/null | awk -F: '/online/ { gsub(/^[[:space:]]+/, "", $2); print $2; exit }')"
+    fi
+    if [[ -z "${online:-}" ]]; then
+        for ac_online in /sys/class/power_supply/A*/online; do
+            [[ -r "$ac_online" ]] || continue
+            online="$(cat "$ac_online" 2>/dev/null)"
+            break
+        done
+    fi
+
+    profile="$(powerprofilesctl get 2>/dev/null || true)"
+    printf 'BATTERY|%s|%s|%s\n' "${pct:-0}" "$(clean_field "${state:-unknown}")" "$(clean_field "${time_text:-}")"
+    printf 'POWER|%s|%s\n' "$(clean_field "${profile:-unknown}")" "$(clean_field "${online:-unknown}")"
+}
+
+case "$mode" in
+    audio) emit_audio ;;
+    files) emit_files ;;
+    battery) emit_battery ;;
+    all)
+        emit_audio
+        emit_files
+        emit_battery
+        ;;
+    *)
+        printf 'unknown mode: %s\n' "$mode" >&2
+        exit 2
+        ;;
+esac

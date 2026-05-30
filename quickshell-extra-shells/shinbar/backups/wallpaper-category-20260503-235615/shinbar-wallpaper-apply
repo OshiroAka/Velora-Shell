@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+kind="${1:-}"
+path="${2:-}"
+preview="${3:-}"
+transition="${4:-fade}"
+apply_pywal="${5:-true}"
+
+[ -n "$kind" ] || exit 2
+[ -n "$path" ] || exit 2
+
+theme_path="$path"
+[ -n "$preview" ] && [ -f "$preview" ] && theme_path="$preview"
+
+apply_theme() {
+  local img="$1"
+  [ "$apply_pywal" = "true" ] || return 0
+  [ -f "$img" ] || return 0
+  mkdir -p "$HOME/.cache/shinbar"
+  printf '%s\n' "$img" > "$HOME/.cache/shinbar/current_wallpaper"
+  wal -i "$img" -n -q >/dev/null 2>&1 || true
+  "$HOME/.config/quickshell/shinbar/scripts/shinbar-pywal-bridge" --send-once >/dev/null 2>&1 || true
+}
+
+case "$kind" in
+  static)
+    if ! pgrep -x awww-daemon >/dev/null 2>&1; then
+      nohup awww-daemon -q >/dev/null 2>&1 &
+      sleep 0.15
+    fi
+    awww img "$path" --transition-type "$transition" --transition-duration 1 --transition-fps 60
+    apply_theme "$path"
+    (sleep 0.85; pkill -x mpvpaper >/dev/null 2>&1 || true; pkill -x linux-wallpaperengine >/dev/null 2>&1 || true) >/dev/null 2>&1 &
+    ;;
+  live)
+    apply_theme "$theme_path"
+    monitors="$(hyprctl monitors -j 2>/dev/null | python3 -c 'import json,sys; data=json.load(sys.stdin); print(" ".join(m.get("name","") for m in data if m.get("name")))' 2>/dev/null || true)"
+    [ -n "$monitors" ] || monitors="eDP-1"
+    pkill -x mpvpaper >/dev/null 2>&1 || true
+    sleep 0.10
+    for mon in $monitors; do
+      nohup mpvpaper -o 'no-audio loop-file=inf panscan=1.0 video-unscaled=no hwdec=auto-safe scale=bilinear cscale=bilinear dscale=bilinear interpolation=no deband=no' "$mon" "$path" >/tmp/shinbar-mpvpaper.log 2>&1 &
+    done
+    (sleep 0.85; pkill -x linux-wallpaperengine >/dev/null 2>&1 || true; awww kill >/dev/null 2>&1 || true) >/dev/null 2>&1 &
+    ;;
+  engine)
+    apply_theme "$theme_path"
+    pkill -x linux-wallpaperengine >/dev/null 2>&1 || true
+    sleep 0.18
+    nohup linux-wallpaperengine --screen-root eDP-1 --bg "$path" >/tmp/shinbar-wallpaperengine.log 2>&1 &
+    (sleep 0.85; pkill -x mpvpaper >/dev/null 2>&1 || true; awww kill >/dev/null 2>&1 || true) >/dev/null 2>&1 &
+    ;;
+  *)
+    exit 2
+    ;;
+esac

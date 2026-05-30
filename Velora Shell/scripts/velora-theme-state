@@ -10,6 +10,7 @@ border_file="${state_dir}/border"
 layout_file="${state_dir}/layout"
 language_file="${state_dir}/language"
 visualizer_file="${state_dir}/visualizer"
+topbar_file="${state_dir}/topbar"
 command="${1:-get}"
 
 case "$command" in
@@ -29,6 +30,7 @@ case "$command" in
     layout="left|1"
     language="ja"
     visualizer="0.46"
+    topbar="off"
 
     [[ -s "$state_file" ]] && theme="$(cat "$state_file")"
     [[ -s "$opacity_file" ]] && opacity="$(cat "$opacity_file")"
@@ -38,6 +40,7 @@ case "$command" in
     [[ -s "$layout_file" ]] && layout="$(cat "$layout_file")"
     [[ -s "$language_file" ]] && language="$(cat "$language_file")"
     [[ -s "$visualizer_file" ]] && visualizer="$(cat "$visualizer_file")"
+    [[ -s "$topbar_file" ]] && topbar="$(cat "$topbar_file")"
 
     printf 'theme|%s\n' "$theme"
     printf 'opacity|%s\n' "$opacity"
@@ -47,6 +50,7 @@ case "$command" in
     printf 'layout|%s\n' "$layout"
     printf 'language|%s\n' "$language"
     printf 'visualizer|%s\n' "$visualizer"
+    printf 'topBar|%s\n' "$topbar"
     ;;
   set)
     theme="${2:-default}"
@@ -251,8 +255,36 @@ case "$command" in
         ;;
     esac
     ;;
+  topbar)
+    subcommand="${2:-get}"
+    case "$subcommand" in
+      get)
+        if [[ -s "$topbar_file" ]]; then
+          cat "$topbar_file"
+        else
+          printf 'off\n'
+        fi
+        ;;
+      set)
+        enabled="${3:-off}"
+        case "$enabled" in
+          1|true|yes|on|enabled) enabled="on" ;;
+          *) enabled="off" ;;
+        esac
+        mkdir -p "$state_dir"
+        printf '%s\n' "$enabled" > "$topbar_file"
+        ;;
+      reset)
+        rm -f "$topbar_file"
+        ;;
+      *)
+        printf 'usage: %s topbar get|set|reset [on|off]\n' "$0" >&2
+        exit 2
+        ;;
+    esac
+    ;;
   *)
-    printf 'usage: %s get|dump|set [theme] | opacity get|set|reset [sidebar popup card] | bar-opacity get|set|reset [opacity] | glow get|set|reset [general sidebar_border popup_border icon text] | border get|set|reset [adapt|manual hue] | layout get|set|reset [left|right] [0|1] | language get|set|reset [ja|en|pt-BR] | visualizer get|set|reset [strength]\n' "$0" >&2
+    printf 'usage: %s get|dump|set [theme] | opacity get|set|reset [sidebar popup card] | bar-opacity get|set|reset [opacity] | glow get|set|reset [general sidebar_border popup_border icon text] | border get|set|reset [adapt|manual hue] | layout get|set|reset [left|right] [0|1] | language get|set|reset [ja|en|pt-BR] | visualizer get|set|reset [strength] | topbar get|set|reset [on|off]\n' "$0" >&2
     exit 2
     ;;
 esac

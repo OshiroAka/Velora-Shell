@@ -1,0 +1,117 @@
+#!/usr/bin/env python3
+from pathlib import Path
+import argparse
+import hashlib
+import json
+import re
+import sys
+import urllib.parse
+import urllib.request
+
+
+def norm(value):
+    return re.sub(r"\s+", " ", (value or "").strip())
+
+
+def clean_title(value):
+    value = norm(value)
+    value = re.sub(r"\s*-\s*(slowed|speed up|sped up|reverb|nightcore).*$", "", value, flags=re.I)
+    value = re.sub(r"\s*\((slowed|speed up|sped up|reverb|nightcore).*\)\s*$", "", value, flags=re.I)
+    return norm(value)
+
+
+def parse_lrc(text):
+    out = []
+    for raw in (text or "").splitlines():
+        for minute, second, lyric in re.findall(r"\[(\d+):(\d+(?:\.\d+)?)\](.*)", raw):
+            ms = int((int(minute) * 60 + float(second)) * 1000)
+            line = norm(lyric)
+            if line:
+                out.append((ms, line))
+    return sorted(out, key=lambda item: item[0])
+
+
+def request_json(url):
+    req = urllib.request.Request(
+        url,
+        headers={"User-Agent": "shinbar-lyrics/1.0 (https://lrclib.net)"}
+    )
+    with urllib.request.urlopen(req, timeout=6) as res:
+        return json.loads(res.read().decode("utf-8", "replace"))
+
+
+def fetch(title, artist, duration):
+    params = {
+        "track_name": clean_title(title),
+        "artist_name": norm(artist),
+    }
+    if duration > 0:
+        params["duration"] = str(duration)
+
+    url = "https://lrclib.net/api/get?" + urllib.parse.urlencode(params)
+    try:
+        data = request_json(url)
+    except Exception:
+        query = urllib.parse.urlencode({"track_name": params["track_name"], "artist_name": params["artist_name"]})
+        results = request_json("https://lrclib.net/api/search?" + query)
+        data = results[0] if isinstance(results, list) and results else {}
+
+    synced = parse_lrc(data.get("syncedLyrics", ""))
+    if synced:
+        return "SYNCED", synced
+
+    plain = [norm(line) for line in (data.get("plainLyrics", "") or "").splitlines()]
+    plain = [line for line in plain if line]
+    if plain:
+        return "PLAIN", [(idx * 4000, line) for idx, line in enumerate(plain[:14])]
+
+    return "PLAIN", []
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--title", default="")
+    parser.add_argument("--artist", default="")
+    parser.add_argument("--duration", default="0")
+    args = parser.parse_args()
+
+    title = norm(args.title)
+    artist = norm(args.artist)
+    try:
+        duration = int(float(args.duration))
+    except Exception:
+        duration = 0
+
+    if not title or title.lower().startswith("sem "):
+        print("MODE:PLAIN")
+        print("LINE:0|Lyrics indisponivel")
+        return 0
+
+    cache_dir = Path.home() / ".cache" / "shinbar" / "lyrics"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_key = hashlib.sha1(f"{title}|{artist}|{duration}".encode("utf-8")).hexdigest()
+    cache_path = cache_dir / f"{cache_key}.json"
+
+    try:
+        if cache_path.exists():
+            cached = json.loads(cache_path.read_text())
+            mode = cached.get("mode", "PLAIN")
+            lines = cached.get("lines", [])
+        else:
+            mode, lines = fetch(title, artist, duration)
+            cache_path.write_text(json.dumps({"mode": mode, "lines": lines}, ensure_ascii=False))
+    except Exception:
+        mode, lines = "PLAIN", []
+
+    print(f"MODE:{mode}")
+    if not lines:
+        print("LINE:0|Lyrics indisponivel")
+        return 0
+
+    for ms, line in lines[:80]:
+        print(f"LINE:{int(ms)}|{line}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

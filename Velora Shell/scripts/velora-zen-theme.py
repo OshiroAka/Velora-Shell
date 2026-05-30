@@ -15,6 +15,9 @@ BASE = Path(__file__).resolve().parents[1]
 WAL_PATH = Path(os.path.expanduser("~/.cache/wal/colors.json"))
 STATE_DIR = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "velora-shell"
 STATE_PATH = STATE_DIR / "zen-theme.json"
+WEB_MODE_PATH = STATE_DIR / "zen-web-mode"
+WEB_MODE_DEFAULT = "balance"
+WEB_MODES = {"balance", "clean"}
 CHROME_CSS_NAME = "velora-pywal.css"
 CONTENT_CSS_NAME = "velora-content.css"
 USER_CHROME_MARKER = "Velora Shell wallpaper sync userChrome"
@@ -22,6 +25,13 @@ USER_CONTENT_MARKER = "Velora Shell wallpaper sync userContent"
 ZEN_THEMES_MARKER = "Velora Shell wallpaper sync zen-themes"
 USER_JS_MARKER = "Velora Shell wallpaper sync prefs"
 LEGACY_PREF = "toolkit.legacyUserProfileCustomizations.stylesheets"
+TRANSPARENT_BROWSER_PREF = "browser.tabs.allow_transparent_browser"
+ZEN_LINUX_TRANSPARENCY_PREF = "zen.widget.linux.transparency"
+MANAGED_PREFS = [
+    (LEGACY_PREF, True),
+    (TRANSPARENT_BROWSER_PREF, True),
+    (ZEN_LINUX_TRANSPARENCY_PREF, True),
+]
 
 
 def clamp(value, low=0, high=255):
@@ -118,6 +128,27 @@ def pick_accent(palette, background, used=None, fallback=(232, 166, 200)):
     return ranked[0] if ranked else fallback
 
 
+def normalize_web_mode(mode):
+    mode = str(mode or "").strip().lower()
+    return mode if mode in WEB_MODES else WEB_MODE_DEFAULT
+
+
+def read_web_mode():
+    try:
+        return normalize_web_mode(WEB_MODE_PATH.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return WEB_MODE_DEFAULT
+    except Exception:
+        return WEB_MODE_DEFAULT
+
+
+def write_web_mode(mode):
+    mode = normalize_web_mode(mode)
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    WEB_MODE_PATH.write_text(mode + "\n", encoding="utf-8")
+    return mode
+
+
 def load_wal_palette():
     if not WAL_PATH.exists():
         raise FileNotFoundError(f"{WAL_PATH} not found")
@@ -199,6 +230,23 @@ def css_header(palette):
     )
 
 
+def pref_value(value):
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    return json.dumps(value)
+
+
+def managed_pref_lines():
+    return "\n".join(f'user_pref("{name}", {pref_value(value)});' for name, value in MANAGED_PREFS)
+
+
+def strip_managed_pref_lines(lines):
+    names = tuple(name for name, _ in MANAGED_PREFS)
+    return [line for line in lines if not any(f'user_pref("{name}"' in line for name in names)]
+
+
 def generate_chrome_css(palette):
     dark = palette["mode"] == "dark"
     return css_header(palette) + f""":root {{
@@ -206,6 +254,7 @@ def generate_chrome_css(palette):
   --velora-wallpaper-bg: {rgb_to_hex(palette["background"])};
   --velora-wallpaper-fg: {rgb_to_hex(palette["foreground"])};
   --velora-bg: {rgb_to_hex(palette["base"])};
+  --velora-clear: transparent;
   --velora-surface: {rgba(palette["surface"], 0.78 if dark else 0.72)};
   --velora-surface-strong: {rgba(palette["surface_two"], 0.90 if dark else 0.84)};
   --velora-surface-soft: {rgba(palette["surface_three"], 0.58 if dark else 0.66)};
@@ -224,9 +273,9 @@ def generate_chrome_css(palette):
   --zen-colors-secondary: var(--velora-surface) !important;
   --zen-colors-tertiary: var(--velora-bg) !important;
   --zen-colors-border: var(--velora-border) !important;
-  --zen-main-browser-background: var(--velora-bg) !important;
+  --zen-main-browser-background: transparent !important;
   --zen-themed-toolbar-bg: var(--velora-surface) !important;
-  --zen-branding-bg: var(--velora-bg) !important;
+  --zen-branding-bg: transparent !important;
 
   --toolbar-bgcolor: var(--velora-surface) !important;
   --toolbar-color: var(--velora-text) !important;
@@ -239,12 +288,12 @@ def generate_chrome_css(palette):
   --toolbarbutton-hover-background: color-mix(in srgb, var(--velora-accent), transparent 82%) !important;
   --toolbarbutton-active-background: color-mix(in srgb, var(--velora-accent), transparent 70%) !important;
 
-  --browser-bg: var(--velora-bg) !important;
-  --lwt-accent-color: var(--velora-bg) !important;
+  --browser-bg: transparent !important;
+  --lwt-accent-color: transparent !important;
   --lwt-text-color: var(--velora-text) !important;
   --lwt-sidebar-background-color: var(--velora-surface) !important;
   --lwt-sidebar-text-color: var(--velora-text) !important;
-  --tabpanel-background-color: var(--velora-bg) !important;
+  --tabpanel-background-color: transparent !important;
   --in-content-page-background: var(--velora-bg) !important;
   --in-content-page-color: var(--velora-text) !important;
   --in-content-box-background: var(--velora-surface-strong) !important;
@@ -260,7 +309,42 @@ def generate_chrome_css(palette):
   --arrowpanel-border-color: var(--velora-border) !important;
   --urlbarView-highlight-background: color-mix(in srgb, var(--velora-accent), transparent 72%) !important;
   --urlbarView-highlight-color: var(--velora-text) !important;
-  --newtab-background-color: var(--velora-bg) !important;
+  --newtab-background-color: transparent !important;
+}}
+
+#main-window,
+#browser,
+#appcontent,
+#tabbrowser-tabbox,
+#tabbrowser-tabpanels,
+#tabbrowser-tabpanels > hbox,
+#tabbrowser-tabpanels > vbox,
+#tabbrowser-tabpanels browser,
+#tabbrowser-tabpanels .browserStack,
+#tabbrowser-tabpanels .browserStack browser,
+#appcontent .browserStack,
+#appcontent .browserContainer,
+#appcontent .browserSidebarContainer,
+#appcontent browser,
+#appcontent browser[blank],
+#appcontent browser[primary],
+.browserStack,
+.browserContainer,
+.browserSidebarContainer,
+#zen-main-app-wrapper,
+#zen-appcontent-wrapper,
+#zen-tabbox-wrapper,
+#zen-appcontent-navbar-container,
+#zen-appcontent-navbar-wrapper {{
+  background: transparent !important;
+  background-color: transparent !important;
+}}
+
+browser[transparent="true"],
+#tabbrowser-tabpanels browser[transparent="true"],
+#tabbrowser-tabpanels .browserStack > browser[transparent="true"] {{
+  background: transparent !important;
+  background-color: transparent !important;
 }}
 
 #navigator-toolbox,
@@ -269,21 +353,9 @@ def generate_chrome_css(palette):
 #TabsToolbar,
 #PersonalToolbar,
 #titlebar,
-#browser,
-#main-window,
-#appcontent,
-#tabbrowser-tabbox,
-#tabbrowser-tabpanels,
 #tabbrowser-tabs,
 #tabbrowser-arrowscrollbox,
-#tabbrowser-tabpanels > hbox,
-#tabbrowser-tabpanels > vbox,
 #vertical-tabs,
-#browser vbox,
-#browser hbox,
-.browserStack,
-.browserContainer,
-.browserSidebarContainer,
 #zen-sidebar-icons-wrapper,
 #zen-sidebar-splitter,
 #zen-sidebar-web-panel,
@@ -292,11 +364,7 @@ def generate_chrome_css(palette):
 #zen-sidebar-top-buttons,
 #zen-sidebar-foot-buttons,
 #zen-sidebar-foot-buttons-wrapper,
-#zen-appcontent-navbar-wrapper,
 #zen-browser-sidebar-wrapper,
-#zen-main-app-wrapper,
-#zen-appcontent-wrapper,
-#zen-tabbox-wrapper,
 #zen-tabs-wrapper,
 #zen-essentials-container,
 #zen-workspaces-button,
@@ -307,34 +375,12 @@ def generate_chrome_css(palette):
   background-color: var(--velora-surface) !important;
   color: var(--velora-text) !important;
   border-color: var(--velora-border) !important;
-}}
-
-#browser,
-#tabbrowser-tabpanels,
-#tabbrowser-tabpanels > hbox,
-#tabbrowser-tabpanels > vbox,
-#appcontent,
-#appcontent .browserStack,
-#appcontent .browserContainer,
-#appcontent .browserSidebarContainer,
-#appcontent browser,
-#appcontent browser[blank],
-#appcontent browser[primary],
-#zen-main-app-wrapper,
-#zen-appcontent-wrapper {{
-  background: var(--velora-bg) !important;
-  background-color: var(--velora-bg) !important;
-}}
-
-#tabbrowser-tabpanels browser,
-#tabbrowser-tabpanels .browserStack browser {{
-  background: var(--velora-bg) !important;
-  background-color: var(--velora-bg) !important;
+  backdrop-filter: blur(18px) saturate(1.22) !important;
 }}
 
 #main-window[zen-compact-mode="true"] #browser,
 #main-window[zen-compact-mode="true"] #tabbrowser-tabpanels {{
-  background: var(--velora-bg) !important;
+  background: transparent !important;
 }}
 
 #main-window :is(toolbar, toolbox, tabbox, tabs, vbox, hbox, stack, deck):not(#tabbrowser-tabpanels):not(.browserStack):not(browser) {{
@@ -415,21 +461,43 @@ tooltip {{
 """
 
 
-def generate_content_css(palette):
+def generate_content_css(palette, web_mode=None):
     dark = palette["mode"] == "dark"
+    web_mode = normalize_web_mode(web_mode)
+    if web_mode == "clean":
+        site_bg = "transparent"
+        site_bg_color = "transparent"
+        site_backdrop = "none"
+    else:
+        site_a = mix(palette["surface"], palette["background"], 0.18 if dark else 0.28)
+        site_b = mix(palette["surface_two"], palette["background"], 0.24 if dark else 0.34)
+        site_bg = (
+            "linear-gradient(135deg, "
+            f"{rgba(site_a, 0.70 if dark else 0.78)}, "
+            f"{rgba(site_b, 0.74 if dark else 0.82)})"
+        )
+        site_bg_color = rgba(site_a, 0.72 if dark else 0.80)
+        site_backdrop = "blur(18px) saturate(1.14)"
     return css_header(palette) + f""":root {{
   --velora-page-bg: {rgb_to_hex(palette["base"])};
   --velora-page-surface: {rgba(palette["surface_two"], 0.88 if dark else 0.82)};
   --velora-page-surface-soft: {rgba(palette["surface"], 0.58 if dark else 0.62)};
+  --velora-site-bg: {site_bg};
+  --velora-site-bg-color: {site_bg_color};
+  --velora-site-backdrop: {site_backdrop};
   --velora-page-text: {rgb_to_hex(palette["text"])};
   --velora-page-muted: {rgb_to_hex(palette["text_muted"])};
   --velora-page-accent: {rgb_to_hex(palette["accent"])};
+  --velora-page-accent-2: {rgb_to_hex(palette["accent_two"])};
+  --velora-page-accent-3: {rgb_to_hex(palette["accent_three"])};
+  --velora-page-accent-text: {rgb_to_hex(palette["button_text"])};
+  --velora-page-border: {rgba(palette["border"], 0.46 if dark else 0.62)};
+  --velora-page-shadow: {rgba(palette["shadow"], 0.34 if dark else 0.16)};
 }}
 
 @-moz-document regexp(".*") {{
   :root {{
     color-scheme: {"dark" if dark else "light"} !important;
-    background-color: var(--velora-page-bg) !important;
     --in-content-page-background: var(--velora-page-bg) !important;
     --in-content-page-color: var(--velora-page-text) !important;
     --in-content-text-color: var(--velora-page-text) !important;
@@ -442,33 +510,6 @@ def generate_content_css(palette):
     --in-content-button-text-color: var(--velora-page-text) !important;
     --in-content-border-color: color-mix(in srgb, var(--velora-page-accent), transparent 58%) !important;
     --card-outline-color: color-mix(in srgb, var(--velora-page-accent), transparent 62%) !important;
-  }}
-
-  html,
-  body {{
-    background-color: var(--velora-page-bg) !important;
-    color: var(--velora-page-text) !important;
-  }}
-
-  html:has(body:empty),
-  body:empty {{
-    background:
-      radial-gradient(circle at 22% 18%, color-mix(in srgb, {rgb_to_hex(palette["accent_two"])}, transparent 62%), transparent 34rem),
-      radial-gradient(circle at 70% 72%, color-mix(in srgb, {rgb_to_hex(palette["accent"])}, transparent 68%), transparent 30rem),
-      var(--velora-page-bg) !important;
-  }}
-
-  body:is([style*="background: white"], [style*="background-color: white"], [style*="background:#fff"], [style*="background-color:#fff"]) {{
-    background-color: var(--velora-page-bg) !important;
-  }}
-
-  input,
-  textarea,
-  select,
-  button {{
-    background-color: var(--velora-page-surface) !important;
-    color: var(--velora-page-text) !important;
-    border-color: color-mix(in srgb, var(--velora-page-accent), transparent 58%) !important;
   }}
 
   ::selection {{
@@ -589,46 +630,414 @@ def generate_content_css(palette):
   }}
 }}
 
-@-moz-document regexp("https?://.*") {{
-  body :is(div, main, article, section, aside, header, footer, nav, form),
-  :is(.container, .content, .page, .main, .sidebar, .side-bar, .panel, .drawer, .modal, #content, #main, #root, #app) {{
+@-moz-document domain("youtube.com"), domain("youtu.be") {{
+  :root,
+  html,
+  body {{
+    color-scheme: dark !important;
+    background: var(--velora-site-bg) !important;
+    background-color: var(--velora-site-bg-color) !important;
+  }}
+
+  ytd-app,
+  ytd-watch-flexy,
+  ytd-browse,
+  ytd-search,
+  ytd-page-manager {{
+    --yt-spec-base-background: var(--velora-site-bg-color) !important;
+    --yt-spec-raised-background: var(--velora-page-surface) !important;
+    --yt-spec-menu-background: var(--velora-page-surface) !important;
+    --yt-spec-general-background-a: transparent !important;
+    --yt-spec-general-background-b: transparent !important;
+    --yt-spec-general-background-c: transparent !important;
+    --yt-spec-brand-background-primary: transparent !important;
+    --yt-spec-brand-background-secondary: transparent !important;
+    --yt-spec-brand-background-solid: transparent !important;
+    --yt-spec-text-primary: var(--velora-page-text) !important;
+    --yt-spec-text-secondary: var(--velora-page-muted) !important;
+    --yt-spec-text-disabled: color-mix(in srgb, var(--velora-page-text), transparent 42%) !important;
+    --yt-spec-call-to-action: var(--velora-page-accent) !important;
+    --yt-spec-badge-chip-background: color-mix(in srgb, var(--velora-page-accent), transparent 78%) !important;
+    --yt-spec-button-chip-background-hover: color-mix(in srgb, var(--velora-page-accent), transparent 72%) !important;
+    --yt-spec-touch-response: color-mix(in srgb, var(--velora-page-accent), transparent 70%) !important;
+    --paper-dialog-background-color: var(--velora-page-surface) !important;
+    --paper-listbox-background-color: var(--velora-page-surface) !important;
+    color: var(--velora-page-text) !important;
+  }}
+
+  ytd-app,
+  #content.ytd-app,
+  #page-manager.ytd-app,
+  ytd-page-manager,
+  ytd-browse,
+  ytd-two-column-browse-results-renderer,
+  ytd-rich-grid-renderer,
+  #contents.ytd-rich-grid-renderer,
+  ytd-rich-grid-row,
+  ytd-search,
+  ytd-section-list-renderer,
+  ytd-item-section-renderer,
+  ytd-watch-flexy,
+  #columns.ytd-watch-flexy,
+  #primary.ytd-watch-flexy,
+  #secondary.ytd-watch-flexy,
+  #secondary-inner,
+  #content.ytd-watch-flexy {{
+    background: var(--velora-site-bg) !important;
+    background-color: var(--velora-site-bg-color) !important;
+    backdrop-filter: var(--velora-site-backdrop) !important;
+  }}
+
+  ytd-rich-item-renderer,
+  ytd-rich-grid-media,
+  ytd-video-renderer,
+  ytd-compact-video-renderer,
+  ytd-playlist-video-renderer,
+  ytd-thumbnail,
+  ytd-thumbnail #thumbnail {{
+    background: transparent !important;
     background-color: transparent !important;
   }}
 
-  body :is(input, textarea, select, button, pre, code, kbd, samp, [class*="code"], [class*="Code"], [class*="highlight"], [role="button"], [contenteditable="true"]) {{
+  #guide-content,
+  #guide-inner-content,
+  ytd-mini-guide-renderer,
+  ytd-multi-page-menu-renderer,
+  ytd-menu-popup-renderer,
+  tp-yt-paper-dialog,
+  tp-yt-paper-listbox,
+  ytd-engagement-panel-section-list-renderer,
+  ytd-playlist-panel-renderer,
+  ytd-rich-section-renderer,
+  ytd-comments-header-renderer,
+  ytd-comment-simplebox-renderer {{
+    background: var(--velora-page-surface-soft) !important;
+    background-color: var(--velora-page-surface-soft) !important;
+    border-color: var(--velora-page-border) !important;
+    color: var(--velora-page-text) !important;
+    backdrop-filter: blur(20px) saturate(1.2) !important;
+  }}
+
+  ytd-masthead,
+  #masthead-container,
+  #masthead-container.ytd-app,
+  #container.ytd-masthead,
+  #background.ytd-masthead,
+  #frosted-glass.ytd-masthead,
+  #header.ytd-rich-grid-renderer,
+  #guide-spacer,
+  #chips.ytd-rich-grid-renderer,
+  #chips.ytd-feed-filter-chip-bar-renderer,
+  #container.ytd-feed-filter-chip-bar-renderer,
+  #content.ytd-feed-filter-chip-bar-renderer,
+  ytd-feed-filter-chip-bar-renderer,
+  yt-chip-cloud-renderer,
+  #chips-wrapper,
+  #chips-wrapper.ytd-feed-filter-chip-bar-renderer,
+  #scroll-container.yt-chip-cloud-renderer,
+  #chips.yt-chip-cloud-renderer,
+  #left-arrow.yt-chip-cloud-renderer,
+  #right-arrow.yt-chip-cloud-renderer,
+  .ytd-feed-filter-chip-bar-renderer {{
+    background: transparent !important;
+    background-color: transparent !important;
+    background-image: none !important;
+    box-shadow: none !important;
+    border-color: transparent !important;
+    filter: none !important;
+    backdrop-filter: none !important;
+  }}
+
+  #background.ytd-masthead,
+  #frosted-glass.ytd-masthead,
+  ytd-masthead::before,
+  ytd-masthead::after,
+  #masthead-container::before,
+  #masthead-container::after,
+  #container.ytd-masthead::before,
+  #container.ytd-masthead::after {{
+    display: none !important;
+    content: none !important;
+    background: transparent !important;
+    background-color: transparent !important;
+    background-image: none !important;
+    opacity: 0 !important;
+    box-shadow: none !important;
+    filter: none !important;
+    backdrop-filter: none !important;
+  }}
+
+  ytd-masthead,
+  #background.ytd-masthead {{
+    border-bottom: 0 !important;
+  }}
+
+  ytd-masthead,
+  #masthead-container,
+  #masthead-container.ytd-app,
+  #container.ytd-masthead {{
+    height: 0 !important;
+    min-height: 0 !important;
+    max-height: 0 !important;
+    overflow: visible !important;
+    pointer-events: none !important;
+  }}
+
+  #page-manager.ytd-app,
+  ytd-page-manager,
+  ytd-browse {{
+    margin-top: 0 !important;
+    padding-top: 0 !important;
+  }}
+
+  #start.ytd-masthead,
+  #end.ytd-masthead,
+  #voice-search-button.ytd-masthead,
+  ytd-topbar-logo-renderer,
+  ytd-notification-topbar-button-renderer,
+  ytd-topbar-menu-button-renderer,
+  ytd-button-renderer.ytd-masthead,
+  #buttons.ytd-masthead,
+  ytd-feed-filter-chip-bar-renderer,
+  yt-chip-cloud-renderer,
+  #header.ytd-rich-grid-renderer,
+  #chips.ytd-rich-grid-renderer,
+  #chips-wrapper.ytd-feed-filter-chip-bar-renderer,
+  #scroll-container.yt-chip-cloud-renderer,
+  #left-arrow.yt-chip-cloud-renderer,
+  #right-arrow.yt-chip-cloud-renderer {{
+    display: none !important;
+  }}
+
+  #container.ytd-masthead {{
+    justify-content: center !important;
+    padding: 0 24px !important;
+  }}
+
+  #center.ytd-masthead {{
+    flex: 0 1 min(720px, 72vw) !important;
+    margin: 0 auto !important;
+    max-width: min(720px, 72vw) !important;
+    pointer-events: auto !important;
+    position: relative !important;
+    top: 12px !important;
+    z-index: 2000 !important;
+  }}
+
+  ytd-searchbox {{
+    margin: 0 auto !important;
+    max-width: min(680px, 72vw) !important;
+    pointer-events: auto !important;
+    width: min(680px, 72vw) !important;
+  }}
+
+  ytd-guide-section-renderer:has(ytd-guide-entry-renderer a[href^="/@"]),
+  ytd-guide-section-renderer:has(ytd-guide-entry-renderer a[href^="/channel/"]),
+  ytd-guide-section-renderer:has(ytd-guide-entry-renderer a[href^="/c/"]),
+  ytd-guide-section-renderer:has(ytd-guide-entry-renderer a[href^="/user/"]),
+  ytd-guide-entry-renderer:has(a[href^="/@"]),
+  ytd-guide-entry-renderer:has(a[href^="/channel/"]),
+  ytd-guide-entry-renderer:has(a[href^="/c/"]),
+  ytd-guide-entry-renderer:has(a[href^="/user/"]),
+  ytd-guide-collapsible-section-entry-renderer {{
+    display: none !important;
+  }}
+
+  ytd-rich-grid-renderer,
+  #contents.ytd-rich-grid-renderer {{
+    padding-top: 0 !important;
+    margin-top: 0 !important;
+  }}
+
+  yt-chip-cloud-chip-renderer {{
+    background-color: color-mix(in srgb, var(--velora-page-surface), transparent 20%) !important;
+    border: 1px solid color-mix(in srgb, var(--velora-page-accent), transparent 66%) !important;
+    color: var(--velora-page-text) !important;
+  }}
+
+  ytd-guide-entry-renderer,
+  ytd-mini-guide-entry-renderer {{
+    background-color: transparent !important;
+    border: 1px solid transparent !important;
+    color: var(--velora-page-text) !important;
+  }}
+
+  ytd-toggle-button-renderer,
+  ytd-button-renderer,
+  tp-yt-paper-button {{
+    background-color: color-mix(in srgb, var(--velora-page-surface), transparent 18%) !important;
+    border: 1px solid color-mix(in srgb, var(--velora-page-accent), transparent 66%) !important;
+    color: var(--velora-page-text) !important;
+  }}
+
+  yt-chip-cloud-chip-renderer[chip-style="STYLE_DEFAULT"][selected],
+  yt-chip-cloud-chip-renderer[aria-selected="true"],
+  ytd-guide-entry-renderer[active],
+  ytd-mini-guide-entry-renderer[active] {{
+    background: linear-gradient(135deg,
+      color-mix(in srgb, var(--velora-page-accent), transparent 22%),
+      color-mix(in srgb, var(--velora-page-accent-2), transparent 34%)) !important;
+    color: var(--velora-page-accent-text) !important;
+    border-color: color-mix(in srgb, var(--velora-page-accent), transparent 42%) !important;
+  }}
+
+  ytd-searchbox #container,
+  #container.ytd-searchbox,
+  ytd-searchbox input,
+  #search-icon-legacy,
+  ytd-searchbox button,
+  ytd-searchbox #search-form {{
+    background: var(--velora-page-surface) !important;
     background-color: var(--velora-page-surface) !important;
+    border-color: var(--velora-page-border) !important;
     color: var(--velora-page-text) !important;
-    border-color: color-mix(in srgb, var(--velora-page-accent), transparent 58%) !important;
   }}
 
-  body :is(pre, code, kbd, samp, [class*="code"], [class*="Code"], [class*="highlight"]) * {{
+  #video-title,
+  #video-title-link,
+  #channel-name,
+  ytd-channel-name,
+  ytd-video-meta-block,
+  yt-formatted-string,
+  yt-attributed-string,
+  a.yt-simple-endpoint {{
     color: var(--velora-page-text) !important;
     text-shadow: none !important;
   }}
 
-  body :is(h1, h2, h3, h4, h5, h6, p, span, a, li, dt, dd, td, th, label, small, strong, em, b, i, div, summary, button, input, textarea, select, [role="button"], [role="menuitem"], [contenteditable="true"]) {{
+  #metadata-line,
+  #metadata-line span,
+  #description,
+  ytd-metadata-row-renderer,
+  ytd-reel-player-overlay-renderer .metadata {{
+    color: var(--velora-page-muted) !important;
+  }}
+
+  ytd-watch-metadata,
+  #description.ytd-watch-metadata,
+  ytd-expander,
+  ytd-comments,
+  ytd-comment-thread-renderer,
+  ytd-reel-shelf-renderer,
+  ytd-rich-shelf-renderer {{
+    background: color-mix(in srgb, var(--velora-page-surface-soft), transparent 14%) !important;
+    border-color: var(--velora-page-border) !important;
     color: var(--velora-page-text) !important;
-    text-shadow: none !important;
   }}
 
-  body :is([class*="muted"], [class*="secondary"], [class*="subtle"], [class*="placeholder"], [aria-disabled="true"], [disabled]) {{
-    color: color-mix(in srgb, var(--velora-page-text), transparent 28%) !important;
-    opacity: 1 !important;
+  #player,
+  #player-container,
+  #player-container-outer,
+  #player-container-inner,
+  ytd-player,
+  #movie_player,
+  .html5-video-player,
+  video {{
+    background-color: #000 !important;
+  }}
+}}
+
+@-moz-document domain("chatgpt.com"), domain("chat.openai.com") {{
+  :root,
+  html,
+  body {{
+    color-scheme: dark !important;
+    background: var(--velora-site-bg) !important;
+    background-color: var(--velora-site-bg-color) !important;
+    --main-surface-primary: var(--velora-site-bg-color) !important;
+    --main-surface-secondary: var(--velora-page-surface-soft) !important;
+    --main-surface-tertiary: var(--velora-page-surface) !important;
+    --sidebar-surface-primary: var(--velora-page-surface-soft) !important;
+    --sidebar-surface-secondary: color-mix(in srgb, var(--velora-page-surface), transparent 18%) !important;
+    --sidebar-surface-tertiary: color-mix(in srgb, var(--velora-page-accent), transparent 82%) !important;
+    --text-primary: var(--velora-page-text) !important;
+    --text-secondary: var(--velora-page-muted) !important;
+    --text-tertiary: color-mix(in srgb, var(--velora-page-text), transparent 42%) !important;
+    --border-light: var(--velora-page-border) !important;
+    --border-medium: color-mix(in srgb, var(--velora-page-accent), transparent 64%) !important;
   }}
 
-  body ::placeholder {{
-    color: color-mix(in srgb, var(--velora-page-text), transparent 34%) !important;
-    opacity: 1 !important;
+  body,
+  #__next,
+  .dark {{
+    background: var(--velora-site-bg) !important;
+    background-color: var(--velora-site-bg-color) !important;
+    color: var(--velora-page-text) !important;
   }}
 
-  body a {{
-    color: color-mix(in srgb, var(--velora-page-accent), var(--velora-page-text) 34%) !important;
+  main,
+  [role="main"],
+  [class*="bg-token-main-surface-primary"],
+  .bg-token-main-surface-primary {{
+    background: transparent !important;
+    background-color: transparent !important;
+    color: var(--velora-page-text) !important;
   }}
 
-  body :is([class*="card"], [class*="popover"], [class*="tooltip"], [class*="menu"], [class*="dialog"], [class*="bubble"], [class*="Bubble"]) {{
+  aside,
+  nav,
+  [data-testid="history-sidebar"],
+  [class*="bg-token-sidebar-surface-primary"],
+  .bg-token-sidebar-surface-primary {{
+    background: var(--velora-page-surface-soft) !important;
     background-color: var(--velora-page-surface-soft) !important;
     color: var(--velora-page-text) !important;
-    border-color: color-mix(in srgb, var(--velora-page-accent), transparent 62%) !important;
+    border-color: var(--velora-page-border) !important;
+    backdrop-filter: blur(20px) saturate(1.2) !important;
+  }}
+
+  [class*="bg-token-main-surface-secondary"],
+  [class*="bg-token-main-surface-tertiary"],
+  [class*="bg-token-sidebar-surface-secondary"],
+  [class*="bg-token-sidebar-surface-tertiary"],
+  .bg-token-main-surface-secondary,
+  .bg-token-main-surface-tertiary,
+  .bg-token-sidebar-surface-secondary,
+  .bg-token-sidebar-surface-tertiary {{
+    background-color: var(--velora-page-surface-soft) !important;
+    color: var(--velora-page-text) !important;
+    border-color: var(--velora-page-border) !important;
+  }}
+
+  [data-testid="composer-root"],
+  form textarea,
+  textarea,
+  [contenteditable="true"],
+  input,
+  button,
+  [role="button"],
+  [class*="composer"] {{
+    background-color: color-mix(in srgb, var(--velora-page-surface), transparent 8%) !important;
+    color: var(--velora-page-text) !important;
+    border-color: var(--velora-page-border) !important;
+  }}
+
+  [data-testid="composer-root"],
+  [class*="composer"] {{
+    backdrop-filter: blur(18px) saturate(1.18) !important;
+  }}
+
+  h1,
+  h2,
+  h3,
+  p,
+  li,
+  span,
+  a,
+  div,
+  label,
+  button,
+  textarea,
+  input,
+  [data-message-author-role] {{
+    color: var(--velora-page-text) !important;
+    text-shadow: none !important;
+  }}
+
+  .text-token-text-secondary,
+  [class*="text-token-text-secondary"],
+  [class*="text-token-text-tertiary"] {{
+    color: var(--velora-page-muted) !important;
   }}
 }}
 """
@@ -778,11 +1187,11 @@ def ensure_user_js(profile):
     if path.exists() and not had_marker:
         backup_once(path)
     text = remove_managed_block(text, USER_JS_MARKER)
-    lines = [line for line in text.splitlines() if LEGACY_PREF not in line]
+    lines = strip_managed_pref_lines(text.splitlines())
     base_text = "\n".join(lines).rstrip()
     if base_text:
         base_text += "\n\n"
-    block = managed_block(USER_JS_MARKER, f'user_pref("{LEGACY_PREF}", true);')
+    block = managed_block(USER_JS_MARKER, managed_pref_lines())
     path.write_text(base_text + block + "\n", encoding="utf-8")
 
 
@@ -822,11 +1231,11 @@ def ensure_prefs_js(profile, browser_running):
     if not had_marker:
         backup_once(path)
     text = remove_managed_block(text, USER_JS_MARKER)
-    lines = [line for line in text.splitlines() if LEGACY_PREF not in line]
+    lines = strip_managed_pref_lines(text.splitlines())
     base_text = "\n".join(lines).rstrip()
     if base_text:
         base_text += "\n\n"
-    block = managed_block(USER_JS_MARKER, f'user_pref("{LEGACY_PREF}", true);')
+    block = managed_block(USER_JS_MARKER, managed_pref_lines())
     path.write_text(base_text + block + "\n", encoding="utf-8")
     return True
 
@@ -844,7 +1253,7 @@ def install_profile(profile, chrome_css, content_css, browser_running):
     return ensure_prefs_js(profile, browser_running)
 
 
-def write_state(palette, profiles, browser_running, prefs_written):
+def write_state(palette, profiles, browser_running, prefs_written, web_mode):
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     STATE_PATH.write_text(json.dumps({
         "generatedAt": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
@@ -856,8 +1265,11 @@ def write_state(palette, profiles, browser_running, prefs_written):
         "profiles": [str(profile) for profile in profiles],
         "chromeCss": CHROME_CSS_NAME,
         "contentCss": CONTENT_CSS_NAME,
+        "webMode": web_mode,
         "zenRunning": browser_running,
         "prefsWritten": prefs_written,
+        "transparentBrowser": True,
+        "zenLinuxTransparency": True,
         "restartRequired": browser_running,
     }, indent=2) + "\n", encoding="utf-8")
 
@@ -867,7 +1279,23 @@ def main():
     parser.add_argument("--all-profiles", action="store_true", help="sync every detected Zen profile instead of only the default profile")
     parser.add_argument("--status", action="store_true", help="print the last sync state")
     parser.add_argument("--quiet", action="store_true", help="suppress normal output")
+    parser.add_argument("command", nargs="?", help="optional command: mode")
+    parser.add_argument("subcommand", nargs="?", help="mode action: get or set")
+    parser.add_argument("value", nargs="?", help="mode value: balance or clean")
     args = parser.parse_args()
+
+    if args.command == "mode":
+        action = args.subcommand or "get"
+        if action == "get":
+            print(read_web_mode())
+            return 0
+        if action != "set":
+            parser.error("mode action must be 'get' or 'set'")
+        web_mode = write_web_mode(args.value or WEB_MODE_DEFAULT)
+    elif args.command:
+        parser.error("unknown command; expected 'mode'")
+    else:
+        web_mode = read_web_mode()
 
     if args.status:
         if STATE_PATH.exists():
@@ -890,12 +1318,12 @@ def main():
         return 0
 
     chrome_css = generate_chrome_css(palette)
-    content_css = generate_content_css(palette)
+    content_css = generate_content_css(palette, web_mode)
     browser_running = zen_browser_running()
     prefs_written = False
     for profile in profiles:
         prefs_written = install_profile(profile, chrome_css, content_css, browser_running) or prefs_written
-    write_state(palette, profiles, browser_running, prefs_written)
+    write_state(palette, profiles, browser_running, prefs_written, web_mode)
 
     if not args.quiet:
         print(f"synced {len(profiles)} Zen profile(s):")

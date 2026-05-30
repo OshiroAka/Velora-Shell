@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cache_engine="$HOME/.cache/shinbar/engine-previews"
+cache_live="$HOME/.cache"
+declare -A seen_engine=()
+mkdir -p "$cache_engine" "$cache_live"
+
+make_thumb() {
+  local input="$1"
+  local output="$2"
+  command -v ffmpeg >/dev/null 2>&1 || return 0
+  [ -s "$output" ] && return 0
+  ffmpeg -hide_banner -loglevel error -y \
+    -ss 2 -i "$input" \
+    -frames:v 1 \
+    -vf "scale=480:-2:force_original_aspect_ratio=decrease" \
+    "$output" >/dev/null 2>&1 || true
+}
+
+printf 'BEGIN\n'
+
+if [ -d "$HOME/Pictures/Wallpapers/static" ]; then
+  find "$HOME/Pictures/Wallpapers/static" -maxdepth 1 -type f \
+    \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.webp' -o -iname '*.gif' \) \
+    2>/dev/null | sort | while IFS= read -r file; do
+    printf 'STATIC|%s|%s\n' "$file" "$file"
+  done
+fi
+
+if [ -d "$HOME/Pictures/Wallpapers/live" ]; then
+  find "$HOME/Pictures/Wallpapers/live" -maxdepth 1 -type f \
+    \( -iname '*.mp4' -o -iname '*.webm' -o -iname '*.mkv' -o -iname '*.mov' -o -iname '*.gif' \) \
+    2>/dev/null | sort | while IFS= read -r file; do
+    base="$(basename "$file")"
+    name="${base%.*}"
+    thumb="$cache_live/qs_mpv_thumb_${name}.jpg"
+    make_thumb "$file" "$thumb"
+    [ -s "$thumb" ] || thumb=""
+    printf 'LIVE|%s|%s\n' "$file" "$thumb"
+  done
+fi
+
+for root in \
+  "$HOME/.steam/steam/steamapps/workshop/content/431960" \
+  "$HOME/.local/share/Steam/steamapps/workshop/content/431960"
+do
+  [ -d "$root" ] || continue
+
+  for dir in "$root"/*/; do
+    [ -d "$dir" ] || continue
+    id="$(basename "$dir")"
+    [ -n "${seen_engine[$id]:-}" ] && continue
+    seen_engine[$id]=1
+    preview=""
+
+    preview="$(find "$dir" -maxdepth 5 -type f \
+      \( -iname 'preview*.gif' -o -iname 'thumbnail*.gif' -o -iname 'thumb*.gif' -o -iname 'cover*.gif' -o -iname '*.gif' \) \
+      2>/dev/null | sort | head -1 || true)"
+
+    if [ -n "$preview" ]; then
+      gif_thumb="$cache_engine/${id}.jpg"
+      make_thumb "$preview" "$gif_thumb"
+      if [ -s "$gif_thumb" ]; then
+        preview="$gif_thumb"
+      else
+        preview=""
+      fi
+    fi
+
+    if [ -z "$preview" ]; then
+      video="$(find "$dir" -maxdepth 5 -type f \
+        \( -iname '*.mp4' -o -iname '*.webm' -o -iname '*.mkv' -o -iname '*.mov' \) \
+        2>/dev/null | sort | head -1 || true)"
+      if [ -n "$video" ]; then
+        preview="$cache_engine/${id}.jpg"
+        make_thumb "$video" "$preview"
+      fi
+    fi
+
+    if [ -z "$preview" ] || [ ! -s "$preview" ]; then
+      preview="$(find "$dir" -maxdepth 5 -type f \
+        \( -iname 'preview.*' -o -iname 'thumbnail.*' -o -iname 'thumb.*' -o -iname 'cover.*' -o -iname 'icon.*' \) \
+        \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.webp' \) \
+        2>/dev/null | sort | head -1 || true)"
+    fi
+
+    printf 'ENGINE|%s|%s\n' "$id" "$preview"
+  done
+done
+
+printf 'END\n'

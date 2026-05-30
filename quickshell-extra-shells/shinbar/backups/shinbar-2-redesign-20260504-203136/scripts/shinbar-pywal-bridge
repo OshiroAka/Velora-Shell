@@ -1,0 +1,130 @@
+#!/usr/bin/env bash
+set -u
+
+CONFIG_PATH="${SHINBAR_CONFIG_PATH:-$HOME/.config/quickshell/shinbar}"
+WAL_PATH="${SHINBAR_WAL_PATH:-$HOME/.cache/wal/colors.json}"
+CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/shinbar"
+PID_FILE="$CACHE_DIR/pywal-bridge.pid"
+LOG_FILE="$CACHE_DIR/pywal-bridge.log"
+POLL_SECONDS="${SHINBAR_PYWAL_POLL_SECONDS:-0.35}"
+
+mkdir -p "$CACHE_DIR"
+
+emit_palette() {
+  python3 - "$WAL_PATH" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+try:
+    with open(path, "r", encoding="utf-8") as fh:
+        data = json.load(fh)
+
+    special = data.get("special", {})
+    colors = data.get("colors", {})
+    bg = special.get("background", "#1a1b2e")
+    fg = special.get("foreground", "#c0caf5")
+    accent = colors.get("color4", "#7aa2f7")
+    surface = colors.get("color0", "#24283b")
+    muted = colors.get("color8", "#565f89")
+    warn = colors.get("color1", "#f7768e")
+    sig = ":".join([
+        data.get("checksum", ""),
+        data.get("wallpaper", ""),
+        bg,
+        fg,
+        surface,
+        warn,
+        accent,
+        muted,
+    ])
+
+    print("PAL=" + "|".join([sig, bg, fg, accent, surface, muted, warn]), flush=True)
+except Exception as exc:
+    print("ERR=" + repr(exc), flush=True)
+PY
+}
+
+send_once() {
+  local line payload sig bg fg accent surface muted warn
+  line="$(emit_palette | tail -n 1)"
+
+  if [[ "$line" != PAL=* ]]; then
+    printf '%s\n' "$line"
+    return 1
+  fi
+
+  payload="${line#PAL=}"
+  IFS='|' read -r sig bg fg accent surface muted warn <<< "$payload"
+
+  qs ipc -p "$CONFIG_PATH" call shinbar setColors \
+    "$bg" "$fg" "$accent" "$surface" "$muted" "$warn" "$sig" >/dev/null 2>&1
+}
+
+watch_loop() {
+  local last_sig="" sig line
+
+  while true; do
+    if [[ -r "$WAL_PATH" ]]; then
+      sig="$(stat -c '%Y:%s' "$WAL_PATH" 2>/dev/null || true)"
+      if [[ -n "$sig" && "$sig" != "$last_sig" ]]; then
+        last_sig="$sig"
+        line="$(emit_palette | tail -n 1)"
+        printf '%s %s\n' "$(date '+%F %T')" "$line" >> "$LOG_FILE"
+        send_once >> "$LOG_FILE" 2>&1 || true
+      fi
+    fi
+
+    sleep "$POLL_SECONDS"
+  done
+}
+
+is_running() {
+  local pid="$1"
+  [[ -n "$pid" ]] && kill -0 "$pid" >/dev/null 2>&1
+}
+
+start_watch() {
+  local old_pid=""
+  [[ -f "$PID_FILE" ]] && old_pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+  if is_running "$old_pid"; then
+    exit 0
+  fi
+
+  (
+    echo "$BASHPID" > "$PID_FILE"
+    trap 'rm -f "$PID_FILE"' EXIT
+    watch_loop
+  ) >> "$LOG_FILE" 2>&1 &
+}
+
+stop_watch() {
+  local old_pid=""
+  [[ -f "$PID_FILE" ]] && old_pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+  if is_running "$old_pid"; then
+    kill "$old_pid" >/dev/null 2>&1 || true
+  fi
+  rm -f "$PID_FILE"
+}
+
+case "${1:-}" in
+  --emit)
+    emit_palette
+    ;;
+  --send-once)
+    send_once
+    ;;
+  --start-watch)
+    start_watch
+    ;;
+  --stop-watch)
+    stop_watch
+    ;;
+  --watch-foreground)
+    watch_loop
+    ;;
+  *)
+    echo "usage: $0 --emit|--send-once|--start-watch|--stop-watch|--watch-foreground" >&2
+    exit 2
+    ;;
+esac

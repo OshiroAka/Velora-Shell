@@ -1,0 +1,50 @@
+#!/usr/bin/env python3
+import subprocess
+import re
+
+def clean(s):
+    return (s or "").replace("|", "/").strip()
+
+try:
+    raw = subprocess.check_output(
+        ["pactl", "list", "sink-inputs"],
+        text=True,
+        stderr=subprocess.DEVNULL
+    )
+except Exception:
+    raise SystemExit(0)
+
+blocks = re.split(r"\n(?=Sink Input #)", raw)
+
+for block in blocks:
+    mid = re.search(r"Sink Input #(\d+)", block)
+    if not mid:
+        continue
+
+    idx = mid.group(1)
+
+    app = ""
+    title = ""
+
+    m = re.search(r'application\.name = "([^"]+)"', block)
+    if m:
+        app = m.group(1)
+
+    m = re.search(r'application\.process\.binary = "([^"]+)"', block)
+    if not app and m:
+        app = m.group(1)
+
+    m = re.search(r'media\.name = "([^"]+)"', block)
+    if m:
+        title = m.group(1)
+
+    m = re.search(r"Volume:.*?(\d+)%", block)
+    vol = m.group(1) if m else "0"
+
+    m = re.search(r"Mute:\s+(yes|no)", block)
+    muted = m.group(1) if m else "no"
+
+    if not app:
+        app = "Audio App"
+
+    print(f"{idx}|{clean(app)}|{clean(title)}|{vol}|{muted}")

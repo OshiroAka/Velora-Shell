@@ -20,7 +20,6 @@ ShellRoot {
         NotificationServer.bodyMarkupSupported = true
         NotificationServer.actionsSupported = true
         NotificationServer.imageSupported = true
-        topWallpaperScan.running = true
     }
 
     Connections {
@@ -48,10 +47,14 @@ ShellRoot {
     property bool settingsPanelPreloadEnabled: false
     property bool quickPopupPreloadEnabled: false
     property bool rightDashboardOpen: false
+    property real topBarPopupCenterX: 0
     property bool topWallpaperPopupOpen: false
     property bool topWallpaperKeyboardFocus: false
+    property bool topWallpaperCardsMounted: false
+    property real topWallpaperFrameReveal: topWallpaperPopupOpen ? 1 : 0
     property int topWallpaperOffset: 0
     property int topWallpaperSlideDirection: 0
+    property int topWallpaperQueuedDirection: 0
     property real topWallpaperSlideProgress: 0
     property bool leftMenuOpen: false
     property bool leftMenuHovering: false
@@ -69,6 +72,8 @@ ShellRoot {
     property string rightDashboardSection: "weather"
     property bool focusMode: false
     property int focusIndex: 0
+    readonly property bool topBarLayout: veloraTheme.topBarEnabled
+    readonly property bool sideBarLayoutEnabled: !topBarLayout
     readonly property bool barOnRight: veloraTheme.barPosition === "right"
     readonly property bool leftMenuOnLeft: barOnRight
     readonly property string leftMenuAttachSide: leftMenuOnLeft ? "left" : "right"
@@ -79,8 +84,8 @@ ShellRoot {
     readonly property int sidebarVerticalMargin: 20
     readonly property int sidebarCornerRadius: 24
     readonly property int sideVisualizerWaveWidth: 58
-    readonly property int barPanelWidth: sidebarVisualWidth + sidebarOuterMargin
-    readonly property int barReserveWidth: barPanelWidth
+    readonly property int barPanelWidth: sideBarLayoutEnabled ? sidebarVisualWidth + sidebarOuterMargin : 0
+    readonly property int barReserveWidth: sideBarLayoutEnabled ? barPanelWidth : 0
     readonly property int desktopFrameRadius: 10
     readonly property bool frameVisualsEnabled: veloraTheme.desktopFrameEnabled
     readonly property int frameVisualInset: frameVisualsEnabled ? desktopFrameMargin : 0
@@ -96,6 +101,7 @@ ShellRoot {
     readonly property string topWallpaperHomeDir: Quickshell.env("HOME") || ""
     readonly property string topWallpaperDir: topWallpaperHomeDir + "/Pictures/Wallpapers"
     readonly property string topWallpaperScanScript: Quickshell.shellDir + "/scripts/velora-wallpaper-scan"
+    readonly property string topWallpaperApplyScript: Quickshell.shellDir + "/scripts/velora-wallpaper-apply"
     readonly property var topWallpaperFallbackEntries: [
         { kind: "static", path: topWallpaperDir + "/static/WPP_blue.png", preview: topWallpaperDir + "/static/WPP_blue.png", title: "WPP_blue" },
         { kind: "static", path: topWallpaperDir + "/static/wp15708544.jpg", preview: topWallpaperDir + "/static/wp15708544.jpg", title: "wp15708544" },
@@ -125,6 +131,8 @@ ShellRoot {
     readonly property string activeQuickPopupType: quickPopupOpen ? quickPopupType : quickPopupPreviewType
     readonly property bool quickPopupVisible: activeQuickPopupType.length > 0
     readonly property bool quickPopupPanelVisible: quickPopupVisible || quickPopupWindowOpen
+    readonly property bool sideQuickPopupPanelVisible: sideBarLayoutEnabled && quickPopupPanelVisible
+    readonly property bool topBarQuickPopupPanelVisible: topBarLayout && quickPopupPanelVisible
     readonly property string visibleQuickPopupType: quickPopupVisible ? activeQuickPopupType : renderedQuickPopupType
 
     function shellQuote(value) {
@@ -339,6 +347,37 @@ ShellRoot {
         }
     }
 
+    Process {
+        id: topWallpaperApply
+
+        running: false
+        command: [root.topWallpaperApplyScript, "static", ""]
+        onExited: {
+            running = false
+            if (veloraTheme.themeId === "pywal16")
+                veloraTheme.reloadPywal16()
+        }
+    }
+
+    Timer {
+        id: topWallpaperCardsMountTimer
+
+        interval: 170
+        repeat: false
+        onTriggered: root.topWallpaperCardsMounted = root.topWallpaperPopupOpen
+    }
+
+    Timer {
+        id: topWallpaperDeferredScanTimer
+
+        interval: 420
+        repeat: false
+        onTriggered: {
+            if (root.topWallpaperPopupOpen && !topWallpaperScan.running)
+                topWallpaperScan.running = true
+        }
+    }
+
     NumberAnimation {
         id: topWallpaperSlideAnimation
 
@@ -346,9 +385,8 @@ ShellRoot {
         property: "topWallpaperSlideProgress"
         from: 0
         to: 1
-        duration: veloraTheme.motionEnabled ? 520 : 1
-        easing.type: Easing.BezierSpline
-        easing.bezierCurve: veloraTheme.motionCurveEmphasizedDecel
+        duration: veloraTheme.motionEnabled ? 360 : 1
+        easing.type: Easing.Linear
 
         onStopped: {
             if (root.topWallpaperSlideDirection !== 0 && root.topWallpaperSlideProgress >= 1) {
@@ -357,8 +395,17 @@ ShellRoot {
                     root.topWallpaperOffset = ((root.topWallpaperOffset + root.topWallpaperSlideDirection) % entries.length + entries.length) % entries.length
             }
 
+            const queuedDirection = root.topWallpaperQueuedDirection
+            root.topWallpaperQueuedDirection = 0
             root.topWallpaperSlideProgress = 0
             root.topWallpaperSlideDirection = 0
+
+            const entries = root.topWallpaperEntries && root.topWallpaperEntries.length > 0 ? root.topWallpaperEntries : root.topWallpaperFallbackEntries
+            if (queuedDirection !== 0 && entries && entries.length > 1 && root.topWallpaperPopupOpen) {
+                root.topWallpaperSlideDirection = queuedDirection
+                root.topWallpaperSlideProgress = 0
+                topWallpaperSlideAnimation.start()
+            }
         }
     }
 
@@ -386,6 +433,14 @@ ShellRoot {
         NumberAnimation {
             duration: root.frameVisualsEnabled ? veloraTheme.motionPanelIn : veloraTheme.motionPanelOut
             easing.type: root.frameVisualsEnabled ? veloraTheme.motionEaseEnter : veloraTheme.motionEaseExit
+        }
+    }
+
+    Behavior on topWallpaperFrameReveal {
+        enabled: veloraTheme.motionEnabled
+        NumberAnimation {
+            duration: root.topWallpaperPopupOpen ? veloraTheme.motionPanelIn : veloraTheme.motionPanelOut
+            easing.type: root.topWallpaperPopupOpen ? veloraTheme.motionEaseEnter : veloraTheme.motionEaseExit
         }
     }
 
@@ -418,6 +473,28 @@ ShellRoot {
         return Math.round(Math.min(840, Math.max(640, screenHeight * 0.72)))
     }
 
+    function topWallpaperFrameLiftHeight(screenHeight) {
+        const available = Math.max(0, screenHeight - desktopFrameMargin * 2)
+        const target = Math.round(Math.min(280, Math.max(210, screenHeight * 0.185)))
+        return Math.round(Math.min(target, available * 0.45) * topWallpaperFrameReveal)
+    }
+
+    function desktopFrameY(screenHeight) {
+        return desktopFrameMargin
+    }
+
+    function desktopFrameBottomInset(screenHeight) {
+        return desktopFrameMargin + topWallpaperFrameLiftHeight(screenHeight)
+    }
+
+    function desktopFrameHeight(screenHeight) {
+        return Math.max(0, screenHeight - desktopFrameY(screenHeight) - desktopFrameBottomInset(screenHeight))
+    }
+
+    function desktopFrameBottom(screenHeight) {
+        return desktopFrameY(screenHeight) + desktopFrameHeight(screenHeight)
+    }
+
     function topWallpaperEntry(index) {
         const entries = topWallpaperEntries && topWallpaperEntries.length > 0 ? topWallpaperEntries : topWallpaperFallbackEntries
         if (!entries || entries.length <= 0)
@@ -428,7 +505,7 @@ ShellRoot {
 
     function topWallpaperSlideEase() {
         const t = Math.max(0, Math.min(1, topWallpaperSlideProgress))
-        return 1 - Math.pow(1 - t, 3)
+        return t * t * (3 - 2 * t)
     }
 
     function moveTopWallpaper(delta) {
@@ -436,12 +513,39 @@ ShellRoot {
         if (!entries || entries.length <= 1)
             return
 
-        if (topWallpaperSlideAnimation.running)
-            topWallpaperSlideAnimation.complete()
+        const direction = delta > 0 ? 1 : -1
 
-        topWallpaperSlideDirection = delta > 0 ? 1 : -1
+        if (topWallpaperSlideAnimation.running) {
+            topWallpaperQueuedDirection = direction
+            return
+        }
+
+        topWallpaperQueuedDirection = 0
+        topWallpaperSlideDirection = direction
         topWallpaperSlideProgress = 0
         topWallpaperSlideAnimation.start()
+    }
+
+    function applyTopWallpaperSelection() {
+        if (topWallpaperApply.running)
+            return
+
+        if (topWallpaperSlideAnimation.running) {
+            topWallpaperQueuedDirection = 0
+            topWallpaperSlideAnimation.complete()
+        }
+
+        const item = topWallpaperEntry(0)
+        if (!item || !item.path)
+            return
+
+        topWallpaperApply.command = [
+            topWallpaperApplyScript,
+            item.kind || "static",
+            item.path,
+            item.preview || item.path
+        ]
+        topWallpaperApply.running = true
     }
 
     function toggleTopWallpaperPopup(forceOpen, withKeyboardFocus) {
@@ -457,8 +561,13 @@ ShellRoot {
             quickPopupType = ""
             rightDashboardOpen = false
 
-            if (!topWallpaperScan.running)
-                topWallpaperScan.running = true
+            root.topWallpaperCardsMounted = false
+            topWallpaperCardsMountTimer.restart()
+            topWallpaperDeferredScanTimer.restart()
+        } else {
+            topWallpaperCardsMountTimer.stop()
+            topWallpaperDeferredScanTimer.stop()
+            root.topWallpaperCardsMounted = false
         }
     }
 
@@ -610,6 +719,16 @@ ShellRoot {
             return 212
         if (type === "settings")
             return 1018
+        if (type === "profile")
+            return 1032
+        if (type === "time")
+            return 84
+        if (type === "search")
+            return 180
+        if (type === "files")
+            return 424
+        if (type === "browser")
+            return 474
         if (type === "volume")
             return 782
         if (type === "wifi")
@@ -618,6 +737,8 @@ ShellRoot {
             return 938
         if (type === "notifications")
             return 982
+        if (type === "battery")
+            return 1038
         if (type === "bluetooth")
             return 1028
         if (type === "wallpaperVisibility")
@@ -631,6 +752,7 @@ ShellRoot {
     }
 
     function prepareWallpaperSelector(centerY) {
+        topBarPopupCenterX = 0
         setQuickPopupCenter("theme", centerY)
         discardQuickPopupAnimation()
         settingsPanelOpen = false
@@ -674,6 +796,7 @@ ShellRoot {
     }
 
     function prepareSettingsPanel(centerY) {
+        topBarPopupCenterX = 0
         setQuickPopupCenter("settings", centerY)
         discardQuickPopupAnimation()
         wallpaperSelectorOpen = false
@@ -694,6 +817,21 @@ ShellRoot {
         wallpaperSelectorOpen = false
         settingsPanelOpen = false
         quickPopupType = type
+    }
+
+    function setTopBarPopupCenter(centerX) {
+        const value = Number(centerX)
+        topBarPopupCenterX = value > 0 ? value : Math.round(mainAreaX(1920) + mainAreaWidth(1920) / 2)
+    }
+
+    function toggleTopBarQuickPopup(type, centerX) {
+        setTopBarPopupCenter(centerX)
+        toggleQuickPopup(type, defaultQuickPopupCenterY(type))
+    }
+
+    function previewTopBarPopup(type, centerX) {
+        setTopBarPopupCenter(centerX)
+        previewSidebarPopup(type, defaultQuickPopupCenterY(type))
     }
 
     function closeQuickPopup() {
@@ -764,6 +902,13 @@ ShellRoot {
     }
 
     function openAdaptiveBarPopup(type, centerY) {
+        if (!sideBarLayoutEnabled) {
+            toggleTopBarQuickPopup(type, centerY)
+            return
+        }
+
+        closeTopBarPopup()
+
         if (barOnRight) {
             toggleQuickPopup(type, centerY)
             return
@@ -782,7 +927,20 @@ ShellRoot {
         openLeftMenu()
     }
 
+    function openTopBarPopup(type, centerX) {
+        toggleTopBarQuickPopup(type, centerX)
+    }
+
+    function closeTopBarPopup() {
+        topBarPopupCenterX = 0
+    }
+
     function previewAdaptiveBarPopup(type, centerY) {
+        if (!sideBarLayoutEnabled) {
+            previewTopBarPopup(type, centerY)
+            return
+        }
+
         if (barOnRight) {
             previewSidebarPopup(type, centerY)
             return
@@ -793,6 +951,11 @@ ShellRoot {
     }
 
     function endAdaptiveBarPopupHover(type) {
+        if (!sideBarLayoutEnabled) {
+            endSidebarPopupHover(type)
+            return
+        }
+
         if (barOnRight)
             endSidebarPopupHover(type)
     }
@@ -886,10 +1049,14 @@ ShellRoot {
     }
 
     function mainAreaX(screenWidth) {
+        if (!sideBarLayoutEnabled)
+            return frameVisualInset
         return barOnRight ? frameVisualInset : barPanelWidth
     }
 
     function mainAreaRightInset(screenWidth) {
+        if (!sideBarLayoutEnabled)
+            return frameVisualInset
         return barOnRight ? barPanelWidth : frameVisualInset
     }
 
@@ -921,15 +1088,27 @@ ShellRoot {
         if (type === "theme")
             return 820
         if (type === "settings")
-            return 820
+            return 1510
+        if (type === "profile")
+            return 670
+        if (type === "time")
+            return 835
+        if (type === "search")
+            return 790
+        if (type === "files")
+            return 548
+        if (type === "browser")
+            return 1265
         if (type === "volume")
-            return 350
+            return 342
         if (type === "wifi")
-            return 324
+            return 410
         if (type === "brightness")
-            return 286
+            return 448
         if (type === "notifications")
-            return 360
+            return 522
+        if (type === "battery")
+            return 522
         if (type === "bluetooth")
             return 340
         if (type === "wallpaperVisibility")
@@ -941,15 +1120,27 @@ ShellRoot {
         if (type === "theme")
             return 520
         if (type === "settings")
-            return 560
+            return 920
+        if (type === "profile")
+            return 625
+        if (type === "time")
+            return 905
+        if (type === "search")
+            return 925
+        if (type === "files")
+            return 720
+        if (type === "browser")
+            return 795
         if (type === "volume")
-            return 266
+            return 492
         if (type === "wifi")
-            return 448
+            return 690
         if (type === "brightness")
-            return 376
+            return 735
         if (type === "notifications")
-            return 560
+            return 935
+        if (type === "battery")
+            return 935
         if (type === "bluetooth")
             return 392
         if (type === "wallpaperVisibility")
@@ -959,6 +1150,22 @@ ShellRoot {
 
     function quickPopupY(type, panelHeight, screenHeight) {
         const edgeMargin = frameVisualInset + popupFrameGap
+        const preferredRatios = {
+            profile: 0.395,
+            time: 0.060,
+            search: 0.089,
+            files: 0.179,
+            browser: 0.105,
+            volume: 0.472,
+            wifi: 0.329,
+            brightness: 0.264,
+            notifications: 0.106,
+            battery: 0.106
+        }
+        if (preferredRatios[type] !== undefined) {
+            const preferred = Math.round(screenHeight * preferredRatios[type])
+            return Math.round(Math.max(edgeMargin, Math.min(screenHeight - panelHeight - edgeMargin, preferred)))
+        }
         const wanted = quickPopupCenterY - panelHeight / 2
         return Math.round(Math.max(edgeMargin, Math.min(screenHeight - panelHeight - edgeMargin, wanted)))
     }
@@ -1111,6 +1318,10 @@ ShellRoot {
             root.moveTopWallpaper(-1)
         }
 
+        function topWallpaperApply(): void {
+            root.applyTopWallpaperSelection()
+        }
+
         function closeTopWallpaper(): void {
             root.toggleTopWallpaperPopup(false, false)
         }
@@ -1124,6 +1335,7 @@ ShellRoot {
         }
 
         function settings(): void {
+            root.closeTopBarPopup()
             root.toggleSettingsPanel()
         }
 
@@ -1137,6 +1349,22 @@ ShellRoot {
 
         function search(): void {
             root.openAdaptiveBarPopup("search", root.defaultQuickPopupCenterY("search"))
+        }
+
+        function profile(): void {
+            root.openAdaptiveBarPopup("profile", root.defaultQuickPopupCenterY("profile"))
+        }
+
+        function time(): void {
+            root.openAdaptiveBarPopup("time", root.defaultQuickPopupCenterY("time"))
+        }
+
+        function files(): void {
+            root.openAdaptiveBarPopup("files", root.defaultQuickPopupCenterY("files"))
+        }
+
+        function browser(): void {
+            root.openAdaptiveBarPopup("browser", root.defaultQuickPopupCenterY("browser"))
         }
 
         function volume(): void {
@@ -1157,6 +1385,10 @@ ShellRoot {
 
         function bluetooth(): void {
             root.openAdaptiveBarPopup("bluetooth", root.defaultQuickPopupCenterY("bluetooth"))
+        }
+
+        function battery(): void {
+            root.openAdaptiveBarPopup("battery", root.defaultQuickPopupCenterY("battery"))
         }
 
         function weather(): void {
@@ -1225,10 +1457,205 @@ ShellRoot {
         function frameOff(): void {
             veloraTheme.setDesktopFrameEnabled(false)
         }
+
+        function topBarOn(): void {
+            veloraTheme.setTopBarEnabled(true)
+        }
+
+        function topBarOff(): void {
+            veloraTheme.setTopBarEnabled(false)
+        }
+
+        function toggleTopBar(): void {
+            veloraTheme.toggleTopBarEnabled()
+        }
     }
 
     Variants {
-        model: root.topWallpaperPopupOpen ? Quickshell.screens : []
+        model: veloraTheme.topBarEnabled ? Quickshell.screens : []
+
+        PanelWindow {
+            id: topBarPanel
+
+            required property var modelData
+            readonly property int panelWidth: modelData.width > 0 ? modelData.width : 1920
+            readonly property int panelHeight: modelData.height > 0 ? modelData.height : 1200
+            readonly property int stageWidth: Math.round(Math.min(1240, Math.max(760, root.mainAreaWidth(panelWidth) * 0.74)))
+            readonly property int popupWidth: root.topBarQuickPopupPanelVisible ? root.quickPopupWidth(root.visibleQuickPopupType) : 0
+            readonly property int popupHeight: root.topBarQuickPopupPanelVisible ? root.quickPopupHeight(root.visibleQuickPopupType) : 0
+            readonly property int popupGap: 12
+            readonly property int popupY: topBar.y + topBar.height + popupGap
+            readonly property real popupAnchorX: root.topBarPopupCenterX > 0 ? root.topBarPopupCenterX : root.mainAreaX(panelWidth) + root.mainAreaWidth(panelWidth) / 2
+            readonly property int popupX: Math.round(Math.max(root.mainAreaX(panelWidth) + 12, Math.min(root.mainAreaX(panelWidth) + root.mainAreaWidth(panelWidth) - popupWidth - 12, popupAnchorX - popupWidth / 2)))
+
+            screen: modelData
+            color: "transparent"
+            implicitWidth: panelWidth
+            implicitHeight: panelHeight
+            exclusiveZone: 0
+            exclusionMode: ExclusionMode.Ignore
+            focusable: root.quickPopupType === "search"
+
+            WlrLayershell.layer: WlrLayer.Top
+            WlrLayershell.namespace: "velora-shell-topbar"
+            WlrLayershell.keyboardFocus: root.quickPopupType === "search" ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
+
+            anchors {
+                top: true
+                left: true
+                right: true
+            }
+
+            mask: Region {
+                Region {
+                    item: topBar.maskItem
+                    radius: 16
+                }
+
+                Region {
+                    item: topBarPopupInputMask
+                    radius: topBarPopupLoader.cornerRadius
+                }
+            }
+
+            VeloraTopBar {
+                id: topBar
+
+                theme: veloraTheme
+                activePopupType: root.activeQuickPopupType
+                width: topBarPanel.stageWidth
+                height: 64
+                x: Math.round(root.mainAreaX(topBarPanel.panelWidth) + (root.mainAreaWidth(topBarPanel.panelWidth) - width) / 2)
+                y: 0
+
+                onSearchRequested: function(centerX) {
+                    root.openAdaptiveBarPopup("search", topBar.x + centerX)
+                }
+                onThemeRequested: function(centerX) {
+                    root.toggleWallpaperSelector(root.defaultQuickPopupCenterY("theme"))
+                }
+                onSettingsRequested: function(centerX) {
+                    root.closeTopBarPopup()
+                    root.toggleSettingsPanel(root.defaultQuickPopupCenterY("settings"))
+                }
+                onQuickPopupRequested: function(type, centerX) {
+                    root.openAdaptiveBarPopup(type, topBar.x + centerX)
+                }
+                onQuickPopupHovered: function(type, centerX) {
+                    root.previewAdaptiveBarPopup(type, topBar.x + centerX)
+                }
+                onQuickPopupHoverEnded: function(type) {
+                    root.endAdaptiveBarPopupHover(type)
+                }
+            }
+
+            Item {
+                id: topBarPopupInputMask
+
+                x: topBarPopupLoader.x
+                y: topBarPopupLoader.y
+                width: root.topBarQuickPopupPanelVisible ? topBarPopupLoader.width : 0
+                height: root.topBarQuickPopupPanelVisible ? topBarPopupLoader.height : 0
+            }
+
+            Rectangle {
+                id: topBarPopupSurface
+
+                x: topBarPopupLoader.x
+                y: topBarPopupLoader.y
+                width: topBarPopupLoader.width
+                height: topBarPopupLoader.height
+                radius: topBarPopupLoader.cornerRadius
+                visible: root.topBarQuickPopupPanelVisible
+                color: veloraTheme.surfacePopup
+                border.width: 1
+                border.color: veloraTheme.themeId === "pywal16" ? veloraTheme.popupBorderGlow : veloraTheme.borderSoft
+                antialiasing: true
+                opacity: topBarPopupLoader.item ? topBarPopupLoader.item.revealProgress : 0
+                scale: 0.985 + opacity * 0.015
+                transformOrigin: Item.Top
+                z: 8
+                layer.enabled: true
+                layer.effect: DropShadow {
+                    transparentBorder: true
+                    radius: 30
+                    samples: 61
+                    horizontalOffset: 0
+                    verticalOffset: 10
+                    color: veloraTheme.alpha(veloraTheme.shadowColor, 0.14)
+                }
+            }
+
+            Loader {
+                id: topBarPopupLoader
+
+                readonly property int cornerRadius: item ? item.cornerRadius : 13
+
+                active: root.topBarQuickPopupPanelVisible || (root.topBarLayout && root.quickPopupPreloadEnabled)
+                asynchronous: false
+                z: 9
+                width: topBarPanel.popupWidth
+                height: topBarPanel.popupHeight
+                x: topBarPanel.popupX
+                y: topBarPanel.popupY
+                visible: root.topBarQuickPopupPanelVisible
+
+                sourceComponent: Component {
+                    VeloraSidePopup {
+                        theme: veloraTheme
+                        externalSurface: true
+                        attachSide: "left"
+                        popupType: root.visibleQuickPopupType
+                        open: root.quickPopupVisible
+                        interactiveFocus: root.quickPopupType === "search"
+                        width: topBarPopupLoader.width
+                        height: topBarPopupLoader.height
+                        visible: root.topBarQuickPopupPanelVisible
+                        onCloseRequested: root.closeQuickPopup()
+                        onPointerInsideChanged: function(inside) {
+                            root.quickPopupHovering = inside
+                            if (inside)
+                                hoverCloseTimer.stop()
+                            else if (root.hoverPopupType.length > 0)
+                                root.scheduleHoverClose()
+                        }
+                    }
+                }
+
+                Keys.onEscapePressed: root.closeQuickPopup()
+
+                Behavior on x {
+                    enabled: veloraTheme.motionEnabled
+                    NumberAnimation {
+                        duration: veloraTheme.motionPanelGeometry
+                        easing.type: veloraTheme.motionEaseEmphasized
+                        easing.bezierCurve: veloraTheme.motionEmphasizedCurve
+                    }
+                }
+
+                Behavior on width {
+                    enabled: veloraTheme.motionEnabled
+                    NumberAnimation {
+                        duration: veloraTheme.motionPanelGeometry
+                        easing.type: veloraTheme.motionEaseEmphasized
+                        easing.bezierCurve: veloraTheme.motionEmphasizedCurve
+                    }
+                }
+
+                Behavior on height {
+                    enabled: veloraTheme.motionEnabled
+                    NumberAnimation {
+                        duration: veloraTheme.motionPanelGeometry
+                        easing.type: veloraTheme.motionEaseEmphasized
+                        easing.bezierCurve: veloraTheme.motionEmphasizedCurve
+                    }
+                }
+            }
+        }
+    }
+
+    Variants {
+        model: []
 
         PanelWindow {
             id: topWallpaperPopupPanel
@@ -1284,6 +1711,12 @@ ShellRoot {
 
                     if (event.key === Qt.Key_Right || event.key === Qt.Key_D) {
                         root.moveTopWallpaper(1)
+                        event.accepted = true
+                        return
+                    }
+
+                    if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                        root.applyTopWallpaperSelection()
                         event.accepted = true
                         return
                     }
@@ -2107,7 +2540,7 @@ ShellRoot {
             id: framePanel
 
             required property var modelData
-            readonly property bool compositorReservedBarSpace: modelData.width > 0 && width <= modelData.width - root.barPanelWidth + 2
+            readonly property bool compositorReservedBarSpace: root.sideBarLayoutEnabled && modelData.width > 0 && width <= modelData.width - root.barPanelWidth + 2
             readonly property color frameMatteColor: root.desktopFrameMatteColor()
             readonly property color frameBorderColor: root.desktopFrameBorderColor()
             readonly property color frameHighlightColor: root.desktopFrameHighlightColor()
@@ -2134,7 +2567,7 @@ ShellRoot {
             }
 
             function frameY() {
-                return root.desktopFrameMargin
+                return root.desktopFrameY(height)
             }
 
             function frameWidth() {
@@ -2144,7 +2577,7 @@ ShellRoot {
             }
 
             function frameHeight() {
-                return Math.max(0, height - root.desktopFrameMargin * 2)
+                return root.desktopFrameHeight(height)
             }
 
             anchors {
@@ -2196,10 +2629,14 @@ ShellRoot {
                 function paintFrameOutline(ctx, fx, fy, fw, fh, radius) {
                     const x2 = fx + fw
                     const y2 = fy + fh
-                    const barSide = root.barOnRight ? "right" : "left"
-                    const openSideTrim = Math.max(radius, root.sideVisualizerWaveWidth + 4)
+                    const barSide = root.sideBarLayoutEnabled ? (root.barOnRight ? "right" : "left") : ""
+                    const openSideTrim = root.sideBarLayoutEnabled ? Math.max(radius, root.sideVisualizerWaveWidth + 4) : radius
+                    const bottomOpenCorner = root.sideBarLayoutEnabled && root.topWallpaperFrameReveal > 0.01
+                    const openCornerRadius = bottomOpenCorner ? Math.max(radius, Math.min(34, root.sideVisualizerWaveWidth * 0.52)) : radius
                     const horizontalStart = barSide === "left" ? fx + openSideTrim : fx + radius
                     const horizontalEnd = barSide === "right" ? x2 - openSideTrim : x2 - radius
+                    const bottomHorizontalStart = barSide === "left" && bottomOpenCorner ? fx + openCornerRadius : horizontalStart
+                    const bottomHorizontalEnd = barSide === "right" && bottomOpenCorner ? x2 - openCornerRadius : horizontalEnd
 
                     ctx.save()
                     ctx.strokeStyle = framePanel.frameBorderColor
@@ -2227,8 +2664,21 @@ ShellRoot {
                     if (horizontalEnd > horizontalStart) {
                         ctx.moveTo(horizontalStart, fy)
                         ctx.lineTo(horizontalEnd, fy)
-                        ctx.moveTo(horizontalStart, y2)
-                        ctx.lineTo(horizontalEnd, y2)
+                    }
+
+                    if (bottomHorizontalEnd > bottomHorizontalStart) {
+                        ctx.moveTo(bottomHorizontalStart, y2)
+                        ctx.lineTo(bottomHorizontalEnd, y2)
+                    }
+
+                    if (bottomOpenCorner) {
+                        if (barSide === "right") {
+                            ctx.moveTo(x2, y2 - openCornerRadius)
+                            ctx.arc(x2 - openCornerRadius, y2 - openCornerRadius, openCornerRadius, 0, Math.PI / 2, false)
+                        } else {
+                            ctx.moveTo(fx, y2 - openCornerRadius)
+                            ctx.arc(fx + openCornerRadius, y2 - openCornerRadius, openCornerRadius, Math.PI, Math.PI / 2, true)
+                        }
                     }
 
                     ctx.stroke()
@@ -2247,7 +2697,10 @@ ShellRoot {
                     if (!root.frameVisualsMounted || fw <= 0 || fh <= 0)
                         return
 
-                    const barSide = root.barOnRight ? "right" : "left"
+                    const barSide = root.sideBarLayoutEnabled ? (root.barOnRight ? "right" : "left") : ""
+                    const openCornerRadius = root.topWallpaperFrameReveal > 0.01
+                        ? Math.max(radius, Math.min(34, root.sideVisualizerWaveWidth * 0.52))
+                        : radius
 
                     ctx.fillStyle = framePanel.frameMatteColor
                     ctx.fillRect(0, 0, width, fy)
@@ -2261,6 +2714,9 @@ ShellRoot {
                         ctx.fillRect(fx + fw, fy, Math.max(0, width - fx - fw), fh)
                         paintCorner(ctx, "topRight", fx, fy, fw, fh, radius)
                         paintCorner(ctx, "bottomRight", fx, fy, fw, fh, radius)
+                    }
+                    if (root.sideBarLayoutEnabled && root.topWallpaperFrameReveal > 0.01) {
+                        paintCorner(ctx, barSide === "right" ? "bottomRight" : "bottomLeft", fx, fy, fw, fh, openCornerRadius)
                     }
                     paintFrameOutline(ctx, fx, fy, fw, fh, radius)
                 }
@@ -2313,6 +2769,7 @@ ShellRoot {
                 function onBarOnRightChanged() { if (root.frameVisualsMounted) frameMatteCanvas.requestPaint() }
                 function onDesktopFrameMarginChanged() { if (root.frameVisualsMounted) frameMatteCanvas.requestPaint() }
                 function onDesktopFrameRadiusChanged() { if (root.frameVisualsMounted) frameMatteCanvas.requestPaint() }
+                function onTopWallpaperFrameRevealChanged() { if (root.frameVisualsMounted) frameMatteCanvas.requestPaint() }
             }
         }
     }
@@ -2324,11 +2781,11 @@ ShellRoot {
             id: panel
 
             required property var modelData
-            readonly property bool wantsDrawerKeyboard: root.focusMode || root.quickPopupType === "search" || root.settingsPanelOpen || root.wallpaperSelectorOpen
+            readonly property bool wantsDrawerKeyboard: root.focusMode || root.quickPopupType === "search" || root.settingsPanelOpen || root.wallpaperSelectorOpen || root.topWallpaperKeyboardFocus
 
             screen: modelData
             color: "transparent"
-            implicitWidth: modelData.width > 0 ? modelData.width : root.barPanelWidth + root.quickPopupWidth(root.visibleQuickPopupType) + 24
+            implicitWidth: modelData.width > 0 ? modelData.width : root.barPanelWidth + (root.sideQuickPopupPanelVisible ? root.quickPopupWidth(root.visibleQuickPopupType) + 24 : 0)
             exclusiveZone: root.barReserveWidth
             exclusionMode: ExclusionMode.Normal
             focusable: wantsDrawerKeyboard
@@ -2364,13 +2821,18 @@ ShellRoot {
                     item: inlineSettingsInputMask
                     radius: inlineSettingsLoader.cornerRadius
                 }
+
+                Region {
+                    item: topWallpaperStrip
+                    radius: 0
+                }
             }
 
             anchors {
                 top: true
                 bottom: true
-                left: !root.barOnRight
-                right: root.barOnRight
+                left: !root.sideBarLayoutEnabled || !root.barOnRight
+                right: !root.sideBarLayoutEnabled || root.barOnRight
             }
 
             Canvas {
@@ -2434,10 +2896,14 @@ ShellRoot {
                 function paintFrameOutline(ctx, fx, fy, fw, fh, radius) {
                     const x2 = fx + fw
                     const y2 = fy + fh
-                    const barSide = root.barOnRight ? "right" : "left"
-                    const openSideTrim = Math.max(radius, root.sideVisualizerWaveWidth + 4)
+                    const barSide = root.sideBarLayoutEnabled ? (root.barOnRight ? "right" : "left") : ""
+                    const openSideTrim = root.sideBarLayoutEnabled ? Math.max(radius, root.sideVisualizerWaveWidth + 4) : radius
+                    const bottomOpenCorner = root.sideBarLayoutEnabled && root.topWallpaperFrameReveal > 0.01
+                    const openCornerRadius = bottomOpenCorner ? Math.max(radius, Math.min(34, root.sideVisualizerWaveWidth * 0.52)) : radius
                     const horizontalStart = barSide === "left" ? fx + openSideTrim : fx + radius
                     const horizontalEnd = barSide === "right" ? x2 - openSideTrim : x2 - radius
+                    const bottomHorizontalStart = barSide === "left" && bottomOpenCorner ? fx + openCornerRadius : horizontalStart
+                    const bottomHorizontalEnd = barSide === "right" && bottomOpenCorner ? x2 - openCornerRadius : horizontalEnd
 
                     ctx.save()
                     ctx.strokeStyle = root.desktopFrameBorderColor()
@@ -2463,8 +2929,21 @@ ShellRoot {
                     if (horizontalEnd > horizontalStart) {
                         ctx.moveTo(horizontalStart, fy)
                         ctx.lineTo(horizontalEnd, fy)
-                        ctx.moveTo(horizontalStart, y2)
-                        ctx.lineTo(horizontalEnd, y2)
+                    }
+
+                    if (bottomHorizontalEnd > bottomHorizontalStart) {
+                        ctx.moveTo(bottomHorizontalStart, y2)
+                        ctx.lineTo(bottomHorizontalEnd, y2)
+                    }
+
+                    if (bottomOpenCorner) {
+                        if (barSide === "right") {
+                            ctx.moveTo(x2, y2 - openCornerRadius)
+                            ctx.arc(x2 - openCornerRadius, y2 - openCornerRadius, openCornerRadius, 0, Math.PI / 2, false)
+                        } else {
+                            ctx.moveTo(fx, y2 - openCornerRadius)
+                            ctx.arc(fx + openCornerRadius, y2 - openCornerRadius, openCornerRadius, Math.PI, Math.PI / 2, true)
+                        }
                     }
 
                     ctx.stroke()
@@ -2472,6 +2951,9 @@ ShellRoot {
                 }
 
                 function paintSidebarGutterFill(ctx) {
+                    if (!root.sideBarLayoutEnabled)
+                        return
+
                     const bx = Math.round(root.barX(width))
                     const by = root.sidebarVerticalMargin
                     const bw = root.sidebarVisualWidth
@@ -2505,6 +2987,9 @@ ShellRoot {
                 }
 
                 function paintSidebarSurface(ctx) {
+                    if (!root.sideBarLayoutEnabled)
+                        return
+
                     const bx = Math.round(root.barX(width))
                     const by = root.sidebarVerticalMargin
                     const bw = root.sidebarVisualWidth
@@ -2531,11 +3016,14 @@ ShellRoot {
                 onPaint: {
                     const ctx = getContext("2d")
                     const fx = root.mainAreaX(width)
-                    const fy = root.desktopFrameMargin
+                    const fy = root.desktopFrameY(height)
                     const fw = root.mainAreaWidth(width)
-                    const fh = Math.max(0, height - root.desktopFrameMargin * 2)
+                    const fh = root.desktopFrameHeight(height)
                     const radius = Math.min(root.desktopFrameRadius, Math.max(0, fw / 2), Math.max(0, fh / 2))
-                    const barSide = root.barOnRight ? "right" : "left"
+                    const barSide = root.sideBarLayoutEnabled ? (root.barOnRight ? "right" : "left") : ""
+                    const openCornerRadius = root.topWallpaperFrameReveal > 0.01
+                        ? Math.max(radius, Math.min(34, root.sideVisualizerWaveWidth * 0.52))
+                        : radius
 
                     ctx.clearRect(0, 0, width, height)
                     if (!root.frameVisualsMounted || fw <= 0 || fh <= 0)
@@ -2557,6 +3045,9 @@ ShellRoot {
                         ctx.fillRect(fx + fw, fy, Math.max(0, width - fx - fw), fh)
                         paintCorner(ctx, "topRight", fx, fy, fw, fh, radius)
                         paintCorner(ctx, "bottomRight", fx, fy, fw, fh, radius)
+                    }
+                    if (root.sideBarLayoutEnabled && root.topWallpaperFrameReveal > 0.01) {
+                        paintCorner(ctx, barSide === "right" ? "bottomRight" : "bottomLeft", fx, fy, fw, fh, openCornerRadius)
                     }
 
                     paintFrameOutline(ctx, fx, fy, fw, fh, radius)
@@ -2592,6 +3083,7 @@ ShellRoot {
                 function onDesktopFrameRadiusChanged() { if (root.frameVisualsMounted) unifiedFrameCanvas.requestPaint() }
                 function onFrameVisualsMountedChanged() { unifiedFrameCanvas.requestPaint() }
                 function onFrameVisualsRevealChanged() { if (root.frameVisualsMounted) unifiedFrameCanvas.requestPaint() }
+                function onTopWallpaperFrameRevealChanged() { if (root.frameVisualsMounted) unifiedFrameCanvas.requestPaint() }
             }
 
             Item {
@@ -2617,7 +3109,7 @@ ShellRoot {
                 readonly property real localBarEdgeX: barEdgeX - x
                 readonly property real bridgeLeftX: Math.max(0, Math.min(localFrameEdgeX, localBarEdgeX) - 1)
                 readonly property real bridgeRightX: Math.min(width, Math.max(localFrameEdgeX, localBarEdgeX) + 2)
-                readonly property bool activeForPaint: root.frameVisualsMounted && visible && panel.visible && width > 0 && height > 0
+                readonly property bool activeForPaint: root.sideBarLayoutEnabled && root.frameVisualsMounted && visible && panel.visible && width > 0 && height > 0
 
                 function requestWaveformPaint(force) {
                     if (!activeForPaint) {
@@ -2638,10 +3130,10 @@ ShellRoot {
                 }
 
                 x: root.barOnRight ? frameEdgeX - waveWidth + 1 : barEdgeX - 1
-                y: root.frameVisualInset - 1
-                width: root.frameVisualsMounted ? railWidth : 0
-                height: root.frameVisualsMounted ? Math.max(0, parent.height - root.frameVisualInset * 2 + 2) : 0
-                visible: root.frameVisualsMounted
+                y: root.desktopFrameY(parent.height) - 1
+                width: root.sideBarLayoutEnabled && root.frameVisualsMounted ? railWidth : 0
+                height: root.sideBarLayoutEnabled && root.frameVisualsMounted ? Math.max(0, root.desktopFrameHeight(parent.height) + 2) : 0
+                visible: root.sideBarLayoutEnabled && root.frameVisualsMounted
                 opacity: root.frameVisualsReveal
                 clip: true
                 z: 1
@@ -2878,18 +3370,361 @@ ShellRoot {
                 antialiasing: false
             }
 
+            Item {
+                id: topWallpaperStrip
+
+                readonly property real reveal: root.topWallpaperFrameReveal
+                readonly property int frameBottomY: root.desktopFrameBottom(parent.height)
+                readonly property int topGap: Math.max(24, root.desktopFrameMargin + 12)
+                readonly property int bottomGap: Math.max(10, root.desktopFrameMargin - 4)
+                readonly property int sideGap: Math.max(8, Math.round(parent.width * 0.006))
+                readonly property bool cardsReady: root.topWallpaperCardsMounted && reveal > 0.14
+                readonly property int visibleCards: 9
+                readonly property int layoutCards: 6
+                readonly property int centerSlot: Math.floor(visibleCards / 2)
+                readonly property int arrowGutter: Math.max(54, Math.round(width * 0.034))
+                readonly property real contentWidth: Math.max(1, width - arrowGutter * 2)
+                readonly property real cardGap: -Math.max(14, Math.round(contentWidth * 0.012))
+
+                function entryForSlot(slot) {
+                    return root.topWallpaperEntry(slot - centerSlot)
+                }
+
+                function cardWidthForDistance(distance) {
+                    const available = Math.max(1, contentWidth - cardGap * (layoutCards - 1))
+                    const baseWidth = Math.min(326, Math.max(268, contentWidth * 0.174))
+                    const scale = Math.min(1, available / (baseWidth * layoutCards))
+                    return baseWidth * scale
+                }
+
+                function cardCenterForIntegerOffset(offset) {
+                    const sign = offset < 0 ? -1 : 1
+                    const distance = Math.abs(offset)
+                    let x = arrowGutter + contentWidth / 2
+                    let previousWidth = cardWidthForDistance(0)
+
+                    for (let i = 1; i <= distance; ++i) {
+                        const nextWidth = cardWidthForDistance(i)
+                        x += sign * (previousWidth / 2 + cardGap + nextWidth / 2)
+                        previousWidth = nextWidth
+                    }
+
+                    return x
+                }
+
+                function cardCenterForOffset(offset) {
+                    if (Math.abs(offset) < 0.001)
+                        return cardCenterForIntegerOffset(0)
+
+                    const sign = offset < 0 ? -1 : 1
+                    const absolute = Math.abs(offset)
+                    const lower = Math.floor(absolute)
+                    const upper = Math.ceil(absolute)
+                    const t = absolute - lower
+
+                    if (lower === upper)
+                        return cardCenterForIntegerOffset(sign * lower)
+
+                    const from = cardCenterForIntegerOffset(sign * lower)
+                    const to = cardCenterForIntegerOffset(sign * upper)
+                    return from + (to - from) * t
+                }
+
+                x: root.mainAreaX(parent.width) + sideGap
+                y: frameBottomY + topGap + Math.round((1 - reveal) * 12)
+                width: Math.max(0, root.mainAreaWidth(parent.width) - sideGap * 2)
+                height: Math.max(0, parent.height - root.desktopFrameMargin - frameBottomY - topGap - bottomGap)
+                visible: root.frameVisualsMounted && reveal > 0.01 && width > 420 && height > 78
+                opacity: root.frameVisualsReveal * Math.min(1, reveal * 1.25)
+                z: 4
+                clip: false
+                focus: root.topWallpaperKeyboardFocus
+
+                Keys.onEscapePressed: root.toggleTopWallpaperPopup(false, false)
+
+                Keys.onPressed: function(event) {
+                    if (!root.topWallpaperPopupOpen)
+                        return
+
+                    if (event.key === Qt.Key_Left || event.key === Qt.Key_A) {
+                        root.moveTopWallpaper(-1)
+                        event.accepted = true
+                        return
+                    }
+
+                    if (event.key === Qt.Key_Right || event.key === Qt.Key_D) {
+                        root.moveTopWallpaper(1)
+                        event.accepted = true
+                        return
+                    }
+
+                    if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                        root.applyTopWallpaperSelection()
+                        event.accepted = true
+                    }
+                }
+
+                onVisibleChanged: {
+                    if (visible && root.topWallpaperKeyboardFocus)
+                        forceActiveFocus()
+                }
+
+                Connections {
+                    target: root
+
+                    function onTopWallpaperKeyboardFocusChanged() {
+                        if (root.topWallpaperKeyboardFocus && topWallpaperStrip.visible)
+                            topWallpaperStrip.forceActiveFocus()
+                    }
+                }
+
+                Repeater {
+                    model: topWallpaperStrip.visible && topWallpaperStrip.cardsReady ? 15 : 0
+
+                    delegate: Image {
+                        readonly property int preloadOffset: index - 7
+                        readonly property var preloadEntry: root.topWallpaperEntry(preloadOffset)
+
+                        width: 1
+                        height: 1
+                        visible: false
+                        source: preloadEntry && preloadEntry.preview ? preloadEntry.preview : ""
+                        fillMode: Image.PreserveAspectCrop
+                        asynchronous: true
+                        cache: true
+                        retainWhileLoading: true
+                        smooth: false
+                        mipmap: false
+                        sourceSize.width: 600
+                        sourceSize.height: 360
+                    }
+                }
+
+                Repeater {
+                    model: topWallpaperStrip.visible && topWallpaperStrip.cardsReady ? topWallpaperStrip.visibleCards : 0
+
+                    delegate: Item {
+                        id: wallpaperCard
+
+                        readonly property int slotOffset: index - topWallpaperStrip.centerSlot
+                        readonly property real slideOffset: root.topWallpaperSlideDirection === 0 ? 0 : root.topWallpaperSlideDirection * root.topWallpaperSlideEase()
+                        readonly property real visualOffset: slotOffset - slideOffset
+                        readonly property real layoutDistance: Math.abs(slotOffset)
+                        readonly property real distance: Math.abs(visualOffset)
+                        readonly property real focusAmount: Math.max(0, 1 - Math.min(1, distance / 3.0))
+                        readonly property real cardWidth: topWallpaperStrip.cardWidthForDistance(layoutDistance)
+                        readonly property real cardHeight: Math.min(topWallpaperStrip.height - 18, Math.max(104, topWallpaperStrip.height * 0.74))
+                        readonly property real cardLean: Math.min(64, Math.max(34, cardWidth * 0.21))
+                        readonly property var entry: topWallpaperStrip.entryForSlot(index)
+
+                        function cardPath(ctx, w, h, inset) {
+                            const pad = Math.max(0, inset || 0)
+                            const left = pad
+                            const right = Math.max(left + 1, w - pad)
+                            const top = pad
+                            const bottom = Math.max(top + 1, h - pad)
+                            const lean = Math.min(cardLean, Math.max(8, (right - left) * 0.34))
+
+                            ctx.beginPath()
+                            ctx.moveTo(Math.min(right - 1, left + lean), top)
+                            ctx.lineTo(right, top)
+                            ctx.lineTo(Math.max(left + 1, right - lean), bottom)
+                            ctx.lineTo(left, bottom)
+                            ctx.closePath()
+                        }
+
+                        x: Math.round(topWallpaperStrip.cardCenterForOffset(visualOffset) - width / 2)
+                        y: Math.round((topWallpaperStrip.height - height) / 2 + 4)
+                        width: Math.round(cardWidth)
+                        height: Math.round(cardHeight)
+                        z: Math.round(40 + focusAmount * 30 - distance)
+                        opacity: Math.min(1, Math.max(0.60, 0.78 + focusAmount * 0.22 - Math.max(0, distance - 3.15) * 0.24))
+                        visible: height > 40 && width > 80
+                        scale: 1.00 + focusAmount * 0.16
+                        rotation: 0
+                        transformOrigin: Item.Center
+
+                        Rectangle {
+                            id: cardShadow
+
+                            anchors.fill: parent
+                            visible: false
+                            color: "transparent"
+                        }
+
+                        Item {
+                            id: cardImageClip
+
+                            anchors.fill: parent
+                            layer.enabled: true
+                            layer.effect: OpacityMask {
+                                maskSource: cardMask
+                            }
+
+                            Image {
+                                anchors.fill: parent
+                                source: wallpaperCard.entry && wallpaperCard.entry.preview ? wallpaperCard.entry.preview : ""
+                                fillMode: Image.PreserveAspectCrop
+                                asynchronous: true
+                                cache: true
+                                retainWhileLoading: true
+                                smooth: false
+                                mipmap: false
+                                opacity: 0.98
+                                sourceSize.width: 600
+                                sourceSize.height: 360
+                            }
+
+                            Rectangle {
+                                anchors.fill: parent
+                                color: veloraTheme.themeMode === "dark"
+                                    ? Qt.rgba(0, 0, 0, wallpaperCard.distance < 0.5 ? 0.04 : 0.10)
+                                    : Qt.rgba(1, 1, 1, wallpaperCard.distance < 0.5 ? 0.02 : 0.10)
+                            }
+                        }
+
+                        Canvas {
+                            id: cardMask
+
+                            anchors.fill: parent
+                            visible: false
+
+                            onPaint: {
+                                const ctx = getContext("2d")
+                                ctx.clearRect(0, 0, width, height)
+                                wallpaperCard.cardPath(ctx, width, height, 2)
+                                ctx.fillStyle = "white"
+                                ctx.fill()
+                            }
+
+                            Component.onCompleted: requestPaint()
+                            onWidthChanged: requestPaint()
+                            onHeightChanged: requestPaint()
+                        }
+
+                        Canvas {
+                            id: cardBorder
+
+                            anchors.fill: parent
+                            antialiasing: true
+
+                            onPaint: {
+                                const ctx = getContext("2d")
+                                const selected = wallpaperCard.layoutDistance < 0.5
+
+                                ctx.clearRect(0, 0, width, height)
+                                ctx.save()
+                                wallpaperCard.cardPath(ctx, width, height, selected ? 2.5 : 3.5)
+                                ctx.strokeStyle = selected
+                                    ? veloraTheme.alpha(veloraTheme.accentPrimary, veloraTheme.themeMode === "dark" ? 0.56 : 0.44)
+                                    : veloraTheme.alpha(veloraTheme.borderSoft, veloraTheme.themeMode === "dark" ? 0.26 : 0.34)
+                                ctx.lineWidth = selected ? 1.55 : 1.05
+                                ctx.stroke()
+
+                                wallpaperCard.cardPath(ctx, width, height, selected ? 6.5 : 7.5)
+                                ctx.strokeStyle = Qt.rgba(1, 1, 1, selected ? 0.52 : 0.34)
+                                ctx.lineWidth = 0.8
+                                ctx.stroke()
+                                ctx.restore()
+                            }
+
+                            Component.onCompleted: requestPaint()
+                            onWidthChanged: requestPaint()
+                            onHeightChanged: requestPaint()
+                        }
+                    }
+                }
+
+                Item {
+                    id: topWallpaperLeftArrow
+
+                    width: 48
+                    height: Math.min(82, Math.max(62, topWallpaperStrip.height * 0.46))
+                    x: Math.max(0, Math.round(topWallpaperStrip.arrowGutter / 2 - width / 2))
+                    y: Math.round((topWallpaperStrip.height - height) / 2)
+                    z: 90
+                    visible: topWallpaperStrip.cardsReady
+                    opacity: topWallpaperArrowLeftMouse.containsMouse ? 0.95 : 0.68
+
+                    Rectangle {
+                        anchors.fill: parent
+                        radius: Math.min(width, height) / 2
+                        color: veloraTheme.alpha(veloraTheme.surfaceSidebar, veloraTheme.themeMode === "dark" ? 0.42 : 0.54)
+                        border.width: 1
+                        border.color: veloraTheme.alpha(veloraTheme.borderSoft, 0.38)
+                    }
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "‹"
+                        color: veloraTheme.textPrimary
+                        font.pixelSize: Math.round(parent.height * 0.54)
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+
+                    MouseArea {
+                        id: topWallpaperArrowLeftMouse
+
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.moveTopWallpaper(-1)
+                    }
+                }
+
+                Item {
+                    id: topWallpaperRightArrow
+
+                    width: 48
+                    height: topWallpaperLeftArrow.height
+                    x: Math.min(topWallpaperStrip.width - width, Math.round(topWallpaperStrip.width - topWallpaperStrip.arrowGutter / 2 - width / 2))
+                    y: topWallpaperLeftArrow.y
+                    z: 90
+                    visible: topWallpaperStrip.cardsReady
+                    opacity: topWallpaperArrowRightMouse.containsMouse ? 0.95 : 0.68
+
+                    Rectangle {
+                        anchors.fill: parent
+                        radius: Math.min(width, height) / 2
+                        color: veloraTheme.alpha(veloraTheme.surfaceSidebar, veloraTheme.themeMode === "dark" ? 0.42 : 0.54)
+                        border.width: 1
+                        border.color: veloraTheme.alpha(veloraTheme.borderSoft, 0.38)
+                    }
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "›"
+                        color: veloraTheme.textPrimary
+                        font.pixelSize: Math.round(parent.height * 0.54)
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+
+                    MouseArea {
+                        id: topWallpaperArrowRightMouse
+
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.moveTopWallpaper(1)
+                    }
+                }
+            }
+
             VeloraBarV2 {
                 id: barRoot
 
                 theme: veloraTheme
                 z: 10
-                width: root.sidebarVisualWidth
+                visible: root.sideBarLayoutEnabled
+                width: root.sideBarLayoutEnabled ? root.sidebarVisualWidth : 0
                 x: root.barX(parent.width)
                 focusMode: root.focusMode
                 focusIndex: root.focusIndex
                 focusTarget: root.focusTarget
-                visualizerActive: root.frameVisualsEnabled && sideVisualizerRail.activeForPaint
-                shellDrawsPanelSurface: root.frameVisualsMounted
+                visualizerActive: root.sideBarLayoutEnabled && root.frameVisualsEnabled && sideVisualizerRail.activeForPaint
+                shellDrawsPanelSurface: root.sideBarLayoutEnabled && root.frameVisualsMounted
                 activePopupType: root.wallpaperSelectorOpen ? "theme" : root.quickPopupType
                 onMoveFocusRequested: function(dir) {
                     root.moveFocus(dir)
@@ -2936,8 +3771,8 @@ ShellRoot {
 
                 x: inlineQuickPopupLoader.x
                 y: inlineQuickPopupLoader.y
-                width: root.quickPopupPanelVisible ? inlineQuickPopupLoader.width : 0
-                height: root.quickPopupPanelVisible ? inlineQuickPopupLoader.height : 0
+                width: root.sideQuickPopupPanelVisible ? inlineQuickPopupLoader.width : 0
+                height: root.sideQuickPopupPanelVisible ? inlineQuickPopupLoader.height : 0
             }
 
             VeloraAttachedSurface {
@@ -2952,7 +3787,7 @@ ShellRoot {
                 height: inlineQuickPopupLoader.height
                 radius: inlineQuickPopupLoader.cornerRadius
                 revealProgress: inlineQuickPopupLoader.revealProgress
-                visible: root.quickPopupPanelVisible
+                visible: root.sideQuickPopupPanelVisible
             }
 
             Loader {
@@ -2961,14 +3796,14 @@ ShellRoot {
                 readonly property int cornerRadius: item ? item.cornerRadius : 13
                 readonly property real revealProgress: item ? item.revealProgress : 0
 
-                active: root.quickPopupPanelVisible || root.quickPopupPreloadEnabled
+                active: root.sideQuickPopupPanelVisible || (root.sideBarLayoutEnabled && root.quickPopupPreloadEnabled)
                 asynchronous: false
                 z: 21
                 width: root.quickPopupWidth(root.visibleQuickPopupType)
                 height: root.quickPopupHeight(root.visibleQuickPopupType)
                 x: root.quickPopupX(parent.width, width)
                 y: root.quickPopupY(root.visibleQuickPopupType, height, parent.height)
-                visible: root.quickPopupPanelVisible
+                visible: root.sideQuickPopupPanelVisible
 
                 onActiveChanged: if (!active) root.quickPopupHovering = false
 
@@ -2982,7 +3817,7 @@ ShellRoot {
                         interactiveFocus: root.quickPopupType === "search"
                         width: inlineQuickPopupLoader.width
                         height: inlineQuickPopupLoader.height
-                        visible: root.quickPopupPanelVisible
+                        visible: root.sideQuickPopupPanelVisible
                         onCloseRequested: root.closeQuickPopup()
                         onPointerInsideChanged: function(inside) {
                             root.quickPopupHovering = inside
@@ -3236,10 +4071,10 @@ ShellRoot {
                     active: root.settingsPanelPanelVisible || root.settingsPanelPreloadEnabled
                     asynchronous: true
                     z: 5
-                    width: Math.round(Math.min(root.quickPopupWidth("settings"), parent.width * 0.49))
-                    height: Math.round(Math.min(root.quickPopupHeight("settings"), width * 0.66))
-                    x: root.leftMenuAttachedPopupX(parent.width, width)
-                    y: root.quickPopupY("settings", height, parent.height)
+                    width: Math.round(Math.min(root.quickPopupWidth("settings"), root.mainAreaWidth(parent.width) - 56))
+                    height: Math.round(Math.min(root.quickPopupHeight("settings"), parent.height - root.frameVisualInset * 2 - 72))
+                    x: Math.round(root.mainAreaX(parent.width) + (root.mainAreaWidth(parent.width) - width) / 2)
+                    y: Math.round(root.frameVisualInset + (parent.height - root.frameVisualInset * 2 - height) / 2)
                     visible: root.settingsPanelPanelVisible
 
                     onActiveChanged: if (!active) root.settingsPanelHovering = false

@@ -1,0 +1,99 @@
+#!/usr/bin/env python3
+import re
+import subprocess
+
+
+def run(args):
+    try:
+        return subprocess.check_output(args, text=True, stderr=subprocess.DEVNULL, timeout=3)
+    except Exception:
+        return ""
+
+
+def line_value(text, key):
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith(key + ":"):
+            return line.split(":", 1)[1].strip()
+    return ""
+
+
+def powered_state(show_text):
+    for line in show_text.splitlines():
+        line = line.strip()
+        if line.startswith("Powered:"):
+            return "yes" if line.endswith("yes") else "no"
+    return "no"
+
+
+def adapter_name(show_text):
+    name = line_value(show_text, "Name")
+    alias = line_value(show_text, "Alias")
+    return alias or name or "ShiraOS Machine"
+
+
+def device_type(name):
+    s = name.lower()
+    if any(x in s for x in ("wh-", "head", "buds", "fone", "airpods", "earbud")):
+        return "headphones"
+    if any(x in s for x in ("keychron", "keyboard", "teclado")):
+        return "keyboard"
+    if any(x in s for x in ("mouse", "master", "logitech")):
+        return "mouse"
+    if any(x in s for x in ("dualsense", "controller", "controle", "gamepad")):
+        return "gamepad"
+    if any(x in s for x in ("flip", "speaker", "jbl", "sound", "alto-falante")):
+        return "speaker"
+    if any(x in s for x in ("poco", "phone", "smartphone", "iphone", "galaxy", "xiaomi")):
+        return "phone"
+    return "device"
+
+
+def parse_devices(text):
+    devices = []
+    for line in text.splitlines():
+        m = re.match(r"Device\s+([0-9A-F:]{17})\s+(.+)$", line.strip(), re.I)
+        if not m:
+            continue
+        devices.append((m.group(1), m.group(2).strip()))
+    return devices
+
+
+def device_info(addr):
+    text = run(["bluetoothctl", "info", addr])
+    connected = "yes" if re.search(r"Connected:\s+yes", text) else "no"
+    paired = "yes" if re.search(r"Paired:\s+yes", text) else "no"
+    battery = ""
+    for line in text.splitlines():
+        if "Battery Percentage:" in line:
+            m = re.search(r"\((\d+)\)", line)
+            if m:
+                battery = m.group(1)
+            else:
+                m = re.search(r"(\d+)%", line)
+                battery = m.group(1) if m else ""
+    return paired, connected, battery
+
+
+show = run(["bluetoothctl", "show"])
+if not show:
+    print("POWERED=no")
+    print("LOCAL=ShiraOS Machine|no")
+    raise SystemExit(0)
+
+print("POWERED=" + powered_state(show))
+print("LOCAL=" + adapter_name(show).replace("|", " ") + "|yes")
+
+seen = set()
+for addr, name in parse_devices(run(["bluetoothctl", "devices", "Paired"])):
+    seen.add(addr)
+    paired, connected, battery = device_info(addr)
+    group = "connected" if connected == "yes" else "available"
+    print("DEVICE={}|{}|{}|{}|{}|{}".format(group, addr, name.replace("|", " "), device_type(name), connected, battery))
+
+for addr, name in parse_devices(run(["bluetoothctl", "devices"])):
+    if addr in seen:
+        continue
+    paired, connected, battery = device_info(addr)
+    group = "connected" if connected == "yes" else "available"
+    print("DEVICE={}|{}|{}|{}|{}|{}".format(group, addr, name.replace("|", " "), device_type(name), connected, battery))

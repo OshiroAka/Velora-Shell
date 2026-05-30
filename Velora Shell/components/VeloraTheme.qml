@@ -49,6 +49,7 @@ QtObject {
     readonly property var motionEmphasizedCurve: [0.05, 0, 0.133, 0.06, 0.166, 0.4, 0.208, 0.82, 0.25, 1, 1, 1]
     property string barPosition: "left"
     property bool desktopFrameEnabled: true
+    property bool topBarEnabled: false
     property string language: "ja"
     property real sidebarOpacity: 0.88
     property real barOpacity: 0.88
@@ -833,6 +834,27 @@ QtObject {
         }
     }
 
+    function setTopBarEnabled(enabled, persist) {
+        const nextEnabled = enabled === true || String(enabled) === "1" || String(enabled) === "true" || String(enabled) === "on"
+        topBarEnabled = nextEnabled
+        if (persist !== false)
+            saveTopBarEnabled()
+    }
+
+    function toggleTopBarEnabled() {
+        setTopBarEnabled(!topBarEnabled)
+    }
+
+    function saveTopBarEnabled() {
+        const enabled = topBarEnabled ? "on" : "off"
+        if (topBarSaveProc.running)
+            topBarSaveProc.pending = enabled
+        else {
+            topBarSaveProc.command = [root.stateScript, "topbar", "set", enabled]
+            topBarSaveProc.running = true
+        }
+    }
+
     function applyLayout(position, frameEnabled, persist) {
         const nextPosition = String(position || "left") === "right" ? "right" : "left"
         const nextFrameEnabled = frameEnabled !== false && String(frameEnabled) !== "0" && String(frameEnabled) !== "false"
@@ -959,6 +981,9 @@ QtObject {
 
         if (key === "visualizer" && line.length > 0 && line !== "auto")
             root.setVisualizerStrength(line, false)
+
+        if (key === "topBar")
+            root.setTopBarEnabled(line === "on" || line === "1" || line === "true", false)
     }
 
     Component.onCompleted: {
@@ -1201,6 +1226,22 @@ QtObject {
         running: false
         command: [root.stateScript, "visualizer", "reset"]
         onExited: running = false
+    }
+
+    property Process topBarSaveProc: Process {
+        property string pending: ""
+
+        running: false
+        command: [root.stateScript, "topbar", "set", "off"]
+        onExited: {
+            running = false
+            if (pending.length > 0) {
+                const next = pending
+                pending = ""
+                command = [root.stateScript, "topbar", "set", next]
+                running = true
+            }
+        }
     }
 
     property Process layoutLoadProc: Process {

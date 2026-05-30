@@ -1,0 +1,117 @@
+#!/usr/bin/env python3
+from pathlib import Path
+import json, sys
+
+base = Path.home() / ".config/quickshell/shinbar"
+path = base / "savedata.json"
+
+default = {
+    "barH": 38,
+    "pillH": 28,
+    "pillR": 9,
+    "pillPadH": 12,
+    "pillSpacing": 6,
+    "barMarginT": 8,
+    "barMarginH": 10,
+    "pillOpacity": 0.72,
+    "popupOpacity": 0.58,
+    "fontSize": 12,
+    "fontSizeSm": 10,
+    "fontFamily": "JetBrainsMono Nerd Font",
+
+    "settingsCategory": "bar",
+
+    "clockBg": "",
+    "clockBgOpacity": 0.22,
+    "clockAccentBoost": 1.0,
+
+    "mediaBg": "",
+    "mediaBgOpacity": 0.22,
+
+    "effectsEnabled": True,
+    "motionStrength": 1.0,
+    "pywalActive": True,
+    "pywalPollMs": 350,
+    "weatherCity": "Guarulhos",
+
+    "searchEnabled": True,
+    "searchPanelWidth": 560,
+    "searchMaxResults": 8,
+    "searchIconSize": 28,
+    "searchOpacity": 0.74,
+    "searchShowIcons": True,
+    "searchCompact": False,
+    "searchPosition": 1,
+
+    "clockStyle": 0,
+    "clockPopupStyle": 0,
+    "clockShowSeconds": True,
+    "clockUse24h": False,
+    "clockShowDate": True,
+
+    "mediaAlwaysVisible": False,
+    "mediaShowVisualizer": True,
+    "mediaPanelWidth": 246,
+    "mediaPanelHeight": 560,
+
+    "animationSpeed": 100,
+    "trailEnabled": True,
+    "glowStrength": 0.70,
+    "hoverScale": 1.025
+}
+
+def load():
+    if not path.exists():
+        path.write_text(json.dumps(default, indent=2, ensure_ascii=False))
+        return dict(default)
+
+    try:
+        data = json.loads(path.read_text())
+    except Exception:
+        data = {}
+
+    merged = dict(default)
+    merged.update(data)
+    return merged
+
+def save(data):
+    path.write_text(json.dumps(data, indent=2, ensure_ascii=False))
+
+def emit_all(data):
+    for k, v in data.items():
+        print(f"{k}={v}")
+
+args = sys.argv[1:]
+data = load()
+
+if not args or args[0] == "get":
+    emit_all(data)
+    raise SystemExit(0)
+
+if args[0] == "set" and len(args) >= 3:
+    key = args[1]
+    value = " ".join(args[2:])
+
+    if key not in default:
+        raise SystemExit(0)
+
+    if isinstance(default[key], bool):
+        data[key] = value.lower() in ("1", "true", "yes", "on")
+    elif isinstance(default[key], int) and not isinstance(default[key], bool):
+        try:
+            data[key] = int(float(value))
+        except Exception:
+            data[key] = default[key]
+    elif isinstance(default[key], float):
+        try:
+            data[key] = float(value)
+        except Exception:
+            data[key] = default[key]
+    else:
+        data[key] = value
+
+    save(data)
+    raise SystemExit(0)
+
+if args[0] == "reset":
+    save(dict(default))
