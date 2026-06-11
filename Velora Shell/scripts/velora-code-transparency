@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/velora-shell"
+state_file="${state_dir}/code-opacity"
+code_root="${VELORA_CODE_ROOT:-$HOME/.local/share/velora-code-transparent/code}"
+css_file="${code_root}/out/vs/workbench/velora-transparent.css"
+default_opacity="0.96"
+
+clamp_opacity() {
+  awk -v value="${1:-$default_opacity}" 'BEGIN {
+    if (value == "" || value == "auto") value = 0.96;
+    value += 0;
+    if (value < 0.60) value = 0.60;
+    if (value > 0.98) value = 0.98;
+    printf "%.2f", value;
+  }'
+}
+
+percent() {
+  awk -v value="$1" 'BEGIN { printf "%d%%", int(value * 100 + 0.5); }'
+}
+
+apply_opacity() {
+  local opacity editor surface strong window_pct editor_pct surface_pct strong_pct
+  opacity="$(clamp_opacity "$1")"
+  editor="$(awk -v value="$opacity" 'BEGIN { value -= 0.02; if (value < 0.60) value = 0.60; printf "%.2f", value; }')"
+  surface="$(awk -v value="$opacity" 'BEGIN { value += 0.02; if (value > 0.99) value = 0.99; printf "%.2f", value; }')"
+  strong="$(awk -v value="$opacity" 'BEGIN { value += 0.03; if (value > 0.99) value = 0.99; printf "%.2f", value; }')"
+  window_pct="$(percent "$opacity")"
+  editor_pct="$(percent "$editor")"
+  surface_pct="$(percent "$surface")"
+  strong_pct="$(percent "$strong")"
+
+  if [[ ! -f "$css_file" ]]; then
+    printf 'Code transparency CSS not found: %s\n' "$css_file" >&2
+    exit 1
+  fi
+
+  VELORA_CODE_WINDOW_ALPHA="$window_pct" \
+  VELORA_CODE_EDITOR_ALPHA="$editor_pct" \
+  VELORA_CODE_SURFACE_ALPHA="$surface_pct" \
+  VELORA_CODE_STRONG_ALPHA="$strong_pct" \
+  perl -0pi -e '
+    s/--velora-code-window-alpha:\s*[^;]+;/--velora-code-window-alpha: $ENV{VELORA_CODE_WINDOW_ALPHA};/g;
+    s/--velora-code-editor-alpha:\s*[^;]+;/--velora-code-editor-alpha: $ENV{VELORA_CODE_EDITOR_ALPHA};/g;
+    s/--velora-code-surface-alpha:\s*[^;]+;/--velora-code-surface-alpha: $ENV{VELORA_CODE_SURFACE_ALPHA};/g;
+    s/--velora-code-strong-alpha:\s*[^;]+;/--velora-code-strong-alpha: $ENV{VELORA_CODE_STRONG_ALPHA};/g;
+  ' "$css_file"
+
+  mkdir -p "$state_dir"
+  printf '%s\n' "$opacity" > "$state_file"
+  printf '%s\n' "$opacity"
+}
+
+case "${1:-get}" in
+  get)
+    if [[ -s "$state_file" ]]; then
+      clamp_opacity "$(cat "$state_file")"
+      printf '\n'
+    else
+      printf '%s\n' "$default_opacity"
+    fi
+    ;;
+  set)
+    apply_opacity "${2:-$default_opacity}" >/dev/null
+    ;;
+  apply)
+    apply_opacity "$(if [[ -s "$state_file" ]]; then cat "$state_file"; else printf '%s' "$default_opacity"; fi)" >/dev/null
+    ;;
+  reset)
+    apply_opacity "$default_opacity" >/dev/null
+    ;;
+  *)
+    printf 'usage: %s get|set|apply|reset [opacity]\n' "$0" >&2
+    exit 2
+    ;;
+esac

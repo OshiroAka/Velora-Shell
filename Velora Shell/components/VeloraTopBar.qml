@@ -20,8 +20,8 @@ Item {
     property int notificationCount: 0
     property string activePopupType: ""
     readonly property string homeDir: Quickshell.env("HOME") || ""
-    readonly property string uiFont: "Noto Sans CJK JP"
-    readonly property string monoFont: "JetBrainsMono Nerd Font"
+    readonly property string uiFont: theme ? theme.uiFont : "Noto Sans CJK JP"
+    readonly property string monoFont: theme ? theme.monoFont : "JetBrainsMono Nerd Font"
     readonly property bool pywalStyle: theme && theme.themeId === "pywal16"
     readonly property bool darkSoft: theme && theme.themeMode === "dark"
     readonly property real glassAlpha: theme ? Math.max(theme.minOpacityForRole("sidebar"), Math.min(theme.barOpacity + 0.02, 0.92)) : 0.84

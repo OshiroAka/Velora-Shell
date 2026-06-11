@@ -35,8 +35,8 @@ Item {
         ? (darkSoft ? theme.withAlpha(theme.surfaceCard, Math.min(theme.surfaceCard.a, 0.62)) : theme.surfaceCard)
         : Qt.rgba(1, 1, 1, 0.70)
     readonly property color borderSoft: theme ? (pywalStyle ? theme.withAlpha(theme.sidebarBorderGlow, Math.min(0.18, Math.max(0.08, theme.sidebarBorderGlow.a * 0.50))) : theme.withAlpha(theme.borderSoft, theme.themeMode === "dark" ? 0.11 : 0.26)) : Qt.rgba(1, 1, 1, 0.26)
-    readonly property string uiFont: "Noto Sans CJK JP"
-    readonly property string monoFont: "JetBrainsMono Nerd Font"
+    readonly property string uiFont: theme ? theme.uiFont : "Noto Sans CJK JP"
+    readonly property string monoFont: theme ? theme.monoFont : "JetBrainsMono Nerd Font"
     readonly property int motionFast: theme ? theme.motionFast : 120
     readonly property int motionNormal: theme ? theme.motionNormal : 200
     readonly property int motionHover: theme ? theme.motionHover : 120
@@ -65,12 +65,13 @@ Item {
     property var cavaValues: []
     property int cavaSettledFrames: 0
     property int cavaSkippedFrames: 0
-    readonly property int cavaBandCount: 40
-    readonly property real cavaSettledDelta: 0.006
-    readonly property int cavaSettleFrameThreshold: 8
-    readonly property int cavaMaxSkippedFrames: 10
+    readonly property int cavaBandCount: 28
+    readonly property real cavaSettledDelta: 0.010
+    readonly property int cavaSettleFrameThreshold: 6
+    readonly property int cavaMaxSkippedFrames: 14
     readonly property bool cavaWanted: visualizerActive && visible && width > 0 && height > 0
     readonly property string cavaScript: Quickshell.shellDir + "/scripts/velora-cava"
+    readonly property string popupStatusScript: Quickshell.shellDir + "/scripts/velora-popup-status"
 
     function trackedNotificationValues() {
         const tracked = NotificationServer.trackedNotifications
@@ -142,8 +143,6 @@ Item {
         const probes = [
             { item: slotClock, type: "time" },
             { item: slotSearch, type: "search" },
-            { item: slotFiles, type: "files" },
-            { item: slotBrowser, type: "browser" },
             { item: slotVolume, type: "volume" },
             { item: slotWifi, type: "wifi" },
             { item: slotBrightness, type: "brightness" },
@@ -443,12 +442,12 @@ Item {
         }
 
         if (focusTarget === "files") {
-            root.quickPopupRequested("files", root.itemCenterY(slotFiles))
+            runFocusCommand(filesCommand)
             return
         }
 
         if (focusTarget === "browser") {
-            root.quickPopupRequested("browser", root.itemCenterY(slotBrowser))
+            runFocusCommand(browserCommand)
             return
         }
 
@@ -604,16 +603,18 @@ Item {
         id: volumeQuery
 
         running: false
-        command: ["bash", "-lc", "wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null || echo 'Volume: 0.70'"]
+        command: [root.popupStatusScript, "audio"]
 
         stdout: SplitParser {
             onRead: function(data) {
-                const text = data.trim()
-                const match = text.match(/[0-9]+\\.?[0-9]*/)
+                const parts = data.trim().split("|")
+                if (parts.length < 3 || parts[0] !== "AUDIO_SINK")
+                    return
 
-                root.muted = text.indexOf("MUTED") >= 0
-                if (match)
-                    root.volume = Math.max(0, Math.min(100, Math.round(parseFloat(match[0]) * 100)))
+                const value = parseFloat(parts[1])
+                if (!isNaN(value))
+                    root.volume = Math.max(0, Math.min(100, Math.round(value * 100)))
+                root.muted = parts[2] === "1"
             }
         }
 
@@ -624,7 +625,7 @@ Item {
         id: notificationCountQuery
 
         running: false
-        command: ["bash", "-lc", "if command -v makoctl >/dev/null 2>&1; then makoctl list -j 2>/dev/null | python3 -c 'import sys,json; raw=sys.stdin.read().strip() or \"[]\"; print(len(json.loads(raw)))' 2>/dev/null || printf '0\\n'; else printf '0\\n'; fi"]
+        command: [root.popupStatusScript, "notification-count"]
 
         stdout: SplitParser {
             onRead: function(data) {
@@ -947,8 +948,7 @@ Item {
 
                 iconName: "folder"
                 tint: root.theme ? root.theme.accentTertiary : Qt.rgba(0.46, 0.64, 0.90, 0.94)
-                hoverPopupType: "files"
-                selected: root.activePopupType === "files"
+                command: root.filesCommand
             }
 
             AppButton {
@@ -956,8 +956,7 @@ Item {
 
                 iconName: "browser"
                 tint: root.theme ? root.theme.accentPrimary : Qt.rgba(0.91, 0.46, 0.36, 0.90)
-                hoverPopupType: "browser"
-                selected: root.activePopupType === "browser"
+                command: root.browserCommand
             }
 
             AppButton {

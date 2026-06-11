@@ -9,9 +9,119 @@ glow_file="${state_dir}/glow"
 border_file="${state_dir}/border"
 layout_file="${state_dir}/layout"
 language_file="${state_dir}/language"
+font_file="${state_dir}/font"
 visualizer_file="${state_dir}/visualizer"
+visualizer_mode_file="${state_dir}/visualizer-mode"
+visualizer_pixel_size_file="${state_dir}/visualizer-pixel-size"
 topbar_file="${state_dir}/topbar"
+popup_attach_file="${state_dir}/popup-attach"
+popup_bubbles_file="${state_dir}/popup-bubbles"
+wallpaper_transition_file="${state_dir}/wallpaper-transition"
 command="${1:-get}"
+
+normalize_on_off() {
+  case "${1:-on}" in
+    1|true|yes|on|enable|enabled)
+      printf 'on\n'
+      ;;
+    *)
+      printf 'off\n'
+      ;;
+  esac
+}
+
+normalize_visualizer_mode() {
+  case "${1:-wave}" in
+    pixels|pixel|grid|squares|square)
+      printf 'pixels\n'
+      ;;
+    *)
+      printf 'wave\n'
+      ;;
+  esac
+}
+
+normalize_font() {
+  case "${1:-noto}" in
+    noto|noto-sans|noto_sans)
+      printf 'noto\n'
+      ;;
+    adwaita|adwaita-sans|adwaita_sans)
+      printf 'adwaita\n'
+      ;;
+    cantarell)
+      printf 'cantarell\n'
+      ;;
+    dejavu|dejavu-sans|dejavu_sans)
+      printf 'dejavu\n'
+      ;;
+    liberation|liberation-sans|liberation_sans)
+      printf 'liberation\n'
+      ;;
+    fantasque|fantasque-sans|fantasquesansm)
+      printf 'fantasque\n'
+      ;;
+    *)
+      printf 'noto\n'
+      ;;
+  esac
+}
+
+normalize_popup_bubbles() {
+  case "${1:-matched}" in
+    1|true|yes|on|solid|solids)
+      printf 'solid\n'
+      ;;
+    *)
+      printf 'matched\n'
+      ;;
+  esac
+}
+
+normalize_wallpaper_transition() {
+  case "${1:-fade}" in
+    none|simple|fade|left|right|top|bottom|wipe|wave|grow|center|any|outer|random)
+      printf '%s\n' "$1"
+      ;;
+    *)
+      printf 'fade\n'
+      ;;
+  esac
+}
+
+clamp_decimal() {
+  local value="${1:-}"
+  local fallback="${2:-0}"
+  local min="${3:-0}"
+  local max="${4:-1}"
+
+  awk -v value="$value" -v fallback="$fallback" -v min="$min" -v max="$max" '
+    BEGIN {
+      if (value !~ /^[0-9]+([.][0-9]+)?$/)
+        value = fallback
+      value += 0
+      if (value < min)
+        value = min
+      if (value > max)
+        value = max
+      printf "%.2f\n", value
+    }
+  '
+}
+
+read_wallpaper_transition() {
+  local config="fade|1.00|0.12"
+  local transition
+  local duration
+  local delay
+
+  [[ -s "$wallpaper_transition_file" ]] && config="$(cat "$wallpaper_transition_file")"
+  IFS='|' read -r transition duration delay <<< "$config"
+  transition="$(normalize_wallpaper_transition "${transition:-fade}")"
+  duration="$(clamp_decimal "${duration:-1.00}" "1.00" "0.15" "3.00")"
+  delay="$(clamp_decimal "${delay:-0.12}" "0.12" "0" "0.80")"
+  printf '%s|%s|%s\n' "$transition" "$duration" "$delay"
+}
 
 case "$command" in
   get)
@@ -29,8 +139,14 @@ case "$command" in
     border="auto"
     layout="left|1"
     language="ja"
+    font="noto"
     visualizer="0.46"
+    visualizer_mode="wave"
+    visualizer_pixel_size="7.00"
     topbar="off"
+    popup_attach="on"
+    popup_bubbles="matched"
+    wallpaper_transition="$(read_wallpaper_transition)"
 
     [[ -s "$state_file" ]] && theme="$(cat "$state_file")"
     [[ -s "$opacity_file" ]] && opacity="$(cat "$opacity_file")"
@@ -39,8 +155,13 @@ case "$command" in
     [[ -s "$border_file" ]] && border="$(cat "$border_file")"
     [[ -s "$layout_file" ]] && layout="$(cat "$layout_file")"
     [[ -s "$language_file" ]] && language="$(cat "$language_file")"
+    [[ -s "$font_file" ]] && font="$(normalize_font "$(cat "$font_file")")"
     [[ -s "$visualizer_file" ]] && visualizer="$(cat "$visualizer_file")"
+    [[ -s "$visualizer_mode_file" ]] && visualizer_mode="$(normalize_visualizer_mode "$(cat "$visualizer_mode_file")")"
+    [[ -s "$visualizer_pixel_size_file" ]] && visualizer_pixel_size="$(clamp_decimal "$(cat "$visualizer_pixel_size_file")" "7.00" "3" "12")"
     [[ -s "$topbar_file" ]] && topbar="$(cat "$topbar_file")"
+    [[ -s "$popup_attach_file" ]] && popup_attach="$(normalize_on_off "$(cat "$popup_attach_file")")"
+    [[ -s "$popup_bubbles_file" ]] && popup_bubbles="$(normalize_popup_bubbles "$(cat "$popup_bubbles_file")")"
 
     printf 'theme|%s\n' "$theme"
     printf 'opacity|%s\n' "$opacity"
@@ -49,8 +170,14 @@ case "$command" in
     printf 'border|%s\n' "$border"
     printf 'layout|%s\n' "$layout"
     printf 'language|%s\n' "$language"
+    printf 'font|%s\n' "$font"
     printf 'visualizer|%s\n' "$visualizer"
+    printf 'visualizerMode|%s\n' "$visualizer_mode"
+    printf 'visualizerPixelSize|%s\n' "$visualizer_pixel_size"
     printf 'topBar|%s\n' "$topbar"
+    printf 'popupAttach|%s\n' "$popup_attach"
+    printf 'popupBubbles|%s\n' "$popup_bubbles"
+    printf 'wallpaperTransition|%s\n' "$wallpaper_transition"
     ;;
   set)
     theme="${2:-default}"
@@ -231,6 +358,30 @@ case "$command" in
         ;;
     esac
     ;;
+  font)
+    subcommand="${2:-get}"
+    case "$subcommand" in
+      get)
+        if [[ -s "$font_file" ]]; then
+          normalize_font "$(cat "$font_file")"
+        else
+          printf 'noto\n'
+        fi
+        ;;
+      set)
+        font="$(normalize_font "${3:-noto}")"
+        mkdir -p "$state_dir"
+        printf '%s\n' "$font" > "$font_file"
+        ;;
+      reset)
+        rm -f "$font_file"
+        ;;
+      *)
+        printf 'usage: %s font get|set|reset [noto|adwaita|cantarell|dejavu|liberation|fantasque]\n' "$0" >&2
+        exit 2
+        ;;
+    esac
+    ;;
   visualizer)
     subcommand="${2:-get}"
     case "$subcommand" in
@@ -251,6 +402,102 @@ case "$command" in
         ;;
       *)
         printf 'usage: %s visualizer get|set|reset [strength]\n' "$0" >&2
+        exit 2
+        ;;
+    esac
+    ;;
+  visualizer-mode)
+    subcommand="${2:-get}"
+    case "$subcommand" in
+      get)
+        if [[ -s "$visualizer_mode_file" ]]; then
+          normalize_visualizer_mode "$(cat "$visualizer_mode_file")"
+        else
+          printf 'wave\n'
+        fi
+        ;;
+      set)
+        mode="$(normalize_visualizer_mode "${3:-wave}")"
+        mkdir -p "$state_dir"
+        printf '%s\n' "$mode" > "$visualizer_mode_file"
+        ;;
+      reset)
+        rm -f "$visualizer_mode_file"
+        ;;
+      *)
+        printf 'usage: %s visualizer-mode get|set|reset [wave|pixels]\n' "$0" >&2
+        exit 2
+        ;;
+    esac
+    ;;
+  visualizer-pixel-size)
+    subcommand="${2:-get}"
+    case "$subcommand" in
+      get)
+        if [[ -s "$visualizer_pixel_size_file" ]]; then
+          clamp_decimal "$(cat "$visualizer_pixel_size_file")" "7.00" "3" "12"
+        else
+          printf '7.00\n'
+        fi
+        ;;
+      set)
+        size="$(clamp_decimal "${3:-7.00}" "7.00" "3" "12")"
+        mkdir -p "$state_dir"
+        printf '%s\n' "$size" > "$visualizer_pixel_size_file"
+        ;;
+      reset)
+        rm -f "$visualizer_pixel_size_file"
+        ;;
+      *)
+        printf 'usage: %s visualizer-pixel-size get|set|reset [3-12]\n' "$0" >&2
+        exit 2
+        ;;
+    esac
+    ;;
+  popup-attach)
+    subcommand="${2:-get}"
+    case "$subcommand" in
+      get)
+        if [[ -s "$popup_attach_file" ]]; then
+          normalize_on_off "$(cat "$popup_attach_file")"
+        else
+          printf 'on\n'
+        fi
+        ;;
+      set)
+        enabled="$(normalize_on_off "${3:-on}")"
+        mkdir -p "$state_dir"
+        printf '%s\n' "$enabled" > "$popup_attach_file"
+        ;;
+      reset)
+        rm -f "$popup_attach_file"
+        ;;
+      *)
+        printf 'usage: %s popup-attach get|set|reset [on|off]\n' "$0" >&2
+        exit 2
+        ;;
+    esac
+    ;;
+  popup-bubbles)
+    subcommand="${2:-get}"
+    case "$subcommand" in
+      get)
+        if [[ -s "$popup_bubbles_file" ]]; then
+          normalize_popup_bubbles "$(cat "$popup_bubbles_file")"
+        else
+          printf 'matched\n'
+        fi
+        ;;
+      set)
+        mode="$(normalize_popup_bubbles "${3:-matched}")"
+        mkdir -p "$state_dir"
+        printf '%s\n' "$mode" > "$popup_bubbles_file"
+        ;;
+      reset)
+        rm -f "$popup_bubbles_file"
+        ;;
+      *)
+        printf 'usage: %s popup-bubbles get|set|reset [solid|matched]\n' "$0" >&2
         exit 2
         ;;
     esac
@@ -283,8 +530,30 @@ case "$command" in
         ;;
     esac
     ;;
+  wallpaper-transition)
+    subcommand="${2:-get}"
+    case "$subcommand" in
+      get)
+        read_wallpaper_transition
+        ;;
+      set)
+        transition="$(normalize_wallpaper_transition "${3:-fade}")"
+        duration="$(clamp_decimal "${4:-1.00}" "1.00" "0.15" "3.00")"
+        delay="$(clamp_decimal "${5:-0.12}" "0.12" "0" "0.80")"
+        mkdir -p "$state_dir"
+        printf '%s|%s|%s\n' "$transition" "$duration" "$delay" > "$wallpaper_transition_file"
+        ;;
+      reset)
+        rm -f "$wallpaper_transition_file"
+        ;;
+      *)
+        printf 'usage: %s wallpaper-transition get|set|reset [transition duration delay]\n' "$0" >&2
+        exit 2
+        ;;
+    esac
+    ;;
   *)
-    printf 'usage: %s get|dump|set [theme] | opacity get|set|reset [sidebar popup card] | bar-opacity get|set|reset [opacity] | glow get|set|reset [general sidebar_border popup_border icon text] | border get|set|reset [adapt|manual hue] | layout get|set|reset [left|right] [0|1] | language get|set|reset [ja|en|pt-BR] | visualizer get|set|reset [strength] | topbar get|set|reset [on|off]\n' "$0" >&2
+    printf 'usage: %s get|dump|set [theme] | opacity get|set|reset [sidebar popup card] | bar-opacity get|set|reset [opacity] | glow get|set|reset [general sidebar_border popup_border icon text] | border get|set|reset [adapt|manual hue] | layout get|set|reset [left|right] [0|1] | language get|set|reset [ja|en|pt-BR] | font get|set|reset [noto|adwaita|cantarell|dejavu|liberation|fantasque] | visualizer get|set|reset [strength] | visualizer-mode get|set|reset [wave|pixels] | visualizer-pixel-size get|set|reset [3-12] | popup-attach get|set|reset [on|off] | popup-bubbles get|set|reset [solid|matched] | topbar get|set|reset [on|off] | wallpaper-transition get|set|reset [transition duration delay]\n' "$0" >&2
     exit 2
     ;;
 esac

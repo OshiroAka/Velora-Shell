@@ -79,7 +79,7 @@ def alpha(color, opacity):
 
 
 def text_on(color):
-    return "#ffffff" if luminance(hex_to_rgb(color)) < 0.42 else "#241d28"
+    return "#ffffff" if luminance(hex_to_rgb(color)) < 0.30 else "#111318"
 
 
 def read_wal():
@@ -354,11 +354,7 @@ body {{
 .Root__right-sidebar,
 [data-testid="right-sidebar"],
 [data-testid="now-playing-view"],
-[data-testid="NPV_Panel_OpenDiv"],
-aside[aria-label*="Now playing"],
-aside[aria-label*="now playing"],
-aside[aria-label*="Tocando"],
-aside[aria-label*="tocando"] {{
+[data-testid="NPV_Panel_OpenDiv"] {{
   display: none !important;
   visibility: hidden !important;
   width: 0 !important;
@@ -488,14 +484,164 @@ aside[aria-label*="tocando"] {{
   background: var(--velora-active) !important;
 }}
 
+.Root__now-playing-bar *,
+[data-testid="now-playing-bar"] * {{
+  opacity: 1 !important;
+  visibility: visible !important;
+}}
+
+.main-nowPlayingBar-container,
+.main-nowPlayingBar-nowPlayingBar,
+.Root__now-playing-bar,
+[data-testid="now-playing-bar"] {{
+  display: flex !important;
+  align-items: center !important;
+  gap: 16px !important;
+  overflow: visible !important;
+}}
+
+.main-nowPlayingBar-left,
+.main-nowPlayingBar-center,
+.main-nowPlayingBar-right,
+.main-playerControls-playerControls,
+.main-playerControls-buttons,
+.player-controls,
+.player-controls__buttons,
+[data-testid="player-controls"] {{
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-width: 0 !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}}
+
+.main-nowPlayingBar-center,
+[data-testid="player-controls"] {{
+  flex: 1 1 auto !important;
+  flex-direction: column !important;
+}}
+
+.main-nowPlayingBar-left,
+.main-nowPlayingBar-right {{
+  flex: 1 1 0 !important;
+}}
+
+.main-nowPlayingBar-right {{
+  justify-content: flex-end !important;
+}}
+
+.main-playbackBarPlaybackBar,
+.playback-bar,
+[data-testid="playback-progressbar"] {{
+  display: flex !important;
+  align-items: center !important;
+  width: min(520px, 42vw) !important;
+  max-width: 100% !important;
+}}
+
+.Root__now-playing-bar button,
+[data-testid="now-playing-bar"] button,
+button[data-testid^="control-button-"] {{
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-width: 32px !important;
+  min-height: 32px !important;
+  color: var(--velora-text) !important;
+  --text-base: var(--velora-text) !important;
+  --essential-base: var(--velora-text) !important;
+  background: transparent !important;
+  border-radius: 999px !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  transform: none !important;
+}}
+
 .main-playButton-PlayButton,
 .main-playButton-primary,
 button[data-testid="play-button"],
-button[data-testid="control-button-playpause"] {{
+button[data-testid="control-button-playpause"],
+button[aria-label^="Play"],
+button[aria-label^="Pause"],
+button[aria-label^="Tocar"],
+button[aria-label^="Pausar"] {{
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-width: 40px !important;
+  min-height: 40px !important;
   background: linear-gradient(135deg, var(--velora-accent), var(--velora-accent-2)) !important;
   color: var(--velora-button-text) !important;
+  --text-base: var(--velora-button-text) !important;
+  --essential-base: var(--velora-button-text) !important;
   border-radius: 999px !important;
   box-shadow: 0 0 24px color-mix(in srgb, var(--velora-accent) 42%, transparent 58%) !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}}
+
+.main-playButton-PlayButton span,
+.main-playButton-primary span,
+button[data-testid="play-button"] span,
+button[data-testid="control-button-playpause"] span,
+button[aria-label^="Play"] span,
+button[aria-label^="Pause"] span,
+button[aria-label^="Tocar"] span,
+button[aria-label^="Pausar"] span {{
+  color: var(--velora-button-text) !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}}
+
+.main-playButton-PlayButton svg,
+.main-playButton-primary svg,
+button[data-testid="play-button"] svg,
+button[data-testid="control-button-playpause"] svg,
+button[aria-label^="Play"] svg,
+button[aria-label^="Pause"] svg,
+button[aria-label^="Tocar"] svg,
+button[aria-label^="Pausar"] svg {{
+  color: var(--velora-button-text) !important;
+  fill: currentColor !important;
+  stroke: currentColor !important;
+  display: block !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}}
+
+.main-playButton-PlayButton svg *,
+.main-playButton-primary svg *,
+button[data-testid="play-button"] svg *,
+button[data-testid="control-button-playpause"] svg *,
+button[aria-label^="Play"] svg *,
+button[aria-label^="Pause"] svg *,
+button[aria-label^="Tocar"] svg *,
+button[aria-label^="Pausar"] svg * {{
+  fill: currentColor !important;
+  stroke: currentColor !important;
+  opacity: 1 !important;
+}}
+
+.Root__now-playing-bar button svg,
+[data-testid="now-playing-bar"] button svg,
+button[data-testid^="control-button-"] svg,
+.Root__now-playing-bar button svg *,
+[data-testid="now-playing-bar"] button svg *,
+button[data-testid^="control-button-"] svg * {{
+  color: currentColor !important;
+  fill: currentColor !important;
+  stroke: currentColor !important;
+  display: block !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}}
+
+.Root__now-playing-bar button svg [fill="none"],
+[data-testid="now-playing-bar"] button svg [fill="none"],
+button[data-testid^="control-button-"] svg [fill="none"] {{
+  fill: none !important;
+  stroke: currentColor !important;
 }}
 
 .main-coverSlotExpanded-container,

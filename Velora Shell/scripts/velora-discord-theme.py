@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import base64
 import json
 import os
 import subprocess
@@ -37,6 +38,18 @@ def css_url(path):
         resolved = Path(path).expanduser().resolve()
     except Exception:
         return "none"
+    try:
+        if resolved.is_file() and resolved.stat().st_size <= 2_500_000:
+            mime = {
+                ".jpg": "image/jpeg",
+                ".jpeg": "image/jpeg",
+                ".png": "image/png",
+                ".webp": "image/webp",
+            }.get(resolved.suffix.lower(), "image/jpeg")
+            data = base64.b64encode(resolved.read_bytes()).decode("ascii")
+            return f'url("data:{mime};base64,{data}")'
+    except Exception:
+        pass
     return f'url("file://{str(resolved).replace(chr(34), "%22")}")'
 
 
@@ -138,12 +151,14 @@ def build_css(theme, wal):
   --velora-hover: {alpha(theme, "accentPrimary", accent, 0.16)};
   --velora-active: {alpha(theme, "accentPrimary", accent, 0.26)};
   --velora-shadow: {shadow};
-  --velora-chat: color-mix(in srgb, var(--velora-bg) 94%, black 6%);
+  --velora-chat: transparent;
+  --velora-chat-glass: color-mix(in srgb, var(--velora-bg) 3%, transparent 97%);
+  --velora-chat-soft-glass: color-mix(in srgb, var(--velora-bg) 8%, transparent 92%);
   --velora-sidebar-solid: color-mix(in srgb, var(--velora-panel) 95%, black 5%);
   --velora-panel-solid: color-mix(in srgb, var(--velora-panel-2) 92%, var(--velora-bg) 8%);
   --velora-card-solid: color-mix(in srgb, var(--velora-card) 92%, var(--velora-bg) 8%);
 
-  --background-primary: color-mix(in srgb, var(--velora-bg) 88%, black 12%) !important;
+  --background-primary: transparent !important;
   --background-secondary: var(--velora-panel) !important;
   --background-secondary-alt: color-mix(in srgb, var(--velora-panel) 88%, black 12%) !important;
   --background-tertiary: color-mix(in srgb, var(--velora-panel) 76%, black 24%) !important;
@@ -178,18 +193,18 @@ def build_css(theme, wal):
   --brand-500: var(--velora-accent) !important;
   --brand-experiment: var(--velora-accent) !important;
   --focus-primary: var(--velora-accent-3) !important;
-  --background-base-lowest: var(--velora-chat) !important;
+  --background-base-lowest: transparent !important;
   --background-base-lower: var(--velora-panel-solid) !important;
   --background-base-low: var(--velora-sidebar-solid) !important;
   --background-surface-high: var(--velora-card-solid) !important;
   --background-surface-higher: var(--velora-panel-solid) !important;
   --background-surface-highest: var(--velora-panel-solid) !important;
-  --bg-base-primary: var(--velora-chat) !important;
+  --bg-base-primary: transparent !important;
   --bg-base-secondary: var(--velora-sidebar-solid) !important;
   --bg-base-tertiary: var(--velora-panel-solid) !important;
   --bg-surface-overlay: var(--velora-panel-solid) !important;
   --bg-surface-raised: var(--velora-panel-solid) !important;
-  --chat-background-default: var(--velora-chat) !important;
+  --chat-background-default: transparent !important;
   --chat-text-muted: var(--velora-muted) !important;
   --custom-channel-members-bg: var(--velora-sidebar-solid) !important;
   --custom-guild-sidebar-bg: var(--velora-panel-solid) !important;
@@ -199,7 +214,8 @@ body,
 #app-mount {{
   color: var(--velora-text) !important;
   background:
-    linear-gradient(135deg, color-mix(in srgb, var(--velora-bg) 88%, black 12%), color-mix(in srgb, var(--velora-panel-2) 76%, var(--velora-accent) 24%)) !important;
+    linear-gradient(90deg, color-mix(in srgb, var(--velora-bg) 12%, transparent 88%), color-mix(in srgb, var(--velora-panel-2) 8%, transparent 92%)),
+    var(--velora-wallpaper-image) center / cover no-repeat fixed !important;
 }}
 
 #app-mount::before {{
@@ -207,10 +223,8 @@ body,
   position: fixed;
   inset: 0;
   pointer-events: none;
-  background:
-    linear-gradient(90deg, color-mix(in srgb, var(--velora-bg) 88%, transparent 12%), color-mix(in srgb, var(--velora-panel-2) 72%, transparent 28%)),
-    var(--velora-wallpaper-image) center / cover no-repeat fixed;
-  opacity: 0.22;
+  background: color-mix(in srgb, var(--velora-bg) 10%, transparent 90%);
+  opacity: 1;
   z-index: 0;
 }}
 
@@ -222,6 +236,9 @@ body,
 .app_a3002d,
 .appMount__51fd7,
 .bg__960e4,
+.base_c48ade,
+.content_c48ade,
+.page_c48ade,
 .container__2637a,
 .container_c48ade,
 .sidebar_c48ade,
@@ -237,11 +254,9 @@ body,
   background: transparent !important;
 }}
 
-.container_c48ade,
 .sidebar_c48ade,
 .panels_c48ade,
 .members_c8ffbb,
-.nowPlayingColumn__133bf,
 .sidebarRegionScroller__23e6b {{
   background: color-mix(in srgb, var(--velora-panel) 86%, transparent 14%) !important;
   border-color: color-mix(in srgb, var(--velora-border) 45%, transparent 55%) !important;
@@ -250,7 +265,7 @@ body,
 .chatContent_f75fb0,
 .peopleColumn__133bf,
 .contentRegion__23e6b {{
-  background: color-mix(in srgb, var(--velora-bg) 82%, transparent 18%) !important;
+  background: var(--velora-chat-glass) !important;
 }}
 
 .channelTextArea_f75fb0,
@@ -321,9 +336,52 @@ a,
 
 #app-mount [class*="chatContent"],
 #app-mount [class*="messagesWrapper"],
+#app-mount [class*="container__133bf"],
+#app-mount [class*="base_c48ade"],
+#app-mount [class*="content_c48ade"],
+#app-mount [class*="page_c48ade"],
+#app-mount [class*="chat_f75fb0"],
+#app-mount [class*="scroller__36d07"],
+#app-mount [class*="wrapper__36d07"],
+#app-mount [class*="tabBody"],
 #app-mount [class*="peopleColumn"],
+#app-mount [class*="peopleList"],
+#app-mount [class*="peopleListItem"],
+#app-mount [class*="friendsTable"],
+#app-mount [class*="nowPlayingColumn"],
+#app-mount [class*="nowPlayingScroller"],
+#app-mount [class*="emptyCard"],
+#app-mount [class*="itemCard"],
+#app-mount [class*="chat_"] [class*="container__9293f"],
+#app-mount [class*="chat_"] [class*="themed__9293f"],
+#app-mount [class*="chat_"] [class*="content__908e2"],
+#app-mount [class*="chat_"] [class*="scrollerInner"],
+#app-mount [class*="chat_"] [class*="form_"],
+#app-mount main[class*="chatContent"] {{
+  background: transparent !important;
+  background-color: transparent !important;
+}}
+
+#app-mount [class*="peopleColumn"],
+#app-mount [class*="nowPlayingColumn"],
 #app-mount [class*="contentRegion"] {{
-  background: var(--velora-chat) !important;
+  background: var(--velora-chat-soft-glass) !important;
+}}
+
+#app-mount [class*="messageListItem"],
+#app-mount [data-list-item-id*="chat-messages"],
+#app-mount [class*="message_"] {{
+  background: transparent !important;
+  background-color: transparent !important;
+}}
+
+#app-mount [class*="message_"]:hover {{
+  background: color-mix(in srgb, var(--velora-hover) 62%, transparent 38%) !important;
+}}
+
+#app-mount [class*="mentioned_"],
+#app-mount [class*="replying_"] {{
+  background: color-mix(in srgb, var(--velora-accent-2) 16%, transparent 84%) !important;
 }}
 
 #app-mount [class*="messageContent"],
@@ -445,15 +503,35 @@ body.theme-light,
   --interactive-hover: var(--velora-text) !important;
   --interactive-active: var(--velora-text) !important;
   --channels-default: var(--velora-text-soft) !important;
-  --background-primary: var(--velora-chat) !important;
+  --background-primary: transparent !important;
   --background-secondary: var(--velora-sidebar-solid) !important;
   --background-tertiary: var(--velora-panel-solid) !important;
-  --background-base-lowest: var(--velora-chat) !important;
+  --background-base-lowest: transparent !important;
   --background-base-lower: var(--velora-panel-solid) !important;
   --background-base-low: var(--velora-sidebar-solid) !important;
-  --bg-base-primary: var(--velora-chat) !important;
+  --bg-base-primary: transparent !important;
   --bg-base-secondary: var(--velora-sidebar-solid) !important;
   --bg-base-tertiary: var(--velora-panel-solid) !important;
+}}
+
+#app-mount :is(
+  [class*="chatContent"],
+  [class*="messagesWrapper"],
+  [class*="chat_f75fb0"],
+  [class*="scrollerInner"],
+  [class*="scroller__36d07"],
+  [class*="wrapper__36d07"],
+  [class*="base_c48ade"],
+  [class*="content_c48ade"],
+  [class*="page_c48ade"],
+  [class*="container__133bf"],
+  [class*="peopleColumn"],
+  [class*="tabBody"]
+) {{
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--velora-bg) 7%, transparent 93%), color-mix(in srgb, var(--velora-panel-2) 4%, transparent 96%)),
+    var(--velora-wallpaper-image) center / cover no-repeat fixed !important;
+  background-color: transparent !important;
 }}
 
 #app-mount.theme-light *,

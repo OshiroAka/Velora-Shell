@@ -4,7 +4,9 @@ set -euo pipefail
 kind="${1:-}"
 path="${2:-}"
 preview="${3:-}"
-transition="${4:-fade}"
+transition_arg="${4:-}"
+duration_arg="${5:-}"
+static_delay_arg="${6:-}"
 
 if [ $# -eq 1 ]; then
   kind="static"
@@ -30,6 +32,50 @@ spotify_theme_script="${base_dir}/scripts/velora-spotify-theme.py"
 zen_live_script="${base_dir}/scripts/velora-zen-live-apply"
 
 mkdir -p "$HOME/.cache/velora-shell"
+
+if command -v flock >/dev/null 2>&1; then
+  lock_file="$HOME/.cache/velora-shell/wallpaper-apply.lock"
+  exec 9>"$lock_file"
+  flock -n 9 >/dev/null 2>&1 || exit 0
+fi
+
+clamp_decimal() {
+  local value="${1:-}"
+  local fallback="${2:-0}"
+  local min="${3:-0}"
+  local max="${4:-1}"
+
+  awk -v value="$value" -v fallback="$fallback" -v min="$min" -v max="$max" '
+    BEGIN {
+      if (value !~ /^[0-9]+([.][0-9]+)?$/)
+        value = fallback
+      value += 0
+      if (value < min)
+        value = min
+      if (value > max)
+        value = max
+      printf "%.2f\n", value
+    }
+  ' 2>/dev/null || printf '%s\n' "$fallback"
+}
+
+wallpaper_transition_state="fade|1.00|0.12"
+if [ -x "$theme_state_script" ]; then
+  wallpaper_transition_state="$("$theme_state_script" wallpaper-transition get 2>/dev/null || printf 'fade|1.00|0.12\n')"
+fi
+IFS='|' read -r state_transition state_duration state_delay <<< "$wallpaper_transition_state"
+transition="${transition_arg:-${state_transition:-fade}}"
+transition_duration="${duration_arg:-${state_duration:-1.00}}"
+static_apply_delay="${static_delay_arg:-${state_delay:-0.12}}"
+
+case "$transition" in
+  none|simple|fade|left|right|top|bottom|wipe|wave|grow|center|any|outer|random) ;;
+  *) transition="fade" ;;
+esac
+
+transition_duration="$(clamp_decimal "$transition_duration" "1.00" "0.15" "3.00")"
+static_apply_delay="$(clamp_decimal "$static_apply_delay" "0.12" "0" "0.80")"
+
 printf '%s|%s|%s\n' "$kind" "$path" "$preview" > "$HOME/.cache/velora-shell/current_wallpaper"
 
 kill_matching_processes() {
@@ -77,7 +123,7 @@ show_static_fallback() {
     awww img "$img" --transition-type fade --transition-duration 0.25 --transition-fps 60 >/dev/null 2>&1 || true
   elif command -v swww >/dev/null 2>&1; then
     if ! pgrep -x swww-daemon >/dev/null 2>&1; then
-      nohup swww-daemon >/dev/null 2>&1 &
+      nohup swww-daemon >/dev/null 2>&1 9>&- &
       sleep 0.20
     fi
     swww img "$img" --transition-type fade --transition-duration 0.25 >/dev/null 2>&1 || true
@@ -96,14 +142,7 @@ any_pid_alive() {
   return 1
 }
 
-start_awww_daemon() {
-  local daemon
-  local i
-
-  if pgrep -x awww-daemon >/dev/null 2>&1; then
-    return 0
-  fi
-
+ensure_wayland_env() {
   if [ -z "${XDG_RUNTIME_DIR:-}" ]; then
     export XDG_RUNTIME_DIR="/run/user/$(id -u)"
   fi
@@ -118,6 +157,17 @@ start_awww_daemon() {
       fi
     done
   fi
+}
+
+start_awww_daemon() {
+  local daemon
+  local i
+
+  if pgrep -x awww-daemon >/dev/null 2>&1; then
+    return 0
+  fi
+
+  ensure_wayland_env
 
   daemon="$(command -v awww-daemon)"
   if command -v systemd-run >/dev/null 2>&1; then
@@ -128,7 +178,7 @@ start_awww_daemon() {
       --unit=velora-awww-daemon \
       --collect \
       --quiet \
-      "$daemon" -q >/dev/null 2>&1 || true
+      "$daemon" -q >/dev/null 2>&1 9>&- || true
 
     for i in 1 2 3 4 5 6 7 8 9 10; do
       if pgrep -x awww-daemon >/dev/null 2>&1; then
@@ -138,7 +188,7 @@ start_awww_daemon() {
     done
   fi
 
-  nohup "$daemon" -q >/tmp/velora-awww-daemon.log 2>&1 &
+  nohup "$daemon" -q >/tmp/velora-awww-daemon.log 2>&1 9>&- &
 
   for i in 1 2 3 4 5 6 7 8 9 10; do
     if pgrep -x awww-daemon >/dev/null 2>&1; then
@@ -148,6 +198,65 @@ start_awww_daemon() {
   done
 
   return 1
+}
+
+unit_safe_name() {
+  printf '%s' "$1" | tr -c 'A-Za-z0-9_' '-'
+}
+
+start_mpv_wallpaper() {
+  local mon="$1"
+  local file="$2"
+  local mpvpaper_bin
+  local unit
+  local options
+
+  mpvpaper_bin="$(command -v mpvpaper)"
+  unit="velora-mpvpaper-$(unit_safe_name "$mon")"
+  options='no-audio loop-file=inf panscan=1.0 video-unscaled=no hwdec=auto-safe scale=bilinear cscale=bilinear dscale=bilinear interpolation=no deband=no'
+  ensure_wayland_env
+
+  if command -v systemd-run >/dev/null 2>&1; then
+    systemctl --user reset-failed "${unit}.service" >/dev/null 2>&1 || true
+    if systemd-run --user \
+      --setenv="XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR}" \
+      --setenv="WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-}" \
+      --setenv="DBUS_SESSION_BUS_ADDRESS=${DBUS_SESSION_BUS_ADDRESS:-}" \
+      --unit="$unit" \
+      --collect \
+      --quiet \
+      "$mpvpaper_bin" -o "$options" "$mon" "$file" >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+
+  setsid -f "$mpvpaper_bin" -o "$options" "$mon" "$file" >/tmp/velora-mpvpaper.log 2>&1 </dev/null 9>&- || return 1
+}
+
+start_engine_wallpaper_process() {
+  local id="$1"
+  local engine_bin
+  local unit
+
+  engine_bin="$(command -v linux-wallpaperengine)"
+  unit="velora-wallpaperengine"
+  ensure_wayland_env
+
+  if command -v systemd-run >/dev/null 2>&1; then
+    systemctl --user reset-failed "${unit}.service" >/dev/null 2>&1 || true
+    if systemd-run --user \
+      --setenv="XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR}" \
+      --setenv="WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-}" \
+      --setenv="DBUS_SESSION_BUS_ADDRESS=${DBUS_SESSION_BUS_ADDRESS:-}" \
+      --unit="$unit" \
+      --collect \
+      --quiet \
+      "$engine_bin" --screen-root eDP-1 --bg "$id" --scaling fill --clamp border --disable-mouse --disable-parallax >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+
+  setsid -f "$engine_bin" --screen-root eDP-1 --bg "$id" --scaling fill --clamp border --disable-mouse --disable-parallax >/tmp/velora-wallpaperengine.log 2>&1 </dev/null 9>&- || return 1
 }
 
 apply_theme() {
@@ -196,30 +305,33 @@ static_wallpaper() {
 
   [ -f "$img" ] || exit 2
 
+  stop_engine_wallpapers
+  stop_mpv_wallpapers
+  sleep "$static_apply_delay" || true
+
   if command -v awww >/dev/null 2>&1; then
     start_awww_daemon
-    awww img "$img" --transition-type "$transition" --transition-duration 1 --transition-fps 60
+    awww img "$img" --transition-type "$transition" --transition-duration "$transition_duration" --transition-fps 60 \
+      || awww img "$img" --transition-type fade --transition-duration "$transition_duration" --transition-fps 60
     stop_swww_wallpapers
   elif command -v swww >/dev/null 2>&1; then
     if ! pgrep -x swww-daemon >/dev/null 2>&1; then
-      nohup swww-daemon >/dev/null 2>&1 &
+      nohup swww-daemon >/dev/null 2>&1 9>&- &
       sleep 0.20
     fi
-    swww img "$img" --transition-type "$transition" --transition-duration 1
+    swww img "$img" --transition-type "$transition" --transition-duration "$transition_duration" \
+      || swww img "$img" --transition-type fade --transition-duration "$transition_duration"
     awww kill >/dev/null 2>&1 || true
   else
     exit 127
   fi
 
-  stop_engine_wallpapers
-  stop_mpv_wallpapers
   apply_theme "$img"
 }
 
 live_wallpaper() {
   local file="$1"
   local monitors
-  local pids=()
   local mon
 
   [ -f "$file" ] || exit 2
@@ -234,30 +346,28 @@ live_wallpaper() {
   sleep 0.10
   : > /tmp/velora-mpvpaper.log
   for mon in $monitors; do
-    nohup mpvpaper -o 'no-audio loop-file=inf panscan=1.0 video-unscaled=no hwdec=auto-safe scale=bilinear cscale=bilinear dscale=bilinear interpolation=no deband=no' "$mon" "$file" >>/tmp/velora-mpvpaper.log 2>&1 &
-    pids+=("$!")
+    start_mpv_wallpaper "$mon" "$file" || true
   done
 
-  sleep 0.55
-  if any_pid_alive "${pids[@]}"; then
+  sleep 0.70
+  if pgrep -f '(^|/)mpvpaper([[:space:]]|$)' >/dev/null 2>&1; then
     stop_static_wallpapers
   fi
 }
 
 engine_wallpaper() {
   local id="$1"
-  local pid
 
   apply_theme "$theme_path"
   show_static_fallback "$theme_path"
   stop_mpv_wallpapers
   stop_engine_wallpapers
   sleep 0.10
-  nohup linux-wallpaperengine --screen-root eDP-1 --bg "$id" --scaling fill --clamp border --disable-mouse --disable-parallax >/tmp/velora-wallpaperengine.log 2>&1 &
-  pid="$!"
+  : > /tmp/velora-wallpaperengine.log
+  start_engine_wallpaper_process "$id" || true
 
   sleep 0.70
-  if any_pid_alive "$pid"; then
+  if pgrep -f '(^|/)linux-wallpaperengine([[:space:]]|$)' >/dev/null 2>&1; then
     stop_static_wallpapers
   fi
 }

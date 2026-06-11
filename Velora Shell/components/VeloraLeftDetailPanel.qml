@@ -19,8 +19,8 @@ Item {
     readonly property color lilac: theme ? (pywalStyle ? theme.accentPrimary : theme.accentSecondary) : Qt.rgba(0.58, 0.48, 0.73, 0.78)
     readonly property color card: theme ? (darkSoft ? theme.withAlpha(theme.surfaceCard, Math.min(theme.surfaceCard.a, 0.62)) : theme.surfaceCard) : Qt.rgba(1, 1, 1, 0.70)
     readonly property color borderSoft: theme ? theme.borderSoft : Qt.rgba(1, 1, 1, 0.78)
-    readonly property string uiFont: "Noto Sans CJK JP"
-    readonly property string monoFont: "JetBrainsMono Nerd Font"
+    readonly property string uiFont: theme ? theme.uiFont : "Noto Sans CJK JP"
+    readonly property string monoFont: theme ? theme.monoFont : "JetBrainsMono Nerd Font"
     readonly property int cornerRadius: 22
     readonly property string homeDir: Quickshell.env("HOME") || ""
     readonly property string wallpaperDir: homeDir + "/Pictures/Wallpapers"
@@ -64,8 +64,8 @@ Item {
     property bool wallpaperScanComplete: false
     property string wallpaperApplyState: ""
     readonly property var fallbackWallpapers: [
-        { kind: "static", title: "wp15708544", label: "wp15708544", category: "Static", path: wallpaperDir + "/static/wp15708544.jpg", preview: wallpaperDir + "/static/wp15708544.jpg" },
-        { kind: "static", title: "WPP blue", label: "WPP blue", category: "Static", path: wallpaperDir + "/static/WPP_blue.png", preview: wallpaperDir + "/static/WPP_blue.png" }
+        { kind: "static", title: "Tokyo Fuji", label: "Tokyo Fuji", category: "Static", path: wallpaperDir + "/static/aerial-view-tokyo-cityscape-with-fuji-mountain-japan.jpg", preview: wallpaperDir + "/static/aerial-view-tokyo-cityscape-with-fuji-mountain-japan.jpg" },
+        { kind: "static", title: "city street", label: "city street", category: "Static", path: wallpaperDir + "/static/claudio-guglieri-G6X3OZqIIm8-unsplash.jpg", preview: wallpaperDir + "/static/claudio-guglieri-G6X3OZqIIm8-unsplash.jpg" }
     ]
 
     function alpha(colorValue, opacity) {

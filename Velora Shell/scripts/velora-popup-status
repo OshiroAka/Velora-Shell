@@ -1,7 +1,74 @@
 #!/usr/bin/env bash
 set -u
 
+force=0
 mode="${1:-all}"
+
+if [[ "$mode" == "--force" ]]; then
+    force=1
+    mode="${2:-all}"
+elif [[ "${2:-}" == "--force" ]]; then
+    force=1
+fi
+
+cache_root="${XDG_CACHE_HOME:-$HOME/.cache}/velora-shell/status"
+
+safe_mode_name() {
+    printf '%s' "${1:-all}" | tr -cd '[:alnum:]_.-'
+}
+
+mode_ttl() {
+    case "$1" in
+        audio|brightness) printf '5' ;;
+        wifi) printf '8' ;;
+        notifications|notification-count) printf '4' ;;
+        bluetooth) printf '8' ;;
+        battery) printf '30' ;;
+        files) printf '45' ;;
+        quick|bar) printf '4' ;;
+        *) printf '5' ;;
+    esac
+}
+
+cache_file_for() {
+    printf '%s/%s.cache' "$cache_root" "$(safe_mode_name "$1")"
+}
+
+read_cache() {
+    local key="$1" file ttl now mtime
+    (( force == 0 )) || return 1
+    file="$(cache_file_for "$key")"
+    [[ -s "$file" ]] || return 1
+    ttl="$(mode_ttl "$key")"
+    now="$(date +%s)"
+    mtime="$(stat -c %Y "$file" 2>/dev/null || printf '0')"
+    if (( now - mtime <= ttl )); then
+        cat "$file"
+        return 0
+    fi
+    return 1
+}
+
+write_cache() {
+    local key="$1" data="$2" file tmp
+    mkdir -p "$cache_root" 2>/dev/null || return 0
+    file="$(cache_file_for "$key")"
+    tmp="${file}.$$"
+    printf '%s\n' "$data" > "$tmp" 2>/dev/null && mv -f "$tmp" "$file" 2>/dev/null || rm -f "$tmp"
+}
+
+with_cache() {
+    local key="$1"
+    shift
+    if read_cache "$key"; then
+        return 0
+    fi
+
+    local data
+    data="$("$@")"
+    write_cache "$key" "$data"
+    printf '%s\n' "$data"
+}
 
 clean_field() {
     printf '%s' "${1:-}" | tr '\n\r|' '   ' | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//'
@@ -78,6 +145,77 @@ emit_audio() {
 
     printf 'AUDIO_SINK|%s|%s|%s\n' "${sink_vol:-0.60}" "$(wp_muted_value "$sink_line")" "$(clean_field "${sink_name:-Default output}")"
     printf 'AUDIO_SOURCE|%s|%s|%s\n' "${source_vol:-0.00}" "$(wp_muted_value "$source_line")" "$(clean_field "${source_name:-Default input}")"
+}
+
+emit_brightness() {
+    local line
+    line="$(brightnessctl -m 2>/dev/null | awk -F, '{gsub(/%/,"",$4); printf "BRIGHTNESS|%s|%s\n", $4/100, $1; exit}')"
+    if [[ -n "$line" ]]; then
+        printf '%s\n' "$line"
+    else
+        printf 'BRIGHTNESS|0.86|\n'
+    fi
+}
+
+emit_wifi() {
+    if ! command -v nmcli >/dev/null 2>&1; then
+        printf 'RADIO|disabled\n'
+        return
+    fi
+
+    printf 'RADIO|'
+    nmcli -t -f WIFI radio 2>/dev/null || printf 'disabled\n'
+    nmcli -t -f ACTIVE,SSID,SIGNAL,SECURITY dev wifi list 2>/dev/null \
+        | awk -F: 'NF>=3 && $2!="" {print $1 "|" $2 "|" $3 "|" $4}'
+}
+
+emit_notifications() {
+    if ! command -v makoctl >/dev/null 2>&1; then
+        printf '[]\n'
+        return
+    fi
+
+    makoctl list -j 2>/dev/null \
+        | python3 -c 'import sys,json; raw=sys.stdin.read().strip() or "[]"; print(json.dumps(json.loads(raw), ensure_ascii=False))' 2>/dev/null \
+        || printf '[]\n'
+}
+
+emit_notification_count() {
+    if ! command -v makoctl >/dev/null 2>&1; then
+        printf '0\n'
+        return
+    fi
+
+    makoctl list -j 2>/dev/null \
+        | python3 -c 'import sys,json; raw=sys.stdin.read().strip() or "[]"; print(len(json.loads(raw)))' 2>/dev/null \
+        || printf '0\n'
+}
+
+emit_bluetooth() {
+    if ! command -v bluetoothctl >/dev/null 2>&1; then
+        printf 'POWER|unavailable\n'
+        return
+    fi
+
+    local power
+    power="$(bluetoothctl show 2>/dev/null | awk -F': ' '/Powered/ {print $2; exit}')"
+    [[ -n "$power" ]] || power=unknown
+    printf 'POWER|%s\n' "$power"
+    bluetoothctl devices Connected 2>/dev/null | sed -n 's/^Device \([^ ]*\) \(.*\)$/CONNECTED|\1|\2/p'
+    bluetoothctl devices Paired 2>/dev/null | sed -n 's/^Device \([^ ]*\) \(.*\)$/PAIRED|\1|\2/p'
+    bluetoothctl devices 2>/dev/null | sed -n 's/^Device \([^ ]*\) \(.*\)$/KNOWN|\1|\2/p'
+}
+
+emit_quick() {
+    emit_audio
+    emit_brightness
+    emit_wifi
+    emit_notifications
+}
+
+emit_bar() {
+    emit_audio
+    emit_notification_count
 }
 
 emit_files() {
@@ -159,11 +297,21 @@ emit_battery() {
 }
 
 case "$mode" in
-    audio) emit_audio ;;
-    files) emit_files ;;
-    battery) emit_battery ;;
+    audio) with_cache audio emit_audio ;;
+    brightness) with_cache brightness emit_brightness ;;
+    wifi) with_cache wifi emit_wifi ;;
+    notifications) with_cache notifications emit_notifications ;;
+    notification-count) with_cache notification-count emit_notification_count ;;
+    bluetooth) with_cache bluetooth emit_bluetooth ;;
+    files) with_cache files emit_files ;;
+    battery) with_cache battery emit_battery ;;
+    quick) with_cache quick emit_quick ;;
+    bar) with_cache bar emit_bar ;;
     all)
         emit_audio
+        emit_brightness
+        emit_wifi
+        emit_notifications
         emit_files
         emit_battery
         ;;

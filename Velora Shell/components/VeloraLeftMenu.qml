@@ -76,11 +76,11 @@ Item {
     readonly property color card: theme ? (darkSoft ? theme.withAlpha(theme.surfaceCard, Math.min(theme.surfaceCard.a, 0.62)) : theme.surfaceCard) : Qt.rgba(1, 1, 1, 0.70)
     readonly property color line: theme ? theme.alpha(theme.borderActive, 0.18) : Qt.rgba(0.70, 0.52, 0.64, 0.18)
     readonly property color borderSoft: theme ? (pywalStyle ? theme.withAlpha(theme.sidebarBorderGlow, Math.min(0.30, Math.max(0.16, theme.sidebarBorderGlow.a))) : theme.borderSoft) : Qt.rgba(1, 1, 1, 0.78)
-    readonly property string uiFont: "Noto Sans CJK JP"
-    readonly property string monoFont: "JetBrainsMono Nerd Font"
+    readonly property string uiFont: theme ? theme.uiFont : "Noto Sans CJK JP"
+    readonly property string monoFont: theme ? theme.monoFont : "JetBrainsMono Nerd Font"
     readonly property string menuWallpaperScanScript: Quickshell.shellDir + "/scripts/velora-wallpaper-scan"
+    readonly property string popupStatusScript: Quickshell.shellDir + "/scripts/velora-popup-status"
     readonly property string mediaCommand: "players=$(playerctl -l 2>/dev/null || true); pick=\"\"; for p in $players; do state=$(playerctl -p \"$p\" status 2>/dev/null || true); if [ \"$state\" = \"Playing\" ]; then pick=\"$p\"; break; fi; done; if [ -z \"$pick\" ]; then pick=$(printf '%s\\n' \"$players\" | sed -n '1p'); fi; [ -z \"$pick\" ] && { printf '\\t\\t\\t\\t0\\tStopped\\t\\n'; exit 0; }; title=$(playerctl -p \"$pick\" metadata title 2>/dev/null || true); artist=$(playerctl -p \"$pick\" metadata artist 2>/dev/null || true); length=$(playerctl -p \"$pick\" metadata mpris:length 2>/dev/null || true); art=$(playerctl -p \"$pick\" metadata mpris:artUrl 2>/dev/null || true); pos=$(playerctl -p \"$pick\" position 2>/dev/null || true); status=$(playerctl -p \"$pick\" status 2>/dev/null || true); printf '%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n' \"$title\" \"$artist\" \"$length\" \"$art\" \"$pos\" \"$status\" \"$pick\""
-    readonly property string bluetoothCommand: "if ! command -v bluetoothctl >/dev/null 2>&1; then printf 'POWER|unavailable\\n'; exit 0; fi; power=$(bluetoothctl show 2>/dev/null | awk -F': ' '/Powered/ {print $2; exit}'); [ -z \"$power\" ] && power=unknown; printf 'POWER|%s\\n' \"$power\"; bluetoothctl devices Connected 2>/dev/null | sed -n 's/^Device \\([^ ]*\\) \\(.*\\)$/CONNECTED|\\1|\\2/p'; bluetoothctl devices Paired 2>/dev/null | sed -n 's/^Device \\([^ ]*\\) \\(.*\\)$/PAIRED|\\1|\\2/p'; bluetoothctl devices 2>/dev/null | sed -n 's/^Device \\([^ ]*\\) \\(.*\\)$/KNOWN|\\1|\\2/p'"
     property real revealProgress: 0
     property real entryProgress: 0
     property real arrowVisualCenterY: arrowCenterY
@@ -938,16 +938,18 @@ Item {
         id: volumeQuery
 
         running: false
-        command: ["bash", "-lc", "wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null || echo 'Volume: 0.60'"]
+        command: [root.popupStatusScript, "audio"]
 
         stdout: SplitParser {
             onRead: function(data) {
-                var text = data.trim()
-                var match = text.match(/[0-9]+\\.?[0-9]*/)
+                var parts = data.trim().split("|")
+                if (parts.length < 3 || parts[0] !== "AUDIO_SINK")
+                    return
 
-                root.muted = text.indexOf("MUTED") >= 0
-                if (match)
-                    root.volumePercent = Math.max(0, Math.min(1, parseFloat(match[0])))
+                var value = parseFloat(parts[1])
+                if (!isNaN(value))
+                    root.volumePercent = Math.max(0, Math.min(1, value))
+                root.muted = parts[2] === "1"
             }
         }
 
@@ -958,11 +960,12 @@ Item {
         id: brightnessQuery
 
         running: false
-        command: ["bash", "-lc", "brightnessctl -m 2>/dev/null | awk -F, '{gsub(/%/,\"\",$4); print $4/100}' || echo 0.86"]
+        command: [root.popupStatusScript, "brightness"]
 
         stdout: SplitParser {
             onRead: function(data) {
-                var value = parseFloat(data.trim())
+                var parts = data.trim().split("|")
+                var value = parseFloat(parts.length > 1 ? parts[1] : data.trim())
                 if (!isNaN(value))
                     root.brightnessPercent = Math.max(0.05, Math.min(1, value))
             }
@@ -987,7 +990,7 @@ Item {
         id: wifiQuery
 
         running: false
-        command: ["bash", "-lc", "printf 'RADIO|'; nmcli -t -f WIFI radio 2>/dev/null; nmcli -t -f ACTIVE,SSID,SIGNAL,SECURITY dev wifi list 2>/dev/null | awk -F: 'NF>=3 && $2!=\"\" {print $1 \"|\" $2 \"|\" $3 \"|\" $4}'"]
+        command: [root.popupStatusScript, "wifi"]
 
         stdout: SplitParser {
             onRead: function(lineRaw) {
@@ -1030,7 +1033,7 @@ Item {
         id: notificationQuery
 
         running: false
-        command: ["bash", "-lc", "if command -v makoctl >/dev/null 2>&1; then makoctl list -j 2>/dev/null | python3 -c 'import sys,json; raw=sys.stdin.read().strip() or \"[]\"; print(json.dumps(json.loads(raw)))' 2>/dev/null || printf '[]\\n'; else printf '[]\\n'; fi"]
+        command: [root.popupStatusScript, "notifications"]
 
         stdout: SplitParser {
             onRead: function(lineRaw) {
@@ -1108,7 +1111,7 @@ Item {
         id: bluetoothQuery
 
         running: false
-        command: ["bash", "-lc", root.bluetoothCommand]
+        command: [root.popupStatusScript, "bluetooth"]
 
         stdout: SplitParser {
             onRead: function(lineRaw) {

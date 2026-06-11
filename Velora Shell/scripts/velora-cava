@@ -2,9 +2,15 @@
 set -u
 
 bars="${1:-38}"
+fps="${VELORA_CAVA_FPS:-24}"
 case "$bars" in
     ''|*[!0-9]*)
         bars=38
+        ;;
+esac
+case "$fps" in
+    ''|*[!0-9]*)
+        fps=24
         ;;
 esac
 
@@ -12,6 +18,12 @@ if [ "$bars" -lt 1 ]; then
     bars=1
 elif [ "$bars" -gt 64 ]; then
     bars=64
+fi
+
+if [ "$fps" -lt 12 ]; then
+    fps=12
+elif [ "$fps" -gt 60 ]; then
+    fps=60
 fi
 
 runtime_dir="${XDG_RUNTIME_DIR:-/tmp}"
@@ -47,7 +59,7 @@ write_config() {
     cat > "$config_path" <<EOF
 [general]
 bars = ${bars}
-framerate = 60
+framerate = ${fps}
 autosens = 1
 sensitivity = 155
 

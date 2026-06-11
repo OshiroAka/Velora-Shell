@@ -10,6 +10,7 @@ DEPS_DRY_RUN=0
 CHECK_DEPS=1
 SKIP_HYPR="${VELORA_SKIP_HYPR:-0}"
 INSTALL_DIR="${VELORA_INSTALL_DIR:-}"
+BIN_DIR="${VELORA_BIN_DIR:-}"
 HYPR_CONFIG="${VELORA_HYPR_CONFIG:-}"
 HYPR_MODE="${VELORA_HYPR_MODE:-include}"
 HYPR_INCLUDE="${VELORA_HYPR_INCLUDE:-}"
@@ -22,6 +23,7 @@ usage() {
     "" \
     "Options:" \
     "  --install-dir PATH   Install to PATH instead of XDG config dir" \
+    "  --bin-dir PATH       Install terminal launchers to PATH (default: ~/.local/bin)" \
     "  --hypr-config PATH   Hyprland config file to patch" \
     "  --hypr-include PATH  Velora Hyprland snippet path" \
     "  --hypr-mode MODE     include, inline, or file-only (default: include)" \
@@ -53,6 +55,11 @@ while [ $# -gt 0 ]; do
     --install-dir)
       [ $# -ge 2 ] || fail "--install-dir needs a path"
       INSTALL_DIR="$2"
+      shift 2
+      ;;
+    --bin-dir)
+      [ $# -ge 2 ] || fail "--bin-dir needs a path"
+      BIN_DIR="$2"
       shift 2
       ;;
     --hypr-config)
@@ -116,6 +123,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE_DIR="${VELORA_SOURCE_DIR:-$SCRIPT_DIR/Velora Shell}"
 XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
 INSTALL_DIR="${INSTALL_DIR:-$XDG_CONFIG_HOME/quickshell/$APP_NAME}"
+BIN_DIR="${BIN_DIR:-$HOME/.local/bin}"
 HYPR_CONFIG="${HYPR_CONFIG:-$XDG_CONFIG_HOME/hypr/hyprland.conf}"
 HYPR_INCLUDE="${HYPR_INCLUDE:-$(dirname "$HYPR_CONFIG")/velora-hyprland.conf}"
 
@@ -179,13 +187,15 @@ pkg_for_command() {
         wpctl) printf 'wireplumber' ;;
         nmcli) printf 'networkmanager' ;;
         makoctl) printf 'mako' ;;
+        brightnessctl) printf 'brightnessctl' ;;
         cava) printf 'cava' ;;
         wal) printf 'python-pywal16' ;;
         easyeffects) printf 'easyeffects calf lsp-plugins-lv2 zam-plugins-lv2' ;;
         pipewire-pulse) printf 'pipewire-pulse' ;;
         xdg-open) printf 'xdg-utils' ;;
         awww) printf 'awww' ;;
-        linux-wallpaperengine) printf 'linux-wallpaperengine' ;;
+        mpvpaper) printf 'mpvpaper' ;;
+        linux-wallpaperengine) printf 'linux-wallpaperengine-git' ;;
         *) printf '%s' "$cmd" ;;
       esac
       ;;
@@ -199,6 +209,7 @@ pkg_for_command() {
         wpctl) printf 'wireplumber' ;;
         nmcli) printf 'network-manager' ;;
         makoctl) printf 'mako-notifier' ;;
+        brightnessctl) printf 'brightnessctl' ;;
         cava) printf 'cava' ;;
         wal) printf 'python3-pywal' ;;
         easyeffects) printf 'easyeffects calf lsp-plugins-lv2 zam-plugins-lv2' ;;
@@ -218,6 +229,7 @@ pkg_for_command() {
         wpctl) printf 'wireplumber' ;;
         nmcli) printf 'NetworkManager' ;;
         makoctl) printf 'mako' ;;
+        brightnessctl) printf 'brightnessctl' ;;
         cava) printf 'cava' ;;
         wal) printf 'python3-pywal' ;;
         easyeffects) printf 'easyeffects calf lsp-plugins-lv2 zam-plugins-lv2' ;;
@@ -237,6 +249,7 @@ pkg_for_command() {
         wpctl) printf 'wireplumber' ;;
         nmcli) printf 'NetworkManager' ;;
         makoctl) printf 'mako' ;;
+        brightnessctl) printf 'brightnessctl' ;;
         cava) printf 'cava' ;;
         wal) printf 'python3-pywal' ;;
         easyeffects) printf 'easyeffects calf lsp-plugins-lv2 zam-plugins-lv2' ;;
@@ -303,13 +316,19 @@ missing_audio_feature_packages() {
 
 dependency_commands() {
   printf '%s\n' \
+    qs \
+    hyprctl \
     rsync \
     playerctl \
     wpctl \
+    nmcli \
+    makoctl \
+    brightnessctl \
     cava \
     wal \
     easyeffects \
     pipewire-pulse \
+    xdg-open \
     awww \
     mpvpaper \
     linux-wallpaperengine
@@ -465,6 +484,98 @@ install_runtime() {
   fi
 }
 
+install_cli_launcher() {
+  local launcher quoted_install_dir
+
+  mkdir -p "$BIN_DIR"
+  quoted_install_dir="$(shell_quote "$INSTALL_DIR")"
+  launcher="$BIN_DIR/velora"
+
+cat > "$launcher" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+
+command="\${1:-shell}"
+install_dir=$quoted_install_dir
+shell_file="\$install_dir/shell.qml"
+
+is_running() {
+  qs list --all 2>/dev/null | grep -F "Config path: \$shell_file" >/dev/null 2>&1
+}
+
+case "\$command" in
+  shell|Shell|start|Start|run|Run)
+    if is_running; then
+      exit 0
+    fi
+    qs -d -p "\$install_dir"
+    ;;
+  stop|Stop|kill|Kill)
+    qs kill -p "\$install_dir" >/dev/null 2>&1 || true
+    ;;
+  restart|Restart)
+    qs kill -p "\$install_dir" >/dev/null 2>&1 || true
+    qs -d -p "\$install_dir"
+    ;;
+  *)
+    printf 'usage: velora shell|start|stop|restart\\n' >&2
+    exit 2
+    ;;
+esac
+EOF
+
+  chmod +x "$launcher"
+  ln -sf "velora" "$BIN_DIR/Velora"
+  ln -sf "velora" "$BIN_DIR/velora-shell"
+
+  case ":${PATH:-}:" in
+    *":$BIN_DIR:"*) ;;
+    *) warn "$BIN_DIR is not in PATH; add it to use: velora shell" ;;
+  esac
+
+  log "terminal launchers installed: velora shell, Velora shell, velora-shell"
+}
+
+install_default_wallpapers() {
+  local static_dir selector_dir live_dir source_png_dir source_file target_file legacy_name
+
+  source_png_dir="$SOURCE_DIR/velora-shell-pngs"
+  [ -d "$source_png_dir" ] || return 0
+
+  static_dir="$HOME/Pictures/Wallpapers/static"
+  selector_dir="$HOME/Pictures/Wallpapers/WallpaperSelector"
+  live_dir="$HOME/Pictures/Wallpapers/live"
+  mkdir -p "$static_dir" "$selector_dir" "$live_dir"
+
+  set -- \
+    "photo_2026-05-10_16-17-58.jpg:anime-anime-devushki-anime-anime-girls-belye-volosy-golub-zh.jpg"
+
+  for item in "$@"; do
+    source_file="$source_png_dir/${item%%:*}"
+    target_file="$static_dir/${item#*:}"
+
+    [ -f "$source_file" ] || continue
+    if [ ! -e "$target_file" ]; then
+      cp "$source_file" "$target_file"
+    fi
+  done
+
+  for legacy_name in \
+    "wp15708544.jpg" \
+    "WPP_blue.png" \
+    "wp12419427-tokyo-night-4k-wallpapers.jpg" \
+    "wp6570018-tokyo-aesthetic-wallpapers.jpg"
+  do
+    rm -f "$static_dir/$legacy_name"
+  done
+
+  if [ -x "$INSTALL_DIR/scripts/velora-wallpaper-scan" ]; then
+    "$INSTALL_DIR/scripts/velora-wallpaper-scan" --refresh >/dev/null 2>&1 || true
+  fi
+
+  log "default wallpapers available at: $HOME/Pictures/Wallpapers"
+}
+
 patch_hyprland() {
   local tmp_file backup_file include_dir
 
@@ -486,10 +597,16 @@ patch_hyprland() {
   cat > "$HYPR_INCLUDE" <<EOF
 # Velora Shell Hyprland rules
 # Matches velora-shell and every velora-shell-* layer namespace.
+exec-once = powerprofilesctl set performance
+exec-once = qs -d -p "$INSTALL_DIR"
 layerrule = blur on, match:namespace ^velora-shell($|-.*)
 layerrule = blur_popups on, match:namespace ^velora-shell($|-.*)
 layerrule = ignore_alpha 0.02, match:namespace ^velora-shell($|-.*)
 bind = SUPER, K, exec, qs ipc -p "$INSTALL_DIR" call velora topWallpaper
+bind = SUPER, W, exec, qs ipc -p "$INSTALL_DIR" call velora search
+bind = , Print, exec, "$INSTALL_DIR/scripts/velora-screenshot-select" full
+bind = SHIFT, Print, exec, "$INSTALL_DIR/scripts/velora-screenshot-select" select
+bind = , XF86SelectiveScreenshot, exec, "$INSTALL_DIR/scripts/velora-screenshot-select" select
 EOF
   log "Hyprland snippet written: $HYPR_INCLUDE"
 
@@ -628,9 +745,12 @@ if [ "$DEPS_ONLY" = "1" ] || [ "$DEPS_DRY_RUN" = "1" ]; then
 fi
 
 install_runtime
+install_cli_launcher
+install_default_wallpapers
 patch_hyprland
 validate_quickshell
 start_shell
 
 log "installed to: $INSTALL_DIR"
 log "run with: qs -p \"$INSTALL_DIR\""
+log "terminal launcher: velora shell"

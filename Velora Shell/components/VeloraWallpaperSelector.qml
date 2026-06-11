@@ -23,8 +23,8 @@ Item {
     readonly property color borderSoft: theme ? theme.borderSoft : Qt.rgba(1, 1, 1, 0.38)
     readonly property color selectorEdge: theme ? (pywalStyle && theme.borderAdaptEnabled ? theme.popupBorderGlow : theme.borderActive) : pink
     readonly property color selectorTint: theme ? (pywalStyle && theme.borderAdaptEnabled ? theme.popupBorderGlow : theme.accentPrimary) : pink
-    readonly property string uiFont: "Noto Sans CJK JP"
-    readonly property string monoFont: "JetBrainsMono Nerd Font"
+    readonly property string uiFont: theme ? theme.uiFont : "Noto Sans CJK JP"
+    readonly property string monoFont: theme ? theme.monoFont : "JetBrainsMono Nerd Font"
     readonly property string homeDir: Quickshell.env("HOME") || ""
     readonly property string wallpaperDir: homeDir + "/Pictures/Wallpapers"
     readonly property string applyScript: Quickshell.shellDir + "/scripts/velora-wallpaper-apply"
@@ -33,11 +33,11 @@ Item {
     readonly property var filterKeys: ["all", "static", "live", "engine"]
     readonly property var modeFilterIndexes: [1, 2, 3]
     readonly property var fallbackWallpapers: [
-        { kind: "static", label: "夢見る白羽", title: "白い朝", category: "静止画", path: wallpaperDir + "/static/wp15708544.jpg", preview: wallpaperDir + "/static/wp15708544.jpg" },
-        { kind: "static", label: "青い記憶", title: "青い記憶", category: "静止画", path: wallpaperDir + "/static/WPP_blue.png", preview: wallpaperDir + "/static/WPP_blue.png" },
+        { kind: "static", label: "東京富士", title: "Tokyo Fuji", category: "静止画", path: wallpaperDir + "/static/aerial-view-tokyo-cityscape-with-fuji-mountain-japan.jpg", preview: wallpaperDir + "/static/aerial-view-tokyo-cityscape-with-fuji-mountain-japan.jpg" },
+        { kind: "static", label: "都市の路地", title: "city street", category: "静止画", path: wallpaperDir + "/static/claudio-guglieri-G6X3OZqIIm8-unsplash.jpg", preview: wallpaperDir + "/static/claudio-guglieri-G6X3OZqIIm8-unsplash.jpg" },
         { kind: "static", label: "白い少女", title: "白い少女", category: "静止画", path: wallpaperDir + "/static/anime-anime-devushki-anime-anime-girls-belye-volosy-golub-zh.jpg", preview: wallpaperDir + "/static/anime-anime-devushki-anime-anime-girls-belye-volosy-golub-zh.jpg" },
-        { kind: "static", label: "東京の夜", title: "東京の夜", category: "静止画", path: wallpaperDir + "/static/wp12419427-tokyo-night-4k-wallpapers.jpg", preview: wallpaperDir + "/static/wp12419427-tokyo-night-4k-wallpapers.jpg" },
-        { kind: "static", label: "東京の朝", title: "東京の朝", category: "静止画", path: wallpaperDir + "/static/wp6570018-tokyo-aesthetic-wallpapers.jpg", preview: wallpaperDir + "/static/wp6570018-tokyo-aesthetic-wallpapers.jpg" }
+        { kind: "static", label: "店先", title: "storefront", category: "静止画", path: wallpaperDir + "/static/clay-banks-hwLAI5lRhdM-unsplash.jpg", preview: wallpaperDir + "/static/clay-banks-hwLAI5lRhdM-unsplash.jpg" },
+        { kind: "static", label: "青い寺", title: "blue pagoda", category: "静止画", path: wallpaperDir + "/static/cosmin-georgian-gd3ysFyrsTQ-unsplash.jpg", preview: wallpaperDir + "/static/cosmin-georgian-gd3ysFyrsTQ-unsplash.jpg" }
     ]
 
     property int activeFilter: 1
@@ -70,7 +70,7 @@ Item {
     readonly property int wallcardsOpenDuration: 640
     readonly property int wallcardsMoveDuration: 540
     readonly property int wallcardsCloseDuration: Math.max(170, motionPanelOut)
-    readonly property int preloadThumbLimit: 96
+    readonly property int preloadThumbLimit: 36
     readonly property int preloadHeroLimit: 0
     readonly property int motionFast: theme ? theme.motionFast : 120
     readonly property int motionSlow: theme ? theme.motionSlow : 320

@@ -15,8 +15,8 @@ Item {
     readonly property int cornerRadius: 24
     readonly property bool pywalStyle: theme && theme.themeId === "pywal16"
     readonly property bool neon: pywalStyle && theme.themeMode === "dark"
-    readonly property string uiFont: "Noto Sans CJK JP"
-    readonly property string monoFont: "JetBrainsMono Nerd Font"
+    readonly property string uiFont: theme ? theme.uiFont : "Noto Sans CJK JP"
+    readonly property string monoFont: theme ? theme.monoFont : "JetBrainsMono Nerd Font"
     readonly property color settingsLightText: Qt.rgba(0.27, 0.21, 0.39, 0.94)
     readonly property color settingsLightTextSoft: Qt.rgba(0.39, 0.32, 0.52, 0.70)
     readonly property color settingsLightAccent: accentPrimary()
@@ -24,20 +24,32 @@ Item {
     readonly property color settingsLightPanel: Qt.rgba(1, 1, 1, 0.54)
     readonly property string homeDir: Quickshell.env("HOME") || ""
     readonly property string wallpaperDir: homeDir + "/Pictures/Wallpapers"
+    readonly property string stateScript: Quickshell.shellDir + "/scripts/velora-theme-state"
     readonly property string applyScript: Quickshell.shellDir + "/scripts/velora-wallpaper-apply"
     readonly property string scanScript: Quickshell.shellDir + "/scripts/velora-wallpaper-scan"
     readonly property string zenLiveScript: Quickshell.shellDir + "/scripts/velora-zen-live-apply"
     readonly property string zenThemeScript: Quickshell.shellDir + "/scripts/velora-zen-theme.py"
     readonly property string spotifyThemeScript: Quickshell.shellDir + "/scripts/velora-spotify-theme.py"
+    readonly property string codeTransparencyScript: Quickshell.shellDir + "/scripts/velora-code-transparency"
     readonly property var navItems: [
-        { key: "theme", icon: "palette" },
+        { key: "general", icon: "home" },
+        { key: "appearance", icon: "palette" },
         { key: "wallpaper", icon: "image" },
+        { key: "visualizer", icon: "volume" },
         { key: "language", icon: "language" }
     ]
     readonly property var fallbackLanguageOptions: [
         { id: "ja", label: "日本語", shortLabel: "JP" },
         { id: "en", label: "English", shortLabel: "EN" },
         { id: "pt-BR", label: "Português Brasil", shortLabel: "BR" }
+    ]
+    readonly property var fallbackFontOptions: [
+        { id: "noto", label: "Noto Sans", family: "Noto Sans" },
+        { id: "adwaita", label: "Adwaita Sans", family: "Adwaita Sans" },
+        { id: "cantarell", label: "Cantarell", family: "Cantarell" },
+        { id: "dejavu", label: "DejaVu Sans", family: "DejaVu Sans" },
+        { id: "liberation", label: "Liberation Sans", family: "Liberation Sans" },
+        { id: "fantasque", label: "FantasqueSansM", family: "FantasqueSansM Nerd Font" }
     ]
     readonly property var fallbackThemes: [
         { id: "default", title: "Light", subtitle: "Velora Default", mode: "light", preview: "default" },
@@ -47,7 +59,7 @@ Item {
         { id: "pywal16", title: "pywal16", subtitle: "auto", mode: "dynamic", preview: "pywal16" }
     ]
     readonly property var fallbackWallpapers: [
-        { kind: "static", label: "夢見る白羽", title: "白い朝", category: "人物", path: wallpaperDir + "/static/wp15708544.jpg", preview: wallpaperDir + "/static/wp15708544.jpg" },
+        { kind: "static", label: "東京富士", title: "Tokyo Fuji", category: "風景", path: wallpaperDir + "/static/aerial-view-tokyo-cityscape-with-fuji-mountain-japan.jpg", preview: wallpaperDir + "/static/aerial-view-tokyo-cityscape-with-fuji-mountain-japan.jpg" },
         { kind: "static", label: "朱の回廊", title: "朱の回廊", category: "風景", path: wallpaperDir + "/WallpaperSelector/1238960-best-japan-wallpaper-4k-3840x2160-for-xiaomi.jpg", preview: wallpaperDir + "/WallpaperSelector/1238960-best-japan-wallpaper-4k-3840x2160-for-xiaomi.jpg" },
         { kind: "static", label: "静寂の夕暮れ", title: "静寂の夕暮れ", category: "風景", path: wallpaperDir + "/WallpaperSelector/1238973-japan-wallpaper-4k-3840x2160-for-mobile-hd.jpg", preview: wallpaperDir + "/WallpaperSelector/1238973-japan-wallpaper-4k-3840x2160-for-mobile-hd.jpg" },
         { kind: "static", label: "淡い記憶", title: "淡い記憶", category: "アニメ", path: wallpaperDir + "/WallpaperSelector/columbina-anime-3840x2160-26082.jpg", preview: wallpaperDir + "/WallpaperSelector/columbina-anime-3840x2160-26082.jpg" },
@@ -59,9 +71,14 @@ Item {
     property var allWallpapers: fallbackWallpapers
     property var wallpapers: fallbackWallpapers
     property string noticeText: ""
+    property string powerProfile: "unknown"
     property bool zenAutoRestart: true
     property bool webThemeBalance: true
     property bool spotifyAutoRestart: true
+    property real codeOpacity: 0.96
+    property string wallpaperTransition: "fade"
+    property real wallpaperTransitionDuration: 1.00
+    property real wallpaperStaticDelay: 0.12
     property bool open: visible
     property bool loadedOnce: false
     property bool scanComplete: false
@@ -168,18 +185,44 @@ Item {
         const lang = root.theme ? root.theme.language : "ja"
         const texts = {
             "ja": {
+                "nav_general": "一般",
+                "nav_appearance": "外観",
                 "nav_theme": "テーマ",
                 "nav_wallpaper": "壁紙",
+                "nav_visualizer": "ビジュアライザー",
                 "nav_language": "言語",
+                "settingsTitle": "Settings",
+                "settingsSubtitle": "Velora の表示と動作",
+                "general": "一般",
+                "generalHint": "バー、フレーム、同期。",
+                "appearance": "外観",
+                "appearanceHint": "テーマ、透明度、グロー。",
                 "themeStyle": "テーマスタイル",
+                "fonts": "フォント",
+                "fontsHint": "Velora 全体の表示フォントを選択します。",
+                "fontJapaneseLocked": "日本語では読みやすさのため Noto Sans CJK JP を固定します。",
                 "layout": "レイアウト",
+                "barSide": "バー位置",
+                "barSideHint": "サイドバーを左右、または上バーに切り替えます。",
                 "layoutLeft": "左",
                 "layoutRight": "右",
                 "layoutTop": "上",
+                "integrations": "連携",
+                "integrationsHint": "Zen、Spotify、Web テーマを同期します。",
+                "powerMode": "電源モード",
+                "powerModeHint": "CPU の応答性と消費電力を切り替えます。",
+                "powerBalanced": "バランス",
+                "powerPerformance": "パフォーマンス",
+                "powerProfileApplied": "電源モードを適用: ",
                 "frameOn": "枠 ON",
                 "frameOff": "枠 OFF",
                 "topBarOn": "上バー ON",
                 "topBarOff": "上バー OFF",
+                "popupAttach": "ポップアップをバーに接続",
+                "popups": "ポップアップ",
+                "popupBubblesHint": "内部カードの透明度を切り替えます。",
+                "popupBubblesSolid": "バブルを固定",
+                "popupBubblesMatched": "背景に合わせる",
                 "opacity": "透明度",
                 "opacityAll": "全体",
                 "opacityBar": "バー",
@@ -189,10 +232,22 @@ Item {
                 "reset": "リセット",
                 "materialReset": "マテリアルを復元しました。",
                 "glow": "グロー",
+                "glowGeneral": "全体",
                 "fontGlow": "フォント",
+                "iconGlow": "アイコン",
                 "border": "ボーダー",
+                "borderGlow": "ボーダー",
+                "barOpacity": "バー透明度",
+                "panelOpacity": "パネル透明度",
+                "popupOpacity": "ポップアップ透明度",
                 "visualizer": "ビジュアライザー",
                 "visualizerStrength": "強さ",
+                "visualizerHint": "サイドのオーディオ反応を調整します。",
+                "visualizerMode": "表示モード",
+                "visualizerModeHint": "バー横の反応を波形またはピクセルに切り替えます。",
+                "visualizerWave": "Wave",
+                "visualizerPixels": "Pixels",
+                "visualizerPixelSize": "ピクセルサイズ",
                 "adapt": "自動",
                 "zenRestartOn": "Zen 自動 ON",
                 "zenRestartOff": "Zen 自動 OFF",
@@ -210,28 +265,69 @@ Item {
                 "webBalanceOffNotice": "Web をクリーン表示にしました。",
                 "webBalanceStateOn": "バーと同じ背景",
                 "webBalanceStateOff": "検索だけ残して透明",
+                "codeOpacity": "Code 透明度",
+                "codeOpacityHint": "Code の背景の透け具合を調整します。",
+                "codeOpacityNotice": "Code の透明度を更新しました。Code を再読み込みしてください。",
                 "wallpaper": "壁紙",
+                "wallpaperHint": "背景と pywal16 の元画像。",
                 "customWallpaper": "カスタム壁紙を選択",
                 "applying": "適用中...",
                 "apply": "適用する",
                 "wallpaperFolderOpened": "壁紙フォルダを開きました。",
+                "wallpaperTransition": "静止画の切り替え",
+                "wallpaperTransitionHint": "静止画の表示アニメーションを調整します。",
+                "wallpaperTransitionSaved": "壁紙の切り替え設定を保存しました。",
+                "transitionFade": "Fade",
+                "transitionWave": "Wave",
+                "transitionWipe": "Wipe",
+                "transitionGrow": "Grow",
+                "transitionOuter": "Outer",
+                "transitionRandom": "Random",
+                "transitionDuration": "アニメーション時間",
+                "staticDelay": "静止画ディレイ",
                 "language": "言語",
                 "languageHint": "パネルとサイドバーの表示言語。",
                 "languageApplied": "言語を適用: "
             },
             "en": {
+                "nav_general": "General",
+                "nav_appearance": "Appearance",
                 "nav_theme": "Theme",
                 "nav_wallpaper": "Wallpaper",
+                "nav_visualizer": "Visualizer",
                 "nav_language": "Language",
+                "settingsTitle": "Settings",
+                "settingsSubtitle": "Velora display and behavior",
+                "general": "General",
+                "generalHint": "Bar, frame, and app sync.",
+                "appearance": "Appearance",
+                "appearanceHint": "Themes, opacity, glow.",
                 "themeStyle": "Theme Style",
+                "fonts": "Fonts",
+                "fontsHint": "Choose the interface font used across Velora.",
+                "fontJapaneseLocked": "Japanese keeps Noto Sans CJK JP for readability.",
                 "layout": "Layout",
+                "barSide": "Bar position",
+                "barSideHint": "Move the side bar left/right or use the top bar.",
                 "layoutLeft": "Left",
                 "layoutRight": "Right",
                 "layoutTop": "Top",
+                "integrations": "Integrations",
+                "integrationsHint": "Sync Zen, Spotify, and web themes.",
+                "powerMode": "Power mode",
+                "powerModeHint": "Switch CPU responsiveness and energy use.",
+                "powerBalanced": "Balanced",
+                "powerPerformance": "Performance",
+                "powerProfileApplied": "Power mode applied: ",
                 "frameOn": "Frame ON",
                 "frameOff": "Frame OFF",
                 "topBarOn": "Top bar ON",
                 "topBarOff": "Top bar OFF",
+                "popupAttach": "Attach popup to bar",
+                "popups": "Popups",
+                "popupBubblesHint": "Choose how solid the internal popup cards stay.",
+                "popupBubblesSolid": "Solid bubbles",
+                "popupBubblesMatched": "Match background",
                 "opacity": "Opacity",
                 "opacityAll": "Global",
                 "opacityBar": "Bar",
@@ -241,10 +337,22 @@ Item {
                 "reset": "Reset",
                 "materialReset": "Material reset.",
                 "glow": "Glow",
+                "glowGeneral": "Global",
                 "fontGlow": "Font",
+                "iconGlow": "Icons",
                 "border": "Border",
+                "borderGlow": "Border",
+                "barOpacity": "Bar opacity",
+                "panelOpacity": "Panel opacity",
+                "popupOpacity": "Popup opacity",
                 "visualizer": "Visualizer",
                 "visualizerStrength": "Strength",
+                "visualizerHint": "Tune the side audio reactive effect.",
+                "visualizerMode": "Display mode",
+                "visualizerModeHint": "Switch the bar visualizer between wave and pixel blocks.",
+                "visualizerWave": "Wave",
+                "visualizerPixels": "Pixels",
+                "visualizerPixelSize": "Pixel size",
                 "adapt": "Adapt",
                 "zenRestartOn": "Zen auto ON",
                 "zenRestartOff": "Zen auto OFF",
@@ -262,28 +370,69 @@ Item {
                 "webBalanceOffNotice": "Clean web mode enabled.",
                 "webBalanceStateOn": "Same background as the bar",
                 "webBalanceStateOff": "Only search, transparent page",
+                "codeOpacity": "Code opacity",
+                "codeOpacityHint": "Adjust the patched Code background opacity.",
+                "codeOpacityNotice": "Code opacity updated. Reload Code to see it.",
                 "wallpaper": "Wallpaper",
+                "wallpaperHint": "Background source and pywal16 seed.",
                 "customWallpaper": "Choose wallpaper folder",
                 "applying": "Applying...",
                 "apply": "Apply",
                 "wallpaperFolderOpened": "Wallpaper folder opened.",
+                "wallpaperTransition": "Static transition",
+                "wallpaperTransitionHint": "Tune the static wallpaper animation.",
+                "wallpaperTransitionSaved": "Wallpaper transition updated.",
+                "transitionFade": "Fade",
+                "transitionWave": "Wave",
+                "transitionWipe": "Wipe",
+                "transitionGrow": "Grow",
+                "transitionOuter": "Outer",
+                "transitionRandom": "Random",
+                "transitionDuration": "Animation time",
+                "staticDelay": "Static delay",
                 "language": "Language",
                 "languageHint": "Panel and sidebar interface.",
                 "languageApplied": "Language applied: "
             },
             "pt-BR": {
+                "nav_general": "Geral",
+                "nav_appearance": "Aparência",
                 "nav_theme": "Tema",
                 "nav_wallpaper": "Papel de parede",
+                "nav_visualizer": "Visualizer",
                 "nav_language": "Idioma",
+                "settingsTitle": "Settings",
+                "settingsSubtitle": "Aparência e comportamento da Velora",
+                "general": "Geral",
+                "generalHint": "Barra, moldura e sincronização.",
+                "appearance": "Aparência",
+                "appearanceHint": "Temas, transparência e glow.",
                 "themeStyle": "Estilo do tema",
+                "fonts": "Fontes",
+                "fontsHint": "Escolha a fonte da interface usada na Velora.",
+                "fontJapaneseLocked": "Com idioma JP, a Velora mantém Noto Sans CJK JP.",
                 "layout": "Layout",
+                "barSide": "Lado da barra",
+                "barSideHint": "Move a barra para esquerda/direita ou usa a barra superior.",
                 "layoutLeft": "Esquerda",
                 "layoutRight": "Direita",
                 "layoutTop": "Superior",
+                "integrations": "Integrações",
+                "integrationsHint": "Sincroniza Zen, Spotify e temas web.",
+                "powerMode": "Modo de energia",
+                "powerModeHint": "Alterna resposta do CPU e consumo.",
+                "powerBalanced": "Balanceado",
+                "powerPerformance": "Performance",
+                "powerProfileApplied": "Modo de energia aplicado: ",
                 "frameOn": "Moldura ON",
                 "frameOff": "Moldura OFF",
                 "topBarOn": "Barra sup ON",
                 "topBarOff": "Barra sup OFF",
+                "popupAttach": "Juntar popup à barra",
+                "popups": "Popups",
+                "popupBubblesHint": "Escolhe se os cards internos ficam sólidos ou acompanham a transparência.",
+                "popupBubblesSolid": "Balões sólidos",
+                "popupBubblesMatched": "Acompanhar fundo",
                 "opacity": "Transparência",
                 "opacityAll": "Geral",
                 "opacityBar": "Barra",
@@ -293,10 +442,22 @@ Item {
                 "reset": "Resetar",
                 "materialReset": "Material restaurado.",
                 "glow": "Glow",
+                "glowGeneral": "Geral",
                 "fontGlow": "Fonte",
+                "iconGlow": "Ícones",
                 "border": "Borda",
+                "borderGlow": "Borda",
+                "barOpacity": "Transp. da barra",
+                "panelOpacity": "Transp. dos painéis",
+                "popupOpacity": "Transp. dos popups",
                 "visualizer": "Visualizer",
                 "visualizerStrength": "Força",
+                "visualizerHint": "Ajusta o efeito de áudio lateral.",
+                "visualizerMode": "Modo de exibição",
+                "visualizerModeHint": "Alterna o visualizer da barra entre wave e pixels.",
+                "visualizerWave": "Wave",
+                "visualizerPixels": "Pixels",
+                "visualizerPixelSize": "Tamanho dos pixels",
                 "adapt": "Adaptar",
                 "zenRestartOn": "Zen auto ON",
                 "zenRestartOff": "Zen auto OFF",
@@ -314,11 +475,26 @@ Item {
                 "webBalanceOffNotice": "Modo web limpo ativado.",
                 "webBalanceStateOn": "Mesmo fundo da barra",
                 "webBalanceStateOff": "Só pesquisa e página transparente",
+                "codeOpacity": "Opacidade do Code",
+                "codeOpacityHint": "Ajusta o fundo do Code patchado.",
+                "codeOpacityNotice": "Opacidade do Code atualizada. Recarregue o Code.",
                 "wallpaper": "Papel de parede",
+                "wallpaperHint": "Fundo atual e base do pywal16.",
                 "customWallpaper": "Escolher pasta de wallpapers",
                 "applying": "Aplicando...",
                 "apply": "Aplicar",
                 "wallpaperFolderOpened": "Pasta de wallpapers aberta.",
+                "wallpaperTransition": "Transição do estático",
+                "wallpaperTransitionHint": "Ajusta a animação do wallpaper estático.",
+                "wallpaperTransitionSaved": "Transição do wallpaper atualizada.",
+                "transitionFade": "Fade",
+                "transitionWave": "Wave",
+                "transitionWipe": "Wipe",
+                "transitionGrow": "Grow",
+                "transitionOuter": "Outer",
+                "transitionRandom": "Random",
+                "transitionDuration": "Tempo da animação",
+                "staticDelay": "Delay do estático",
                 "language": "Idioma",
                 "languageHint": "Interface do painel e da barra lateral.",
                 "languageApplied": "Idioma aplicado: "
@@ -343,12 +519,100 @@ Item {
         return Math.round(Number(value || 0) * 100) + "%"
     }
 
+    function secondsText(value) {
+        const n = Number(value)
+        return (isNaN(n) ? 0 : n).toFixed(2) + "s"
+    }
+
+    function wallpaperTransitionOptions() {
+        return [
+            { id: "fade", label: root.tr("transitionFade") },
+            { id: "wave", label: root.tr("transitionWave") },
+            { id: "wipe", label: root.tr("transitionWipe") },
+            { id: "grow", label: root.tr("transitionGrow") },
+            { id: "outer", label: root.tr("transitionOuter") },
+            { id: "random", label: root.tr("transitionRandom") }
+        ]
+    }
+
+    function isValidWallpaperTransition(id) {
+        const value = String(id || "")
+        const options = root.wallpaperTransitionOptions()
+        for (let i = 0; i < options.length; i += 1) {
+            if (options[i].id === value)
+                return true
+        }
+        return false
+    }
+
+    function clampWallpaperDuration(value) {
+        const n = Number(value)
+        if (isNaN(n))
+            return root.wallpaperTransitionDuration
+        return Math.max(0.15, Math.min(3.00, n))
+    }
+
+    function clampWallpaperDelay(value) {
+        const n = Number(value)
+        if (isNaN(n))
+            return root.wallpaperStaticDelay
+        return Math.max(0, Math.min(0.80, n))
+    }
+
+    function applyWallpaperTransitionState(line) {
+        const parts = String(line || "").trim().split("|")
+        if (parts.length > 0 && root.isValidWallpaperTransition(parts[0]))
+            root.wallpaperTransition = parts[0]
+        if (parts.length > 1)
+            root.wallpaperTransitionDuration = root.clampWallpaperDuration(parts[1])
+        if (parts.length > 2)
+            root.wallpaperStaticDelay = root.clampWallpaperDelay(parts[2])
+    }
+
+    function saveWallpaperTransition() {
+        const transition = root.isValidWallpaperTransition(root.wallpaperTransition) ? root.wallpaperTransition : "fade"
+        const duration = root.wallpaperTransitionDuration.toFixed(2)
+        const delay = root.wallpaperStaticDelay.toFixed(2)
+        const payload = transition + "|" + duration + "|" + delay
+
+        if (!wallpaperTransitionSave.running) {
+            wallpaperTransitionSave.command = [root.stateScript, "wallpaper-transition", "set", transition, duration, delay]
+            wallpaperTransitionSave.running = true
+        } else {
+            wallpaperTransitionSave.pendingConfig = payload
+        }
+
+        root.noticeText = root.tr("wallpaperTransitionSaved")
+        noticeReset.restart()
+    }
+
+    function setWallpaperTransition(id) {
+        if (!root.isValidWallpaperTransition(id))
+            return
+        root.wallpaperTransition = String(id)
+        root.saveWallpaperTransition()
+    }
+
+    function setWallpaperTransitionDuration(value) {
+        root.wallpaperTransitionDuration = root.clampWallpaperDuration(value)
+        root.saveWallpaperTransition()
+    }
+
+    function setWallpaperStaticDelay(value) {
+        root.wallpaperStaticDelay = root.clampWallpaperDelay(value)
+        root.saveWallpaperTransition()
+    }
+
     function themeOptions() {
         return root.theme ? root.theme.themeOptions : root.fallbackThemes
     }
 
     function languageOptions() {
         return root.theme ? root.theme.languageOptions : root.fallbackLanguageOptions
+    }
+
+    function fontOptions() {
+        return root.theme ? root.theme.fontOptions : root.fallbackFontOptions
     }
 
     function currentLanguage() {
@@ -381,6 +645,39 @@ Item {
 
     function currentThemeId() {
         return root.theme ? root.theme.themeId : "default"
+    }
+
+    function powerProfileOptions() {
+        return [
+            { id: "balanced", label: root.tr("powerBalanced"), icon: "battery" },
+            { id: "performance", label: root.tr("powerPerformance"), icon: "sun" }
+        ]
+    }
+
+    function powerProfileLabel(profile) {
+        const value = String(profile || "")
+        if (value === "balanced")
+            return root.tr("powerBalanced")
+        if (value === "performance")
+            return root.tr("powerPerformance")
+        return value.length > 0 ? value : "unknown"
+    }
+
+    function setPowerProfile(profile) {
+        const value = String(profile || "")
+        if (value !== "balanced" && value !== "performance")
+            return
+
+        root.powerProfile = value
+        root.noticeText = root.tr("powerProfileApplied") + root.powerProfileLabel(value)
+        noticeReset.restart()
+
+        if (!powerProfileSet.running) {
+            powerProfileSet.command = ["powerprofilesctl", "set", value]
+            powerProfileSet.running = true
+        } else {
+            powerProfileSet.pendingProfile = value
+        }
     }
 
     function selectTheme(id) {
@@ -429,8 +726,27 @@ Item {
         return root.currentWallpaper().kind || "static"
     }
 
+    function wallpaperNavIndex() {
+        return 2
+    }
+
+    function visualizerNavIndex() {
+        return 3
+    }
+
+    function languageNavIndex() {
+        return 4
+    }
+
+    function visualizerModeOptions() {
+        return [
+            { id: "wave", label: root.tr("visualizerWave"), icon: "volume" },
+            { id: "pixels", label: root.tr("visualizerPixels"), icon: "box" }
+        ]
+    }
+
     function moveSelection(dir) {
-        if (root.activeNav === 2) {
+        if (root.activeNav === root.languageNavIndex()) {
             const options = root.languageOptions()
             if (options.length <= 0)
                 return
@@ -439,7 +755,7 @@ Item {
             return
         }
 
-        if (root.activeNav !== 1)
+        if (root.activeNav !== root.wallpaperNavIndex())
             return
 
         const count = root.wallpapers.length
@@ -449,12 +765,12 @@ Item {
     }
 
     function applySelected() {
-        if (root.activeNav !== 1)
+        if (root.activeNav !== root.wallpaperNavIndex())
             return
         if (applyWallpaper.running)
             return
         const item = root.currentWallpaper()
-        applyWallpaper.command = [root.applyScript, item.kind || "static", item.path, root.displaySource(item)]
+        applyWallpaper.command = [root.applyScript, item.kind || "static", item.path, root.displaySource(item), root.wallpaperTransition, root.wallpaperTransitionDuration.toFixed(2), root.wallpaperStaticDelay.toFixed(2)]
         applyWallpaper.running = true
     }
 
@@ -498,6 +814,20 @@ Item {
         noticeReset.restart()
     }
 
+    function setCodeOpacity(value) {
+        const next = Math.max(0.60, Math.min(0.98, Number(value || 0.94)))
+        root.codeOpacity = next
+        if (!codeOpacitySave.running) {
+            codeOpacitySave.command = [root.codeTransparencyScript, "set", next.toFixed(2)]
+            codeOpacitySave.running = true
+        } else {
+            codeOpacitySave.pendingOpacity = next.toFixed(2)
+        }
+
+        root.noticeText = root.tr("codeOpacityNotice")
+        noticeReset.restart()
+    }
+
     function reload() {
         if (!scanWallpapers.running)
             scanWallpapers.running = true
@@ -509,12 +839,18 @@ Item {
 
         loadedOnce = true
         reload()
+        if (!powerProfileLoad.running)
+            powerProfileLoad.running = true
         if (!zenModeLoad.running)
             zenModeLoad.running = true
         if (!webThemeModeLoad.running)
             webThemeModeLoad.running = true
         if (!spotifyModeLoad.running)
             spotifyModeLoad.running = true
+        if (!codeOpacityLoad.running)
+            codeOpacityLoad.running = true
+        if (!wallpaperTransitionLoad.running)
+            wallpaperTransitionLoad.running = true
     }
 
     Timer {
@@ -528,7 +864,7 @@ Item {
         id: applyWallpaper
 
         running: false
-        command: [root.applyScript, root.currentWallpaperKind(), root.currentWallpaperPath(), root.currentWallpaperPreview()]
+        command: [root.applyScript, root.currentWallpaperKind(), root.currentWallpaperPath(), root.currentWallpaperPreview(), root.wallpaperTransition, root.wallpaperTransitionDuration.toFixed(2), root.wallpaperStaticDelay.toFixed(2)]
         onExited: {
             running = false
             if (root.theme && root.theme.themeId === "pywal16")
@@ -542,6 +878,42 @@ Item {
         running: false
         command: ["bash", "-lc", "xdg-open \"$HOME/Pictures/Wallpapers\" >/dev/null 2>&1 || true"]
         onExited: running = false
+    }
+
+    Process {
+        id: powerProfileLoad
+
+        running: false
+        command: ["powerprofilesctl", "get"]
+
+        stdout: SplitParser {
+            onRead: function(data) {
+                const value = String(data || "").trim()
+                root.powerProfile = value.length > 0 ? value : "unknown"
+            }
+        }
+
+        onExited: running = false
+    }
+
+    Process {
+        id: powerProfileSet
+
+        property string pendingProfile: ""
+        running: false
+        command: ["powerprofilesctl", "set", "balanced"]
+        onExited: {
+            running = false
+            if (pendingProfile.length > 0) {
+                const next = pendingProfile
+                pendingProfile = ""
+                command = ["powerprofilesctl", "set", next]
+                running = true
+                return
+            }
+            if (!powerProfileLoad.running)
+                powerProfileLoad.running = true
+        }
     }
 
     Process {
@@ -652,6 +1024,72 @@ Item {
     }
 
     Process {
+        id: codeOpacityLoad
+
+        running: false
+        command: [root.codeTransparencyScript, "get"]
+
+        stdout: SplitParser {
+            onRead: function(data) {
+                const value = Number(String(data || "").trim())
+                if (!isNaN(value))
+                    root.codeOpacity = Math.max(0.60, Math.min(0.98, value))
+            }
+        }
+
+        onExited: running = false
+    }
+
+    Process {
+        id: codeOpacitySave
+
+        property string pendingOpacity: ""
+        running: false
+        command: [root.codeTransparencyScript, "set", root.codeOpacity.toFixed(2)]
+        onExited: {
+            running = false
+            if (pendingOpacity.length > 0) {
+                const next = pendingOpacity
+                pendingOpacity = ""
+                command = [root.codeTransparencyScript, "set", next]
+                running = true
+            }
+        }
+    }
+
+    Process {
+        id: wallpaperTransitionLoad
+
+        running: false
+        command: [root.stateScript, "wallpaper-transition", "get"]
+
+        stdout: SplitParser {
+            onRead: function(data) {
+                root.applyWallpaperTransitionState(data)
+            }
+        }
+
+        onExited: running = false
+    }
+
+    Process {
+        id: wallpaperTransitionSave
+
+        property string pendingConfig: ""
+        running: false
+        command: [root.stateScript, "wallpaper-transition", "set", root.wallpaperTransition, root.wallpaperTransitionDuration.toFixed(2), root.wallpaperStaticDelay.toFixed(2)]
+        onExited: {
+            running = false
+            if (pendingConfig.length > 0) {
+                const parts = pendingConfig.split("|")
+                pendingConfig = ""
+                command = [root.stateScript, "wallpaper-transition", "set", parts[0], parts[1], parts[2]]
+                running = true
+            }
+        }
+    }
+
+    Process {
         id: scanWallpapers
 
         running: false
@@ -746,7 +1184,7 @@ Item {
         MouseArea {
             anchors.fill: parent
             acceptedButtons: Qt.LeftButton
-            onClicked: mouse.accepted = true
+            onClicked: function(mouse) { mouse.accepted = true }
         }
 
         Rectangle {
@@ -939,6 +1377,16 @@ Item {
                     }
 
                     LayoutToggleButton {
+                        width: 184
+                        label: root.tr("popupAttach")
+                        active: root.theme ? root.theme.popupAttachedToBar : true
+                        onClicked: {
+                            if (root.theme)
+                                root.theme.setPopupAttachedToBar(!root.theme.popupAttachedToBar)
+                        }
+                    }
+
+                    LayoutToggleButton {
                         width: 154
                         label: root.zenAutoRestart ? root.tr("zenRestartOn") : root.tr("zenRestartOff")
                         active: root.zenAutoRestart
@@ -1118,7 +1566,7 @@ Item {
                     OpacityControl {
                         width: Math.min(280, visualizerRow.width)
                         label: root.tr("visualizerStrength")
-                        minValue: 0.20
+                        minValue: 0
                         maxValue: 0.90
                         value: root.theme ? root.theme.visualizerStrength : 0.46
                         onMoved: function(nextValue) {
@@ -1451,7 +1899,7 @@ Item {
 
             Item {
                 anchors.fill: parent
-                visible: root.activeNav > 2
+                visible: false
 
                 Text {
                     anchors.centerIn: parent
@@ -1473,8 +1921,44 @@ Item {
         readonly property color panelStrong: Qt.rgba(1, 1, 1, 0.70)
         readonly property color text: Qt.rgba(0.27, 0.21, 0.39, 0.94)
         readonly property color textSoft: Qt.rgba(0.39, 0.32, 0.52, 0.70)
-        readonly property color pink: root.accentPrimary()
         readonly property color line: Qt.rgba(0.42, 0.31, 0.53, 0.10)
+        readonly property bool compact: width < 980
+        readonly property int bodyX: compact ? 24 : 318
+        readonly property int bodyTop: compact ? 126 : 112
+        readonly property int bodyW: Math.max(320, width - bodyX - (compact ? 24 : 40))
+        readonly property int contentColumns: bodyW > 820 ? 2 : 1
+
+        function sectionTitle() {
+            if (root.activeNav === 1)
+                return root.tr("appearance")
+            if (root.activeNav === root.wallpaperNavIndex())
+                return root.tr("wallpaper")
+            if (root.activeNav === root.visualizerNavIndex())
+                return root.tr("visualizer")
+            if (root.activeNav === root.languageNavIndex())
+                return root.tr("language")
+            return root.tr("general")
+        }
+
+        function sectionSubtitle() {
+            if (root.activeNav === 1)
+                return root.tr("appearanceHint")
+            if (root.activeNav === root.wallpaperNavIndex())
+                return root.tr("wallpaperHint")
+            if (root.activeNav === root.visualizerNavIndex())
+                return root.tr("visualizerHint")
+            if (root.activeNav === root.languageNavIndex())
+                return root.tr("languageHint")
+            return root.tr("generalHint")
+        }
+
+        function themeIcon(themeId) {
+            if (themeId === "dark")
+                return "moon"
+            if (themeId === "pywal16")
+                return "display"
+            return "sun"
+        }
 
         radius: root.cornerRadius
         color: bg
@@ -1505,14 +1989,16 @@ Item {
         }
 
         Rectangle {
+            visible: !settingsView.compact
             x: 292
             y: 34
             width: 1
             height: parent.height - 98
-            color: line
+            color: settingsView.line
         }
 
         ColumnLayout {
+            visible: !settingsView.compact
             x: 42
             y: 48
             width: 210
@@ -1521,7 +2007,7 @@ Item {
 
             Text {
                 Layout.fillWidth: true
-                text: "Settings"
+                text: root.tr("settingsTitle")
                 color: settingsView.text
                 font.family: root.uiFont
                 font.pixelSize: 25
@@ -1530,38 +2016,30 @@ Item {
 
             Text {
                 Layout.fillWidth: true
-                text: "Customize your experience"
+                text: root.tr("settingsSubtitle")
                 color: settingsView.textSoft
                 font.family: root.uiFont
                 font.pixelSize: 12
+                wrapMode: Text.WordWrap
             }
 
             ColumnLayout {
                 Layout.fillWidth: true
-                Layout.topMargin: 16
+                Layout.topMargin: 18
                 spacing: 10
 
                 Repeater {
-                    model: [
-                        ["General", "home"],
-                        ["Appearance", "palette"],
-                        ["Themes", "palette"],
-                        ["Workspaces", "display"],
-                        ["Apps", "box"],
-                        ["Notifications", "bell"],
-                        ["Sound", "volume"],
-                        ["Network", "wifi"],
-                        ["Battery", "battery"],
-                        ["Bluetooth", "bluetooth"],
-                        ["Privacy", "lock"],
-                        ["About", "memo"]
-                    ]
+                    model: root.navItems
 
                     SettingsNavPill {
+                        required property int index
+                        required property var modelData
+
                         Layout.fillWidth: true
-                        label: modelData[0]
-                        iconName: modelData[1]
-                        active: index === 0
+                        label: root.tr("nav_" + modelData.key)
+                        iconName: modelData.icon
+                        active: root.activeNav === index
+                        onClicked: root.activeNav = index
                     }
                 }
             }
@@ -1593,172 +2071,772 @@ Item {
                     ColumnLayout {
                         Layout.fillWidth: true
                         spacing: 2
-                        Text { Layout.fillWidth: true; text: "Starlight"; color: settingsView.text; font.family: root.uiFont; font.pixelSize: 13; font.weight: Font.Bold }
-                        Text { Layout.fillWidth: true; text: "starlight@elysium.dev"; color: settingsView.textSoft; font.family: root.uiFont; font.pixelSize: 10; elide: Text.ElideRight }
+                        Text { Layout.fillWidth: true; text: "Shira"; color: settingsView.text; font.family: root.uiFont; font.pixelSize: 13; font.weight: Font.Bold }
+                        Text { Layout.fillWidth: true; text: root.currentLanguage(); color: settingsView.textSoft; font.family: root.uiFont; font.pixelSize: 10; elide: Text.ElideRight }
                     }
-
-                    Text { text: "›"; color: settingsView.textSoft; font.pixelSize: 22 }
                 }
             }
         }
 
-        ColumnLayout {
-            x: 332
-            y: 46
-            width: parent.width - x - 40
-            height: parent.height - 92
-            spacing: 18
+        RowLayout {
+            visible: settingsView.compact
+            x: 24
+            y: 74
+            width: parent.width - 48
+            height: 42
+            spacing: 8
 
-            RowLayout {
-                Layout.fillWidth: true
+            Repeater {
+                model: root.navItems
 
-                ColumnLayout {
+                RectButton {
+                    required property int index
+                    required property var modelData
+
                     Layout.fillWidth: true
-                    spacing: 4
-                    Text { text: "General"; color: settingsView.text; font.family: root.uiFont; font.pixelSize: 23; font.weight: Font.Bold }
-                    Text { text: "Basic settings and preferences"; color: settingsView.textSoft; font.family: root.uiFont; font.pixelSize: 12 }
+                    label: root.tr("nav_" + modelData.key)
+                    primary: root.activeNav === index
+                    onClicked: root.activeNav = index
+                }
+            }
+        }
+
+        RowLayout {
+            x: settingsView.bodyX
+            y: 46
+            width: settingsView.bodyW
+            height: 52
+            spacing: 14
+
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 4
+
+                Text {
+                    Layout.fillWidth: true
+                    text: settingsView.sectionTitle()
+                    color: settingsView.text
+                    font.family: root.uiFont
+                    font.pixelSize: 23
+                    font.weight: Font.Bold
+                    elide: Text.ElideRight
                 }
 
-                WindowButton { label: "-" }
-                WindowButton { label: "□" }
-                WindowButton { label: "×"; onClicked: root.closeRequested() }
+                Text {
+                    Layout.fillWidth: true
+                    text: settingsView.sectionSubtitle()
+                    color: settingsView.textSoft
+                    font.family: root.uiFont
+                    font.pixelSize: 12
+                    elide: Text.ElideRight
+                }
             }
 
-            GridLayout {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                columns: 3
-                columnSpacing: 14
-                rowSpacing: 14
+            WindowButton { label: "×"; onClicked: root.closeRequested() }
+        }
 
-                SettingsCard {
-                    title: "Language"
-                    subtitle: "Choose your preferred language"
-                    ComboField { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; anchors.margins: 18; label: "English (US)"; iconName: "globe" }
-                }
+        Flickable {
+            id: settingsFlick
 
-                SettingsCard {
-                    title: "Time & Date"
-                    subtitle: "Set time format and date preferences"
-                    RowLayout { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; anchors.margins: 18; spacing: 10
-                        ComboField { Layout.fillWidth: true; label: "24-hour"; iconName: "clock" }
-                        ComboField { Layout.fillWidth: true; label: "YYYY-MM-DD"; iconName: "calendar" }
+            x: settingsView.bodyX
+            y: settingsView.bodyTop
+            width: settingsView.bodyW
+            height: parent.height - y - 84
+            contentWidth: width
+            contentHeight: settingsColumn.implicitHeight + 12
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
+
+            ColumnLayout {
+                id: settingsColumn
+
+                width: settingsFlick.width
+                spacing: 14
+
+                GridLayout {
+                    visible: root.activeNav === 0
+                    Layout.fillWidth: true
+                    columns: settingsView.contentColumns
+                    columnSpacing: 14
+                    rowSpacing: 14
+
+                    SettingsCard {
+                        Layout.preferredHeight: 292
+                        title: root.tr("barSide")
+                        subtitle: root.tr("barSideHint")
+
+                        ColumnLayout {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.top: parent.top
+                            anchors.bottom: parent.bottom
+                            anchors.margins: 18
+                            anchors.topMargin: 72
+                            spacing: 14
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 10
+
+                                LayoutPreviewButton {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 66
+                                    side: "left"
+                                    label: root.tr("layoutLeft")
+                                    active: root.theme ? !root.theme.topBarEnabled && root.theme.barPosition === "left" : true
+                                    onClicked: {
+                                        if (root.theme) {
+                                            root.theme.setTopBarEnabled(false)
+                                            root.theme.setBarPosition("left")
+                                        }
+                                    }
+                                }
+
+                                LayoutPreviewButton {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 66
+                                    side: "right"
+                                    label: root.tr("layoutRight")
+                                    active: root.theme ? !root.theme.topBarEnabled && root.theme.barPosition === "right" : false
+                                    onClicked: {
+                                        if (root.theme) {
+                                            root.theme.setTopBarEnabled(false)
+                                            root.theme.setBarPosition("right")
+                                        }
+                                    }
+                                }
+
+                                LayoutPreviewButton {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 66
+                                    side: "top"
+                                    label: root.tr("layoutTop")
+                                    active: root.theme ? root.theme.topBarEnabled : false
+                                    onClicked: {
+                                        if (root.theme)
+                                            root.theme.setTopBarEnabled(true)
+                                    }
+                                }
+                            }
+
+                            SettingsToggleRow {
+                                Layout.fillWidth: true
+                                label: root.theme && root.theme.desktopFrameEnabled ? root.tr("frameOn") : root.tr("frameOff")
+                                checked: root.theme ? root.theme.desktopFrameEnabled : true
+                                onClicked: if (root.theme) root.theme.setDesktopFrameEnabled(!root.theme.desktopFrameEnabled)
+                            }
+
+                            SettingsToggleRow {
+                                Layout.fillWidth: true
+                                label: root.tr("popupAttach")
+                                checked: root.theme ? root.theme.popupAttachedToBar : true
+                                onClicked: if (root.theme) root.theme.setPopupAttachedToBar(!root.theme.popupAttachedToBar)
+                            }
+                        }
                     }
-                }
 
-                SettingsCard {
-                    title: root.tr("webTheme")
-                    subtitle: root.tr("webThemeHint")
-                    ColumnLayout { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; anchors.margins: 18; spacing: 12
-                        RowLayout { Layout.fillWidth: true; spacing: 10
-                            RectButton { Layout.fillWidth: true; widthHint: 118; label: root.tr("webBalanceOn"); primary: root.webThemeBalance; onClicked: root.setWebThemeBalance(true) }
-                            RectButton { Layout.fillWidth: true; widthHint: 96; label: root.tr("webBalanceOff"); primary: !root.webThemeBalance; onClicked: root.setWebThemeBalance(false) }
-                        }
-                        Text {
-                            Layout.fillWidth: true
-                            text: root.webThemeBalance ? root.tr("webBalanceStateOn") : root.tr("webBalanceStateOff")
-                            color: settingsView.textSoft
-                            font.family: root.uiFont
-                            font.pixelSize: 11
-                            wrapMode: Text.WordWrap
+                    SettingsCard {
+                        Layout.preferredHeight: 238
+                        title: root.tr("integrations")
+                        subtitle: root.tr("integrationsHint")
+
+                        ColumnLayout {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.top: parent.top
+                            anchors.bottom: parent.bottom
+                            anchors.margins: 18
+                            anchors.topMargin: 72
+                            spacing: 8
+
+                            SettingsToggleRow {
+                                Layout.fillWidth: true
+                                label: root.zenAutoRestart ? root.tr("zenRestartOn") : root.tr("zenRestartOff")
+                                checked: root.zenAutoRestart
+                                onClicked: root.setZenAutoRestart(!root.zenAutoRestart)
+                            }
+
+                            SettingsToggleRow {
+                                Layout.fillWidth: true
+                                label: root.spotifyAutoRestart ? root.tr("spotifyRestartOn") : root.tr("spotifyRestartOff")
+                                checked: root.spotifyAutoRestart
+                                onClicked: root.setSpotifyAutoRestart(!root.spotifyAutoRestart)
+                            }
+
+                            SettingsToggleRow {
+                                Layout.fillWidth: true
+                                label: root.webThemeBalance ? root.tr("webBalanceOn") : root.tr("webBalanceOff")
+                                checked: root.webThemeBalance
+                                onClicked: root.setWebThemeBalance(!root.webThemeBalance)
+                            }
                         }
                     }
+
+                    SettingsCard {
+                        Layout.preferredHeight: 176
+                        title: root.tr("powerMode")
+                        subtitle: root.tr("powerModeHint")
+
+                        ColumnLayout {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.top: parent.top
+                            anchors.bottom: parent.bottom
+                            anchors.margins: 18
+                            anchors.topMargin: 72
+                            spacing: 8
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 10
+
+                                Repeater {
+                                    model: root.powerProfileOptions()
+
+                                    AppearanceModeButton {
+                                        required property var modelData
+
+                                        Layout.fillWidth: true
+                                        Layout.preferredHeight: 70
+                                        label: modelData.label
+                                        iconName: modelData.icon
+                                        active: root.powerProfile === modelData.id
+                                        onClicked: root.setPowerProfile(modelData.id)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                 }
 
-                SettingsCard {
-                    title: "Appearance"
-                    subtitle: "Customize how the interface looks"
-                    ColumnLayout { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; anchors.margins: 18; spacing: 16
-                        RowLayout { Layout.fillWidth: true; spacing: 14
-                            AppearanceModeButton { Layout.fillWidth: true; label: "Light"; iconName: "sun"; active: true; onClicked: if (root.theme) root.theme.applyTheme("default") }
-                            AppearanceModeButton { Layout.fillWidth: true; label: "Dark"; iconName: "moon"; onClicked: if (root.theme) root.theme.applyTheme("dark") }
-                            AppearanceModeButton { Layout.fillWidth: true; label: "Auto"; iconName: "display"; onClicked: if (root.theme) root.theme.applyTheme("pywal16") }
+                GridLayout {
+                    visible: root.activeNav === 1
+                    Layout.fillWidth: true
+                    columns: settingsView.contentColumns
+                    columnSpacing: 14
+                    rowSpacing: 14
+
+                    SettingsCard {
+                        Layout.preferredHeight: 220
+                        title: root.tr("themeStyle")
+                        subtitle: root.tr("appearanceHint")
+
+                        GridLayout {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.bottom: parent.bottom
+                            anchors.margins: 18
+                            columns: settingsView.bodyW > 900 ? 5 : 3
+                            columnSpacing: 10
+                            rowSpacing: 10
+
+                            Repeater {
+                                model: root.themeOptions()
+
+                                AppearanceModeButton {
+                                    required property var modelData
+
+                                    Layout.fillWidth: true
+                                    label: modelData.title
+                                    iconName: settingsView.themeIcon(modelData.id)
+                                    active: root.currentThemeId() === modelData.id
+                                    onClicked: root.selectTheme(modelData.id)
+                                }
+                            }
                         }
-                        Text { text: "Accent Color"; color: settingsView.textSoft; font.family: root.uiFont; font.pixelSize: 12; font.weight: Font.Bold }
-                        RowLayout { Layout.fillWidth: true; spacing: 13
-                            Repeater { model: ["#e78ac3", "#9d6bd6", "#66a6ee", "#40c2c5", "#68cd6c", "#f0b849", "#f47361"]
-                                Rectangle { Layout.preferredWidth: 25; Layout.preferredHeight: 25; radius: 13; color: modelData; border.width: index === 0 ? 6 : 1; border.color: index === 0 ? Qt.rgba(1, 1, 1, 0.72) : settingsView.line }
+                    }
+
+                    SettingsCard {
+                        Layout.preferredHeight: 254
+                        title: root.tr("fonts")
+                        subtitle: root.theme && !root.theme.fontSelectionActive ? root.tr("fontJapaneseLocked") : root.tr("fontsHint")
+
+                        GridLayout {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.bottom: parent.bottom
+                            anchors.margins: 18
+                            columns: settingsView.bodyW > 900 ? 3 : 2
+                            columnSpacing: 9
+                            rowSpacing: 9
+
+                            Repeater {
+                                model: root.fontOptions()
+
+                                FontChoiceButton {
+                                    required property var modelData
+
+                                    Layout.fillWidth: true
+                                    label: modelData.label
+                                    familyName: modelData.family
+                                    active: root.theme ? root.theme.fontFamilyId === modelData.id : modelData.id === "noto"
+                                    enabled: root.theme ? root.theme.fontSelectionActive : true
+                                    onClicked: if (root.theme && root.theme.fontSelectionActive) root.theme.setFontFamily(modelData.id)
+                                }
+                            }
+                        }
+                    }
+
+                    SettingsCard {
+                        Layout.preferredHeight: 322
+                        title: root.tr("opacity")
+                        subtitle: root.tr("codeOpacityHint")
+
+                        ColumnLayout {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.bottom: parent.bottom
+                            anchors.margins: 18
+                            spacing: 10
+
+                            SettingsSlider {
+                                Layout.fillWidth: true
+                                label: root.tr("panelOpacity")
+                                minValue: root.theme ? root.theme.minPanelOpacity() : 0.25
+                                maxValue: 0.98
+                                value: root.theme ? root.theme.sidebarOpacity : 0.78
+                                onMoved: function(v) { if (root.theme) root.theme.applyOpacity(v, root.theme.popupOpacity, root.theme.cardOpacity) }
+                            }
+
+                            SettingsSlider {
+                                Layout.fillWidth: true
+                                label: root.tr("popupOpacity")
+                                minValue: root.theme ? root.theme.minPanelOpacity() : 0.25
+                                maxValue: 0.98
+                                value: root.theme ? root.theme.popupOpacity : 0.78
+                                onMoved: function(v) { if (root.theme) root.theme.applyOpacity(root.theme.sidebarOpacity, v, root.theme.cardOpacity) }
+                            }
+
+                            SettingsSlider {
+                                Layout.fillWidth: true
+                                label: root.tr("opacityCard")
+                                minValue: root.theme ? root.theme.minOpacityForRole("card") : 0.25
+                                maxValue: 0.98
+                                value: root.theme ? root.theme.cardOpacity : 0.68
+                                onMoved: function(v) { if (root.theme) root.theme.applyOpacity(root.theme.sidebarOpacity, root.theme.popupOpacity, v) }
+                            }
+
+                            SettingsSlider {
+                                Layout.fillWidth: true
+                                label: root.tr("barOpacity")
+                                minValue: root.theme ? root.theme.minOpacityForRole("sidebar") : 0.25
+                                maxValue: 0.98
+                                value: root.theme ? root.theme.barOpacity : 0.78
+                                onMoved: function(v) { if (root.theme) root.theme.applyBarOpacity(v) }
+                            }
+
+                            SettingsSlider {
+                                Layout.fillWidth: true
+                                label: root.tr("codeOpacity")
+                                minValue: 0.60
+                                maxValue: 0.98
+                                value: root.codeOpacity
+                                onMoved: function(v) { root.setCodeOpacity(v) }
+                            }
+                        }
+                    }
+
+                    SettingsCard {
+                        Layout.preferredHeight: 146
+                        title: root.tr("popups")
+                        subtitle: root.tr("popupBubblesHint")
+
+                        ColumnLayout {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.bottom: parent.bottom
+                            anchors.margins: 18
+                            spacing: 8
+
+                            SettingsToggleRow {
+                                Layout.fillWidth: true
+                                label: root.theme && root.theme.popupBubblesSolid ? root.tr("popupBubblesSolid") : root.tr("popupBubblesMatched")
+                                checked: root.theme ? root.theme.popupBubblesSolid : false
+                                onClicked: if (root.theme) root.theme.setPopupBubblesSolid(!root.theme.popupBubblesSolid)
+                            }
+                        }
+                    }
+
+                    SettingsCard {
+                        Layout.preferredHeight: 262
+                        title: root.tr("glow")
+                        subtitle: root.tr("appearanceHint")
+
+                        ColumnLayout {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.bottom: parent.bottom
+                            anchors.margins: 18
+                            spacing: 10
+
+                            SettingsSlider {
+                                Layout.fillWidth: true
+                                label: root.tr("glowGeneral")
+                                value: root.theme ? root.theme.generalGlow : 0.50
+                                onMoved: function(v) { if (root.theme) root.theme.applyGlow(v, root.theme.sidebarBorderGlowLevel, root.theme.popupBorderGlowLevel, root.theme.iconGlowLevel, root.theme.textGlowLevel) }
+                            }
+
+                            SettingsSlider {
+                                Layout.fillWidth: true
+                                label: root.tr("borderGlow")
+                                value: root.theme ? root.theme.sidebarBorderGlowLevel : 0.50
+                                onMoved: function(v) { if (root.theme) root.theme.applyGlow(root.theme.generalGlow, v, v, root.theme.iconGlowLevel, root.theme.textGlowLevel) }
+                            }
+
+                            SettingsSlider {
+                                Layout.fillWidth: true
+                                label: root.tr("iconGlow")
+                                value: root.theme ? root.theme.iconGlowLevel : 0.50
+                                onMoved: function(v) { if (root.theme) root.theme.applyGlow(root.theme.generalGlow, root.theme.sidebarBorderGlowLevel, root.theme.popupBorderGlowLevel, v, root.theme.textGlowLevel) }
+                            }
+
+                            SettingsSlider {
+                                Layout.fillWidth: true
+                                label: root.tr("fontGlow")
+                                value: root.theme ? root.theme.textGlowLevel : 0.78
+                                onMoved: function(v) { if (root.theme) root.theme.applyTextGlow(v) }
+                            }
+                        }
+                    }
+
+                    SettingsCard {
+                        Layout.preferredHeight: 210
+                        title: root.tr("border")
+                        subtitle: root.tr("adapt")
+
+                        RowLayout {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.bottom: parent.bottom
+                            anchors.margins: 18
+                            spacing: 16
+
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 12
+
+                                BorderAdaptButton {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 42
+                                    active: root.theme ? root.theme.borderAdaptEnabled : true
+                                    onClicked: if (root.theme) root.theme.applyBorderAccent(true, root.theme.borderHue)
+                                }
+
+                                RectButton {
+                                    Layout.fillWidth: true
+                                    label: root.tr("reset")
+                                    onClicked: if (root.theme) root.theme.resetBorderAccent()
+                                }
+                            }
+
+                            BorderPaletteWheel {
+                                Layout.preferredWidth: 104
+                                Layout.preferredHeight: 104
                             }
                         }
                     }
                 }
 
-                SettingsCard {
-                    title: "Transparency"
-                    subtitle: "Adjust background blur and transparency"
-                    ColumnLayout { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; anchors.margins: 18; spacing: 14
-                        SettingsSlider { Layout.fillWidth: true; value: root.theme ? root.theme.sidebarOpacity : 0.55; onMoved: function(v) { if (root.theme) root.theme.applyOpacity(v, v, root.theme.cardOpacity) } }
-                        RowLayout { Layout.fillWidth: true; Text { Layout.fillWidth: true; text: "20%"; color: settingsView.textSoft; font.family: root.uiFont; font.pixelSize: 11 } Text { text: "100%"; color: settingsView.textSoft; font.family: root.uiFont; font.pixelSize: 11 } }
-                        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 58; radius: 8; clip: true; Image { anchors.fill: parent; source: root.currentWallpaperPreview(); fillMode: Image.PreserveAspectCrop; opacity: 0.55 } }
-                    }
-                }
+                GridLayout {
+                    visible: root.activeNav === root.visualizerNavIndex()
+                    Layout.fillWidth: true
+                    columns: settingsView.contentColumns
+                    columnSpacing: 14
+                    rowSpacing: 14
 
-                SettingsCard {
-                    title: "Corner Radius"
-                    subtitle: "Adjust the roundness of UI elements"
-                    ColumnLayout { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; anchors.margins: 18; spacing: 14
-                        SettingsSlider { Layout.fillWidth: true; value: 0.42 }
-                        RowLayout { Layout.fillWidth: true; Text { Layout.fillWidth: true; text: "4px"; color: settingsView.textSoft; font.family: root.uiFont; font.pixelSize: 11 } Text { text: "24px"; color: settingsView.textSoft; font.family: root.uiFont; font.pixelSize: 11 } }
-                        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 58; radius: 8; color: Qt.rgba(1, 1, 1, 0.38)
-                            Rectangle { x: 30; y: 15; width: 58; height: 36; radius: 12; color: "transparent"; border.width: 1; border.color: Qt.rgba(1, 1, 1, 0.70) }
-                            Rectangle { x: 110; y: 15; width: 166; height: 36; radius: 12; color: Qt.rgba(1, 1, 1, 0.30); Rectangle { anchors.verticalCenter: parent.verticalCenter; x: 26; width: 14; height: 14; radius: 7; color: settingsView.pink } }
+                    SettingsCard {
+                        Layout.preferredHeight: 186
+                        title: root.tr("visualizerMode")
+                        subtitle: root.tr("visualizerModeHint")
+
+                        ColumnLayout {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.top: parent.top
+                            anchors.bottom: parent.bottom
+                            anchors.margins: 18
+                            anchors.topMargin: 72
+                            spacing: 8
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 10
+
+                                Repeater {
+                                    model: root.visualizerModeOptions()
+
+                                    AppearanceModeButton {
+                                        required property var modelData
+
+                                        Layout.fillWidth: true
+                                        Layout.preferredHeight: 78
+                                        label: modelData.label
+                                        iconName: modelData.icon
+                                        active: root.theme ? root.theme.visualizerMode === modelData.id : modelData.id === "wave"
+                                        onClicked: if (root.theme) root.theme.setVisualizerMode(modelData.id)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    SettingsCard {
+                        Layout.preferredHeight: 226
+                        title: root.tr("visualizer")
+                        subtitle: root.tr("visualizerHint")
+
+                        ColumnLayout {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.bottom: parent.bottom
+                            anchors.margins: 18
+                            spacing: 10
+
+                            SettingsSlider {
+                                Layout.fillWidth: true
+                                label: root.tr("visualizerStrength")
+                                minValue: 0
+                                maxValue: 0.90
+                                value: root.theme ? root.theme.visualizerStrength : 0.46
+                                onMoved: function(v) { if (root.theme) root.theme.setVisualizerStrength(v) }
+                            }
+
+                            SettingsSlider {
+                                Layout.fillWidth: true
+                                label: root.tr("visualizerPixelSize")
+                                minValue: 3
+                                maxValue: 12
+                                value: root.theme ? root.theme.visualizerPixelSize : 7
+                                valueText: Math.round(root.theme ? root.theme.visualizerPixelSize : 7) + " px"
+                                onMoved: function(v) { if (root.theme) root.theme.setVisualizerPixelSize(v) }
+                            }
                         }
                     }
                 }
 
-                SettingsCard {
-                    title: "Animations"
-                    subtitle: "Control interface animations"
-                    ColumnLayout { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; anchors.margins: 18; spacing: 0
-                        SettingsToggleRow { Layout.fillWidth: true; label: "Enable animations"; checked: true }
-                        SettingsToggleRow { Layout.fillWidth: true; label: "Reduce motion"; checked: false }
-                        ComboField { Layout.fillWidth: true; label: "Normal"; iconName: "clock" }
+                GridLayout {
+                    visible: root.activeNav === root.wallpaperNavIndex()
+                    Layout.fillWidth: true
+                    columns: settingsView.contentColumns
+                    columnSpacing: 14
+                    rowSpacing: 14
+
+                    SettingsCard {
+                        Layout.columnSpan: settingsView.contentColumns
+                        Layout.preferredHeight: 510
+                        title: root.tr("wallpaper")
+                        subtitle: root.tr("wallpaperHint")
+
+                        ColumnLayout {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.top: parent.top
+                            anchors.bottom: parent.bottom
+                            anchors.margins: 18
+                            anchors.topMargin: 72
+                            spacing: 8
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 12
+
+                                Repeater {
+                                    model: Math.min(5, root.wallpapers.length)
+
+                                    WallpaperMini {
+                                        required property int index
+
+                                        Layout.fillWidth: true
+                                        Layout.preferredHeight: 104
+                                        source: root.contentActive && root.scanComplete ? root.displaySource(root.wallpapers[index]) : ""
+                                        selected: root.selectedIndex === index
+                                        onClicked: root.selectedIndex = index
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 52
+                                radius: 10
+                                color: Qt.rgba(1, 1, 1, 0.38)
+                                clip: true
+
+                                Image {
+                                    anchors.fill: parent
+                                    source: root.currentWallpaperPreview()
+                                    fillMode: Image.PreserveAspectCrop
+                                    opacity: 0.55
+                                    asynchronous: true
+                                }
+                            }
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: root.tr("wallpaperTransition")
+                                color: root.settingsLightText
+                                font.family: root.uiFont
+                                font.pixelSize: 11
+                                font.weight: Font.DemiBold
+                                elide: Text.ElideRight
+                            }
+
+                            GridLayout {
+                                Layout.fillWidth: true
+                                columns: settingsView.bodyW > 900 ? 6 : 3
+                                columnSpacing: 8
+                                rowSpacing: 8
+
+                                Repeater {
+                                    model: root.wallpaperTransitionOptions()
+
+                                    TransitionButton {
+                                        required property var modelData
+
+                                        Layout.fillWidth: true
+                                        label: modelData.label
+                                        active: root.wallpaperTransition === modelData.id
+                                        onClicked: root.setWallpaperTransition(modelData.id)
+                                    }
+                                }
+                            }
+
+                            SettingsSlider {
+                                Layout.fillWidth: true
+                                label: root.tr("transitionDuration")
+                                minValue: 0.15
+                                maxValue: 3.00
+                                value: root.wallpaperTransitionDuration
+                                valueText: root.secondsText(root.wallpaperTransitionDuration)
+                                onMoved: function(v) { root.setWallpaperTransitionDuration(v) }
+                            }
+
+                            SettingsSlider {
+                                Layout.fillWidth: true
+                                label: root.tr("staticDelay")
+                                minValue: 0
+                                maxValue: 0.80
+                                value: root.wallpaperStaticDelay
+                                valueText: root.secondsText(root.wallpaperStaticDelay)
+                                onMoved: function(v) { root.setWallpaperStaticDelay(v) }
+                            }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 12
+
+                                RectButton {
+                                    label: root.tr("customWallpaper")
+                                    widthHint: 220
+                                    onClicked: {
+                                        root.noticeText = root.tr("wallpaperFolderOpened")
+                                        noticeReset.restart()
+                                        if (!customWallpaperChooser.running)
+                                            customWallpaperChooser.running = true
+                                    }
+                                }
+
+                                Item { Layout.fillWidth: true }
+
+                                RectButton {
+                                    label: applyWallpaper.running ? root.tr("applying") : root.tr("apply")
+                                    widthHint: 132
+                                    primary: true
+                                    onClicked: root.applySelected()
+                                }
+                            }
+                        }
                     }
                 }
 
-                SettingsCard {
-                    title: "Interface Scale"
-                    subtitle: "Adjust the size of interface elements"
-                    ColumnLayout { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; anchors.margins: 18; spacing: 18
-                        SettingsSlider { Layout.fillWidth: true; value: 0.50 }
-                        RowLayout { Layout.fillWidth: true; Text { Layout.fillWidth: true; text: "80%"; color: settingsView.textSoft; font.family: root.uiFont; font.pixelSize: 11 } Text { Layout.fillWidth: true; text: "100%"; color: settingsView.text; horizontalAlignment: Text.AlignHCenter; font.family: root.uiFont; font.pixelSize: 11; font.weight: Font.Bold } Text { Layout.fillWidth: true; text: "120%"; color: settingsView.textSoft; horizontalAlignment: Text.AlignRight; font.family: root.uiFont; font.pixelSize: 11 } }
-                    }
-                }
+                GridLayout {
+                    visible: root.activeNav === root.languageNavIndex()
+                    Layout.fillWidth: true
+                    columns: 1
 
-                SettingsCard {
-                    title: "Wallpaper"
-                    subtitle: "Choose your background"
-                    RowLayout { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; anchors.margins: 18; spacing: 14
-                        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 108; radius: 9; clip: true; Image { anchors.fill: parent; source: root.currentWallpaperPreview(); fillMode: Image.PreserveAspectCrop } }
-                        ColumnLayout { Layout.preferredWidth: 92; spacing: 12
-                            RectButton { Layout.fillWidth: true; label: "Change"; onClicked: if (!customWallpaperChooser.running) customWallpaperChooser.running = true }
-                            ComboField { Layout.fillWidth: true; label: "Fit"; iconName: "display" }
+                    SettingsCard {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 188
+                        title: root.tr("language")
+                        subtitle: root.tr("languageHint")
+
+                        RowLayout {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.bottom: parent.bottom
+                            anchors.margins: 18
+                            spacing: 14
+
+                            Repeater {
+                                model: root.languageOptions()
+
+                                LanguageButton {
+                                    required property var modelData
+
+                                    Layout.fillWidth: true
+                                    itemData: modelData
+                                    active: root.currentLanguage() === modelData.id
+                                    onClicked: root.selectLanguage(modelData.id)
+                                }
+                            }
                         }
                     }
                 }
             }
+        }
 
-            RowLayout {
+        RowLayout {
+            x: settingsView.bodyX
+            y: parent.height - 58
+            width: settingsView.bodyW
+            height: 40
+            spacing: 14
+
+            RectButton {
+                label: root.tr("reset")
+                widthHint: 110
+                onClicked: {
+                    if (root.theme) {
+                        root.theme.resetOpacity()
+                        root.theme.resetGlow()
+                        root.theme.resetBorderAccent()
+                        root.theme.resetVisualizerStrength()
+                    }
+                    root.noticeText = root.tr("materialReset")
+                    noticeReset.restart()
+                }
+            }
+
+            Text {
                 Layout.fillWidth: true
-                spacing: 14
-                RectButton { label: "Reset to Defaults"; widthHint: 150; onClicked: { if (root.theme) { root.theme.resetOpacity(); root.theme.resetGlow(); root.theme.resetBorderAccent(); } } }
-                Item { Layout.fillWidth: true }
-                RectButton { label: "Cancel"; widthHint: 110; onClicked: root.closeRequested() }
-                RectButton { label: "Apply Changes"; widthHint: 150; primary: true }
+                text: root.noticeText.length > 0 ? root.noticeText : (root.theme && root.theme.themeNotice.length > 0 ? root.theme.themeNotice : "")
+                color: settingsView.textSoft
+                font.family: root.uiFont
+                font.pixelSize: 11
+                elide: Text.ElideRight
+                verticalAlignment: Text.AlignVCenter
             }
+
+            RectButton { label: "OK"; widthHint: 86; primary: true; onClicked: root.closeRequested() }
         }
     }
 
     component SettingsNavPill: Rectangle {
+        id: pill
+
         property string label: ""
         property string iconName: "box"
         property bool active: false
+        property bool hovered: false
+        signal clicked()
 
         Layout.preferredHeight: 50
         radius: 11
-        color: active ? Qt.rgba(0.96, 0.72, 0.88, 0.32) : "transparent"
-        border.width: active ? 1 : 0
+        color: active ? Qt.rgba(0.96, 0.72, 0.88, 0.32) : (hovered ? Qt.rgba(1, 1, 1, 0.28) : "transparent")
+        border.width: active || hovered ? 1 : 0
         border.color: Qt.rgba(0.90, 0.52, 0.74, 0.24)
+        scale: navMouse.pressed ? 0.98 : (hovered ? 1.01 : 1.0)
 
         RowLayout {
             anchors.fill: parent
@@ -1768,6 +2846,17 @@ Item {
             SmallIcon { Layout.preferredWidth: 18; Layout.preferredHeight: 18; iconName: parent.parent.iconName; colorOverride: parent.parent.active ? root.settingsLightAccent : root.settingsLightTextSoft }
             Text { Layout.fillWidth: true; text: parent.parent.label; color: parent.parent.active ? root.settingsLightAccent : root.settingsLightTextSoft; font.family: root.uiFont; font.pixelSize: 13; font.weight: Font.DemiBold }
         }
+
+        MouseArea {
+            id: navMouse
+
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onEntered: pill.hovered = true
+            onExited: pill.hovered = false
+            onClicked: pill.clicked()
+        }
     }
 
     component SettingsCard: Rectangle {
@@ -1775,7 +2864,8 @@ Item {
         property string subtitle: ""
 
         Layout.fillWidth: true
-        Layout.fillHeight: true
+        Layout.fillHeight: false
+        Layout.preferredHeight: 190
         Layout.minimumHeight: 170
         radius: 13
         color: Qt.rgba(1, 1, 1, 0.46)
@@ -1803,13 +2893,17 @@ Item {
     }
 
     component SettingsToggleRow: Rectangle {
+        id: toggleRow
+
         property string label: ""
         property bool checked: false
         property string buttonLabel: ""
+        property bool hovered: false
+        signal clicked()
 
         Layout.preferredHeight: 42
         radius: 8
-        color: "transparent"
+        color: hovered ? Qt.rgba(1, 1, 1, 0.24) : "transparent"
         Text { anchors.left: parent.left; anchors.leftMargin: 14; anchors.verticalCenter: parent.verticalCenter; text: parent.label; color: root.settingsLightText; font.family: root.uiFont; font.pixelSize: 12 }
         Rectangle {
             anchors.right: parent.right
@@ -1822,17 +2916,72 @@ Item {
             Text { anchors.centerIn: parent; visible: parent.parent.buttonLabel.length > 0; text: parent.parent.buttonLabel; color: root.settingsLightAccent; font.family: root.uiFont; font.pixelSize: 10; font.weight: Font.Bold }
             Rectangle { visible: parent.parent.buttonLabel.length <= 0; x: parent.parent.checked ? parent.width - width - 3 : 3; anchors.verticalCenter: parent.verticalCenter; width: 18; height: 18; radius: 9; color: "white" }
         }
+
+        MouseArea {
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onEntered: toggleRow.hovered = true
+            onExited: toggleRow.hovered = false
+            onClicked: toggleRow.clicked()
+        }
     }
 
     component SettingsSlider: Item {
+        id: settingsSlider
+
+        property string label: ""
         property real value: 0.5
+        property real minValue: 0
+        property real maxValue: 1
+        property string valueText: ""
         signal moved(real value)
 
-        height: 24
-        Rectangle { id: sliderTrack; anchors.left: parent.left; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; height: 5; radius: 3; color: Qt.rgba(0.50, 0.42, 0.58, 0.14) }
-        Rectangle { anchors.left: sliderTrack.left; anchors.verticalCenter: sliderTrack.verticalCenter; width: sliderTrack.width * Math.max(0, Math.min(1, parent.value)); height: sliderTrack.height; radius: 3; color: root.settingsLightAccent }
-        Rectangle { x: sliderTrack.x + sliderTrack.width * Math.max(0, Math.min(1, parent.value)) - width / 2; anchors.verticalCenter: sliderTrack.verticalCenter; width: 18; height: 18; radius: 9; color: root.settingsLightAccent }
-        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onPressed: function(mouse) { parent.moved(Math.max(0, Math.min(1, mouse.x / Math.max(1, parent.width)))) } onPositionChanged: function(mouse) { if (pressed) parent.moved(Math.max(0, Math.min(1, mouse.x / Math.max(1, parent.width)))) } }
+        readonly property real normalizedValue: Math.max(0, Math.min(1, (value - minValue) / Math.max(0.01, maxValue - minValue)))
+
+        Layout.preferredHeight: label.length > 0 ? 42 : 24
+        implicitHeight: label.length > 0 ? 42 : 24
+        height: implicitHeight
+
+        function valueFromX(xPos) {
+            return minValue + Math.max(0, Math.min(1, xPos / Math.max(1, width))) * (maxValue - minValue)
+        }
+
+        Text {
+            visible: settingsSlider.label.length > 0
+            anchors.left: parent.left
+            anchors.top: parent.top
+            text: settingsSlider.label
+            color: root.settingsLightText
+            font.family: root.uiFont
+            font.pixelSize: 11
+            font.weight: Font.DemiBold
+        }
+
+        Text {
+            visible: settingsSlider.label.length > 0
+            anchors.right: parent.right
+            anchors.top: parent.top
+            text: settingsSlider.valueText.length > 0 ? settingsSlider.valueText : root.percent(settingsSlider.normalizedValue)
+            color: root.settingsLightTextSoft
+            font.family: root.monoFont
+            font.pixelSize: 10
+        }
+
+        Rectangle {
+            id: sliderTrack
+
+            anchors.left: parent.left
+            anchors.right: parent.right
+            y: settingsSlider.label.length > 0 ? 28 : Math.round((parent.height - height) / 2)
+            height: 5
+            radius: 3
+            color: Qt.rgba(0.50, 0.42, 0.58, 0.14)
+        }
+
+        Rectangle { anchors.left: sliderTrack.left; anchors.verticalCenter: sliderTrack.verticalCenter; width: sliderTrack.width * settingsSlider.normalizedValue; height: sliderTrack.height; radius: 3; color: root.settingsLightAccent }
+        Rectangle { x: sliderTrack.x + sliderTrack.width * settingsSlider.normalizedValue - width / 2; anchors.verticalCenter: sliderTrack.verticalCenter; width: 18; height: 18; radius: 9; color: root.settingsLightAccent }
+        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onPressed: function(mouse) { settingsSlider.moved(settingsSlider.valueFromX(mouse.x)) } onPositionChanged: function(mouse) { if (pressed) settingsSlider.moved(settingsSlider.valueFromX(mouse.x)) } }
     }
 
     component AppearanceModeButton: Rectangle {
@@ -1853,6 +3002,81 @@ Item {
         MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: parent.clicked() }
     }
 
+    component FontChoiceButton: Rectangle {
+        id: button
+
+        property string label: ""
+        property string familyName: root.uiFont
+        property bool active: false
+        property bool hovered: false
+        signal clicked()
+
+        Layout.preferredHeight: 48
+        radius: 8
+        opacity: enabled ? 1 : 0.48
+        color: active ? Qt.rgba(0.98, 0.78, 0.91, 0.30) : (hovered ? Qt.rgba(1, 1, 1, 0.34) : Qt.rgba(1, 1, 1, 0.24))
+        border.width: 1
+        border.color: active ? Qt.rgba(0.91, 0.48, 0.72, 0.44) : Qt.rgba(0.37, 0.26, 0.50, 0.10)
+
+        Text {
+            anchors.centerIn: parent
+            width: parent.width - 16
+            text: button.label
+            color: button.active ? root.settingsLightAccent : root.settingsLightText
+            font.family: button.familyName
+            font.pixelSize: 12
+            font.weight: Font.DemiBold
+            horizontalAlignment: Text.AlignHCenter
+            elide: Text.ElideRight
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            enabled: button.enabled
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onEntered: button.hovered = true
+            onExited: button.hovered = false
+            onClicked: button.clicked()
+        }
+    }
+
+    component TransitionButton: Rectangle {
+        id: button
+
+        property string label: ""
+        property bool active: false
+        property bool hovered: false
+        signal clicked()
+
+        Layout.preferredHeight: 34
+        radius: 8
+        color: active ? Qt.rgba(0.98, 0.78, 0.91, 0.30) : (hovered ? Qt.rgba(1, 1, 1, 0.34) : Qt.rgba(1, 1, 1, 0.24))
+        border.width: 1
+        border.color: active ? Qt.rgba(0.91, 0.48, 0.72, 0.44) : Qt.rgba(0.37, 0.26, 0.50, 0.10)
+
+        Text {
+            anchors.centerIn: parent
+            width: parent.width - 12
+            text: button.label
+            color: button.active ? root.settingsLightAccent : root.settingsLightText
+            font.family: root.uiFont
+            font.pixelSize: 11
+            font.weight: Font.DemiBold
+            horizontalAlignment: Text.AlignHCenter
+            elide: Text.ElideRight
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onEntered: button.hovered = true
+            onExited: button.hovered = false
+            onClicked: button.clicked()
+        }
+    }
+
     component RectButton: Rectangle {
         property string label: ""
         property bool primary: false
@@ -1865,7 +3089,7 @@ Item {
         color: primary ? root.accentPrimary() : Qt.rgba(1, 1, 1, 0.52)
         border.width: primary ? 0 : 1
         border.color: Qt.rgba(0.36, 0.26, 0.50, 0.10)
-        Text { anchors.centerIn: parent; text: parent.label; color: parent.primary ? "white" : Qt.rgba(0.31, 0.25, 0.43, 0.92); font.family: root.uiFont; font.pixelSize: 12; font.weight: Font.Bold }
+        Text { anchors.centerIn: parent; width: parent.width - 12; text: parent.label; color: parent.primary ? "white" : Qt.rgba(0.31, 0.25, 0.43, 0.92); font.family: root.uiFont; font.pixelSize: 12; font.weight: Font.Bold; horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight }
         MouseArea { anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: parent.clicked() }
     }
 

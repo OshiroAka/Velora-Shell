@@ -24,8 +24,8 @@ Item {
     readonly property color glass: theme ? (externalSurface ? (darkSoft ? theme.withAlpha(theme.surfaceSidebar, Math.min(theme.surfaceSidebar.a, 0.72)) : theme.surfaceSidebar) : theme.surfacePopup) : Qt.rgba(1.0, 0.988, 0.998, externalSurface ? 0.66 : 0.90)
     readonly property color cardGlass: theme ? (externalSurface && darkSoft ? theme.withAlpha(theme.surfaceCard, Math.min(theme.surfaceCard.a, 0.62)) : theme.surfaceCard) : Qt.rgba(1, 1, 1, externalSurface ? 0.70 : 0.78)
     readonly property color borderSoft: theme ? theme.borderSoft : Qt.rgba(1, 1, 1, 0.82)
-    readonly property string uiFont: "Noto Sans CJK JP"
-    readonly property string monoFont: "JetBrainsMono Nerd Font"
+    readonly property string uiFont: theme ? theme.uiFont : "Noto Sans CJK JP"
+    readonly property string monoFont: theme ? theme.monoFont : "JetBrainsMono Nerd Font"
     readonly property int motionHover: theme ? theme.motionHover : 120
     readonly property int motionPanelGeometry: theme ? theme.motionPanelGeometry : 220
     readonly property int motionEaseHover: theme ? theme.motionEaseHover : Easing.OutCubic

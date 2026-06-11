@@ -26,12 +26,12 @@ QtObject {
     property bool motionEnabled: true
     readonly property int motionFast: motionEnabled ? 120 : 1
     readonly property int motionNormal: motionEnabled ? 200 : 1
-    readonly property int motionSlow: motionEnabled ? 320 : 1
-    readonly property int motionPanelIn: motionEnabled ? 280 : 1
-    readonly property int motionPanelOut: motionEnabled ? 210 : 1
-    readonly property int motionPanelGeometry: motionEnabled ? 270 : 1
-    readonly property int motionMenuIn: motionEnabled ? 360 : 1
-    readonly property int motionMenuOut: motionEnabled ? 240 : 1
+    readonly property int motionSlow: motionEnabled ? 500 : 1
+    readonly property int motionPanelIn: motionEnabled ? 460 : 1
+    readonly property int motionPanelOut: motionEnabled ? 380 : 1
+    readonly property int motionPanelGeometry: motionEnabled ? 460 : 1
+    readonly property int motionMenuIn: motionEnabled ? 540 : 1
+    readonly property int motionMenuOut: motionEnabled ? 420 : 1
     readonly property int motionHover: motionEnabled ? 120 : 1
     readonly property int motionUnmountDelay: motionEnabled ? motionPanelOut + 120 : 1
     readonly property int motionPanelOffset: motionEnabled ? 40 : 0
@@ -50,7 +50,13 @@ QtObject {
     property string barPosition: "left"
     property bool desktopFrameEnabled: true
     property bool topBarEnabled: false
+    property bool popupAttachedToBar: true
+    property bool popupBubblesSolid: false
     property string language: "ja"
+    property string fontFamilyId: "noto"
+    readonly property string uiFont: language === "ja" ? "Noto Sans CJK JP" : fontFamilyForId(fontFamilyId)
+    readonly property string monoFont: uiFont
+    readonly property bool fontSelectionActive: language !== "ja"
     property real sidebarOpacity: 0.88
     property real barOpacity: 0.88
     property real popupOpacity: 0.90
@@ -62,6 +68,8 @@ QtObject {
     property real textGlowLevel: 0.78
     property real borderHue: 0.55
     property real visualizerStrength: 0.46
+    property string visualizerMode: "wave"
+    property real visualizerPixelSize: 7
 
     property color surfaceBase: Qt.rgba(255 / 255, 250 / 255, 254 / 255, 0.86)
     property color surfaceSidebar: Qt.rgba(255 / 255, 247 / 255, 253 / 255, 0.88)
@@ -112,6 +120,14 @@ QtObject {
         { id: "ja", label: "日本語", shortLabel: "JP" },
         { id: "en", label: "English", shortLabel: "EN" },
         { id: "pt-BR", label: "Português Brasil", shortLabel: "BR" }
+    ]
+    readonly property var fontOptions: [
+        { id: "noto", label: "Noto Sans", family: "Noto Sans" },
+        { id: "adwaita", label: "Adwaita Sans", family: "Adwaita Sans" },
+        { id: "cantarell", label: "Cantarell", family: "Cantarell" },
+        { id: "dejavu", label: "DejaVu Sans", family: "DejaVu Sans" },
+        { id: "liberation", label: "Liberation Sans", family: "Liberation Sans" },
+        { id: "fantasque", label: "FantasqueSansM", family: "FantasqueSansM Nerd Font" }
     ]
 
     Behavior on surfaceBase { enabled: root.paletteBehaviorEnabled; ColorAnimation { duration: root.paletteTransitionDuration; easing.type: Easing.OutCubic } }
@@ -264,7 +280,33 @@ QtObject {
         const n = Number(value)
         if (isNaN(n))
             return visualizerStrength
-        return Math.max(0.16, Math.min(0.68, n))
+        return Math.max(0, Math.min(0.90, n))
+    }
+
+    function normalizeVisualizerMode(value) {
+        const mode = String(value || "wave").toLowerCase()
+        return mode === "pixels" || mode === "pixel" || mode === "grid" || mode === "squares" || mode === "square" ? "pixels" : "wave"
+    }
+
+    function clampVisualizerPixelSize(value) {
+        const n = Number(value)
+        if (isNaN(n))
+            return visualizerPixelSize
+        return Math.max(3, Math.min(12, n))
+    }
+
+    function popupBubbleSolidAlpha() {
+        return themeMode === "dark" ? 0.74 : 0.88
+    }
+
+    function popupBubbleOpacity(opacity) {
+        const n = Number(opacity)
+        const base = isNaN(n) ? popupBubbleSolidAlpha() : n
+        return popupBubblesSolid ? Math.max(base, popupBubbleSolidAlpha()) : base
+    }
+
+    function popupBubbleSurface() {
+        return popupBubblesSolid ? withAlpha(paletteSurfaceCard, popupBubbleSolidAlpha()) : surfaceCard
     }
 
     function withOpacity(colorValue, opacity, role) {
@@ -834,6 +876,38 @@ QtObject {
         }
     }
 
+    function setVisualizerMode(mode, persist) {
+        visualizerMode = normalizeVisualizerMode(mode)
+        if (persist !== false)
+            saveVisualizerMode()
+    }
+
+    function saveVisualizerMode() {
+        const mode = normalizeVisualizerMode(visualizerMode)
+        if (visualizerModeSaveProc.running)
+            visualizerModeSaveProc.pending = mode
+        else {
+            visualizerModeSaveProc.command = [root.stateScript, "visualizer-mode", "set", mode]
+            visualizerModeSaveProc.running = true
+        }
+    }
+
+    function setVisualizerPixelSize(value, persist) {
+        visualizerPixelSize = clampVisualizerPixelSize(value)
+        if (persist !== false)
+            saveVisualizerPixelSize()
+    }
+
+    function saveVisualizerPixelSize() {
+        const size = Number(visualizerPixelSize).toFixed(2)
+        if (visualizerPixelSizeSaveProc.running)
+            visualizerPixelSizeSaveProc.pending = size
+        else {
+            visualizerPixelSizeSaveProc.command = [root.stateScript, "visualizer-pixel-size", "set", size]
+            visualizerPixelSizeSaveProc.running = true
+        }
+    }
+
     function setTopBarEnabled(enabled, persist) {
         const nextEnabled = enabled === true || String(enabled) === "1" || String(enabled) === "true" || String(enabled) === "on"
         topBarEnabled = nextEnabled
@@ -852,6 +926,38 @@ QtObject {
         else {
             topBarSaveProc.command = [root.stateScript, "topbar", "set", enabled]
             topBarSaveProc.running = true
+        }
+    }
+
+    function setPopupAttachedToBar(enabled, persist) {
+        popupAttachedToBar = enabled === true || String(enabled) === "1" || String(enabled) === "true" || String(enabled) === "on"
+        if (persist !== false)
+            savePopupAttachedToBar()
+    }
+
+    function savePopupAttachedToBar() {
+        const enabled = popupAttachedToBar ? "on" : "off"
+        if (popupAttachSaveProc.running)
+            popupAttachSaveProc.pending = enabled
+        else {
+            popupAttachSaveProc.command = [root.stateScript, "popup-attach", "set", enabled]
+            popupAttachSaveProc.running = true
+        }
+    }
+
+    function setPopupBubblesSolid(enabled, persist) {
+        popupBubblesSolid = enabled === true || String(enabled) === "1" || String(enabled) === "true" || String(enabled) === "on" || String(enabled) === "solid"
+        if (persist !== false)
+            savePopupBubblesSolid()
+    }
+
+    function savePopupBubblesSolid() {
+        const mode = popupBubblesSolid ? "solid" : "matched"
+        if (popupBubblesSaveProc.running)
+            popupBubblesSaveProc.pending = mode
+        else {
+            popupBubblesSaveProc.command = [root.stateScript, "popup-bubbles", "set", mode]
+            popupBubblesSaveProc.running = true
         }
     }
 
@@ -891,6 +997,36 @@ QtObject {
         return "ja"
     }
 
+    function normalizeFontFamily(value) {
+        const next = String(value || "noto").toLowerCase()
+        if (next === "adwaita" || next === "adwaita-sans" || next === "adwaita_sans")
+            return "adwaita"
+        if (next === "cantarell")
+            return "cantarell"
+        if (next === "dejavu" || next === "dejavu-sans" || next === "dejavu_sans")
+            return "dejavu"
+        if (next === "liberation" || next === "liberation-sans" || next === "liberation_sans")
+            return "liberation"
+        if (next === "fantasque" || next === "fantasque-sans" || next === "fantasquesansm")
+            return "fantasque"
+        return "noto"
+    }
+
+    function fontFamilyForId(value) {
+        const id = normalizeFontFamily(value)
+        if (id === "adwaita")
+            return "Adwaita Sans"
+        if (id === "cantarell")
+            return "Cantarell"
+        if (id === "dejavu")
+            return "DejaVu Sans"
+        if (id === "liberation")
+            return "Liberation Sans"
+        if (id === "fantasque")
+            return "FantasqueSansM Nerd Font"
+        return "Noto Sans"
+    }
+
     function setLanguage(value, persist) {
         language = normalizeLanguage(value)
         if (persist !== false)
@@ -903,6 +1039,22 @@ QtObject {
         else {
             languageSaveProc.command = [root.stateScript, "language", "set", language]
             languageSaveProc.running = true
+        }
+    }
+
+    function setFontFamily(value, persist) {
+        fontFamilyId = normalizeFontFamily(value)
+        if (persist !== false)
+            saveFontFamily()
+    }
+
+    function saveFontFamily() {
+        const fontId = normalizeFontFamily(fontFamilyId)
+        if (fontSaveProc.running)
+            fontSaveProc.pending = fontId
+        else {
+            fontSaveProc.command = [root.stateScript, "font", "set", fontId]
+            fontSaveProc.running = true
         }
     }
 
@@ -979,11 +1131,29 @@ QtObject {
             return
         }
 
+        if (key === "font") {
+            if (line.length > 0)
+                root.setFontFamily(line, false)
+            return
+        }
+
         if (key === "visualizer" && line.length > 0 && line !== "auto")
             root.setVisualizerStrength(line, false)
 
+        if (key === "visualizerMode" && line.length > 0)
+            root.setVisualizerMode(line, false)
+
+        if (key === "visualizerPixelSize" && line.length > 0)
+            root.setVisualizerPixelSize(line, false)
+
         if (key === "topBar")
             root.setTopBarEnabled(line === "on" || line === "1" || line === "true", false)
+
+        if (key === "popupAttach")
+            root.setPopupAttachedToBar(line === "on" || line === "1" || line === "true", false)
+
+        if (key === "popupBubbles")
+            root.setPopupBubblesSolid(line === "solid" || line === "on" || line === "1" || line === "true", false)
     }
 
     Component.onCompleted: {
@@ -1228,6 +1398,38 @@ QtObject {
         onExited: running = false
     }
 
+    property Process visualizerModeSaveProc: Process {
+        property string pending: ""
+
+        running: false
+        command: [root.stateScript, "visualizer-mode", "set", "wave"]
+        onExited: {
+            running = false
+            if (pending.length > 0) {
+                const next = pending
+                pending = ""
+                command = [root.stateScript, "visualizer-mode", "set", next]
+                running = true
+            }
+        }
+    }
+
+    property Process visualizerPixelSizeSaveProc: Process {
+        property string pending: ""
+
+        running: false
+        command: [root.stateScript, "visualizer-pixel-size", "set", "7.00"]
+        onExited: {
+            running = false
+            if (pending.length > 0) {
+                const next = pending
+                pending = ""
+                command = [root.stateScript, "visualizer-pixel-size", "set", next]
+                running = true
+            }
+        }
+    }
+
     property Process topBarSaveProc: Process {
         property string pending: ""
 
@@ -1239,6 +1441,38 @@ QtObject {
                 const next = pending
                 pending = ""
                 command = [root.stateScript, "topbar", "set", next]
+                running = true
+            }
+        }
+    }
+
+    property Process popupAttachSaveProc: Process {
+        property string pending: ""
+
+        running: false
+        command: [root.stateScript, "popup-attach", "set", "on"]
+        onExited: {
+            running = false
+            if (pending.length > 0) {
+                const next = pending
+                pending = ""
+                command = [root.stateScript, "popup-attach", "set", next]
+                running = true
+            }
+        }
+    }
+
+    property Process popupBubblesSaveProc: Process {
+        property string pending: ""
+
+        running: false
+        command: [root.stateScript, "popup-bubbles", "set", "matched"]
+        onExited: {
+            running = false
+            if (pending.length > 0) {
+                const next = pending
+                pending = ""
+                command = [root.stateScript, "popup-bubbles", "set", next]
                 running = true
             }
         }
@@ -1304,6 +1538,22 @@ QtObject {
                 const next = pending
                 pending = ""
                 command = [root.stateScript, "language", "set", next]
+                running = true
+            }
+        }
+    }
+
+    property Process fontSaveProc: Process {
+        property string pending: ""
+
+        running: false
+        command: [root.stateScript, "font", "set", "noto"]
+        onExited: {
+            running = false
+            if (pending.length > 0) {
+                const next = pending
+                pending = ""
+                command = [root.stateScript, "font", "set", next]
                 running = true
             }
         }
