@@ -22,16 +22,16 @@ Item {
     readonly property string homeDir: Quickshell.env("HOME") || ""
     readonly property string uiFont: theme ? theme.uiFont : "Noto Sans CJK JP"
     readonly property string monoFont: theme ? theme.monoFont : "JetBrainsMono Nerd Font"
-    readonly property bool pywalStyle: theme && theme.themeId === "pywal16"
-    readonly property bool darkSoft: theme && theme.themeMode === "dark"
-    readonly property real glassAlpha: theme ? Math.max(theme.minOpacityForRole("sidebar"), Math.min(theme.barOpacity + 0.02, 0.92)) : 0.84
-    readonly property color glass: theme ? theme.withAlpha(theme.surfaceSidebar, glassAlpha) : Qt.rgba(1, 0.97, 0.995, 0.84)
-    readonly property color card: theme ? theme.withAlpha(theme.surfaceCard, Math.max(0.38, Math.min(theme.surfaceCard.a + 0.08, 0.82))) : Qt.rgba(1, 1, 1, 0.62)
-    readonly property color ink: theme ? theme.textPrimary : "#4d3f63"
-    readonly property color inkSoft: theme ? theme.textSecondary : "#8d7ca3"
-    readonly property color mutedInk: theme ? theme.textMuted : "#b7a9c7"
-    readonly property color accent: theme ? (pywalStyle ? theme.accentSecondary : theme.accentPrimary) : "#e8a6c8"
-    readonly property color accent2: theme ? (pywalStyle ? theme.accentPrimary : theme.accentSecondary) : "#c894f2"
+    readonly property color glass: Qt.rgba(0.070, 0.073, 0.068, 0.74)
+    readonly property color card: Qt.rgba(1, 1, 1, 0.075)
+    readonly property color cardHover: Qt.rgba(1, 1, 1, 0.13)
+    readonly property color cardActive: Qt.rgba(0.52, 0.54, 0.57, 0.82)
+    readonly property color ink: "#fbf8f2"
+    readonly property color inkSoft: "#d5d1c8"
+    readonly property color mutedInk: "#aaa59c"
+    readonly property color accent: "#aeb3bc"
+    readonly property color accent2: "#f3eee6"
+    readonly property int sectionInset: 34
     readonly property int motionHover: theme ? theme.motionHover : 120
     readonly property int motionNormal: theme ? theme.motionNormal : 200
 
@@ -42,7 +42,7 @@ Item {
     signal quickPopupHovered(string popupType, real centerX)
     signal quickPopupHoverEnded(string popupType)
 
-    implicitHeight: 64
+    implicitHeight: 88
     clip: false
 
     function alpha(colorValue, opacity) {
@@ -50,20 +50,13 @@ Item {
     }
 
     function fontGlowEnabled() {
-        return root.theme && root.theme.textGlow.a > 0.001
+        return false
     }
 
     function formatLocalizedDate(date) {
         const lang = root.theme ? root.theme.language : "ja"
-        if (lang === "en")
-            return Qt.formatDateTime(date, "MMM d")
-        if (lang === "pt-BR") {
-            const weekdays = ["dom", "seg", "ter", "qua", "qui", "sex", "sab"]
-            return date.getDate() + "/" + (date.getMonth() + 1) + " (" + weekdays[date.getDay()] + ")"
-        }
-
-        const weekdaysJa = ["日", "月", "火", "水", "木", "金", "土"]
-        return (date.getMonth() + 1) + "月" + date.getDate() + "日 (" + weekdaysJa[date.getDay()] + ")"
+        const weekdays = ["dom", "seg", "ter", "qua", "qui", "sex", "sab"]
+        return date.getDate() + "/" + (date.getMonth() + 1) + " (" + weekdays[date.getDay()] + ")"
     }
 
     function updateClockText() {
@@ -125,25 +118,14 @@ Item {
         autoPaddingEnabled: true
     }
 
-    DropShadow {
-        anchors.fill: surface
-        horizontalOffset: 0
-        verticalOffset: 7
-        radius: 22
-        samples: 41
-        color: root.theme ? root.alpha(root.theme.shadowColor, root.darkSoft ? 0.34 : 0.22) : Qt.rgba(0.40, 0.25, 0.55, 0.14)
-        source: surface
-        transparentBorder: true
-    }
-
     Rectangle {
         id: surface
 
         anchors.fill: parent
-        radius: 16
+        radius: 14
         color: root.glass
         border.width: 1
-        border.color: root.theme ? root.alpha(root.theme.borderSoft, root.darkSoft ? 0.16 : 0.34) : Qt.rgba(1, 1, 1, 0.36)
+        border.color: Qt.rgba(1, 1, 1, 0.10)
         antialiasing: true
 
         Rectangle {
@@ -152,215 +134,208 @@ Item {
             radius: Math.max(0, parent.radius - 1)
             color: "transparent"
             border.width: 1
-            border.color: root.theme ? root.alpha(root.theme.activeText, root.darkSoft ? 0.05 : 0.18) : Qt.rgba(1, 1, 1, 0.18)
+            border.color: Qt.rgba(1, 1, 1, 0.035)
             antialiasing: true
         }
 
         RowLayout {
             anchors.fill: parent
-            anchors.leftMargin: 14
-            anchors.rightMargin: 14
-            anchors.topMargin: 9
-            anchors.bottomMargin: 9
-            spacing: 8
+            anchors.leftMargin: 22
+            anchors.rightMargin: 18
+            anchors.topMargin: 12
+            anchors.bottomMargin: 12
+            spacing: 0
 
-            Rectangle {
-                Layout.preferredWidth: 232
+            Item {
+                id: clockBlock
+
+                Layout.preferredWidth: 146
                 Layout.fillHeight: true
-                radius: 10
-                color: root.alpha(root.card, root.darkSoft ? 0.42 : 0.50)
-                border.width: 1
-                border.color: root.theme ? root.alpha(root.theme.borderSoft, root.darkSoft ? 0.10 : 0.24) : Qt.rgba(1, 1, 1, 0.22)
-                antialiasing: true
+
+                function centerX() {
+                    return clockBlock.mapToItem(root, clockBlock.width / 2, clockBlock.height / 2).x
+                }
 
                 RowLayout {
                     anchors.fill: parent
-                    anchors.leftMargin: 9
-                    anchors.rightMargin: 12
-                    spacing: 10
+                    spacing: 13
 
-                    Item {
-                        Layout.preferredWidth: 34
-                        Layout.preferredHeight: 34
-
-                        Rectangle {
-                            anchors.fill: parent
-                            radius: width / 2
-                            color: root.alpha(root.accent, 0.18)
-                            border.width: 1
-                            border.color: root.alpha(root.accent, 0.42)
-                            antialiasing: true
-                        }
-
-                        Image {
-                            anchors.fill: parent
-                            anchors.margins: 2
-                            source: root.homeDir + "/.face"
-                            fillMode: Image.PreserveAspectCrop
-                            smooth: true
-                            layer.enabled: true
-                            layer.effect: OpacityMask {
-                                maskSource: Rectangle {
-                                    width: 30
-                                    height: 30
-                                    radius: 15
-                                }
-                            }
-                        }
+                    IconCanvas {
+                        Layout.preferredWidth: 39
+                        Layout.preferredHeight: 39
+                        iconName: "clock"
                     }
 
-                    Text {
-                        text: root.clockText
-                        color: root.ink
-                        font.family: root.uiFont
-                        font.pixelSize: 18
-                        font.weight: Font.Bold
-                        layer.enabled: root.fontGlowEnabled()
-                        layer.effect: FontGlowEffect {}
-                    }
-
-                    Text {
+                    ColumnLayout {
                         Layout.fillWidth: true
-                        text: root.dateText
-                        color: root.inkSoft
-                        font.family: root.uiFont
-                        font.pixelSize: 11
-                        font.weight: Font.DemiBold
-                        elide: Text.ElideRight
-                        layer.enabled: root.fontGlowEnabled()
-                        layer.effect: FontGlowEffect {}
+                        spacing: 2
+
+                        Text {
+                            text: root.clockText
+                            color: root.ink
+                            font.family: root.uiFont
+                            font.pixelSize: 19
+                            font.weight: Font.DemiBold
+                        }
+
+                        Text {
+                            text: root.dateText
+                            color: root.inkSoft
+                            font.family: root.uiFont
+                            font.pixelSize: 11
+                            font.weight: Font.DemiBold
+                        }
+                    }
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onEntered: root.quickPopupHovered("time", clockBlock.centerX())
+                    onExited: root.quickPopupHoverEnded("time")
+                    onClicked: root.quickPopupRequested("time", clockBlock.centerX())
+                }
+            }
+
+            TopDivider {}
+
+            TopSection {
+                Layout.preferredWidth: 146
+                title: "Ferramentas"
+
+                RowLayout {
+                    anchors.left: parent.left
+                    anchors.leftMargin: parent.contentInset
+                    anchors.top: parent.top
+                    anchors.topMargin: 28
+                    height: 30
+                    spacing: 8
+
+                    TopButton {
+                        Layout.preferredWidth: 86
+                        Layout.preferredHeight: 30
+                        iconName: "search"
+                        label: "Busca"
+                        hoverPopupType: "search"
+                        selected: root.activePopupType === "search"
+                        onClicked: function(centerX) { root.searchRequested(centerX) }
                     }
                 }
             }
 
-            TopButton {
-                Layout.preferredWidth: 164
-                Layout.fillHeight: true
-                iconName: "search"
-                label: root.theme && root.theme.language === "pt-BR" ? "Buscar" : (root.theme && root.theme.language === "en" ? "Search" : "検索")
-                hoverPopupType: "search"
-                selected: root.activePopupType === "search"
-                onClicked: function(centerX) { root.searchRequested(centerX) }
-            }
+            TopDivider {}
 
-            Rectangle {
-                Layout.preferredWidth: 236
-                Layout.fillHeight: true
-                radius: 10
-                color: root.alpha(root.card, root.darkSoft ? 0.34 : 0.42)
-                border.width: 1
-                border.color: root.theme ? root.alpha(root.theme.borderSoft, root.darkSoft ? 0.08 : 0.22) : Qt.rgba(1, 1, 1, 0.22)
+            TopSection {
+                Layout.preferredWidth: 308
+                title: "Áreas"
 
                 RowLayout {
-                    anchors.fill: parent
-                    anchors.leftMargin: 10
-                    anchors.rightMargin: 10
-                    anchors.topMargin: 8
-                    anchors.bottomMargin: 8
-                    spacing: 7
+                    anchors.left: parent.left
+                    anchors.leftMargin: parent.contentInset
+                    anchors.top: parent.top
+                    anchors.topMargin: 28
+                    height: 30
+                    spacing: 13
 
                     Repeater {
                         model: 4
                         WorkspaceButton {
-                            Layout.fillWidth: true
-                            Layout.fillHeight: true
+                            Layout.preferredWidth: 56
+                            Layout.preferredHeight: 30
                             number: index + 1
                         }
                     }
                 }
             }
 
-            Rectangle {
-                Layout.preferredWidth: 200
-                Layout.fillHeight: true
-                radius: 10
-                color: root.alpha(root.card, root.darkSoft ? 0.34 : 0.42)
-                border.width: 1
-                border.color: root.theme ? root.alpha(root.theme.borderSoft, root.darkSoft ? 0.08 : 0.22) : Qt.rgba(1, 1, 1, 0.22)
+            TopDivider {}
+
+            TopSection {
+                Layout.preferredWidth: 176
+                title: "Apps"
 
                 RowLayout {
-                    anchors.fill: parent
-                    anchors.margins: 8
-                    spacing: 9
+                    anchors.left: parent.left
+                    anchors.leftMargin: parent.contentInset
+                    anchors.top: parent.top
+                    anchors.topMargin: 28
+                    height: 30
+                    spacing: 12
 
                     TopIconButton {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
+                        Layout.preferredWidth: 36
+                        Layout.preferredHeight: 30
                         iconName: "files"
                         onClicked: root.launchFiles()
                     }
 
                     TopIconButton {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        iconName: "theme"
-                        onClicked: function(centerX) { root.themeRequested(centerX) }
-                    }
-
-                    TopIconButton {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        iconName: "discord"
-                        onClicked: root.launchDiscord()
-                    }
-
-                    TopIconButton {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
+                        Layout.preferredWidth: 36
+                        Layout.preferredHeight: 30
                         iconName: "browser"
                         onClicked: root.launchBrowser()
+                    }
+
+                    TopIconButton {
+                        Layout.preferredWidth: 36
+                        Layout.preferredHeight: 30
+                        iconName: "discord"
+                        onClicked: root.launchDiscord()
                     }
                 }
             }
 
-            Rectangle {
+            TopDivider {}
+
+            TopSection {
                 Layout.fillWidth: true
-                Layout.minimumWidth: 306
-                Layout.fillHeight: true
-                radius: 10
-                color: root.alpha(root.card, root.darkSoft ? 0.28 : 0.34)
-                border.width: 1
-                border.color: root.theme ? root.alpha(root.theme.borderSoft, root.darkSoft ? 0.07 : 0.18) : Qt.rgba(1, 1, 1, 0.18)
+                Layout.minimumWidth: 274
+                title: ""
+
+                Text {
+                    anchors.left: utilityRow.left
+                    anchors.top: parent.top
+                    text: "Utilitários"
+                    color: root.ink
+                    font.family: root.uiFont
+                    font.pixelSize: 11
+                    font.weight: Font.Bold
+                }
 
                 RowLayout {
-                    anchors.fill: parent
-                    anchors.leftMargin: 11
-                    anchors.rightMargin: 11
-                    anchors.topMargin: 8
-                    anchors.bottomMargin: 8
-                    spacing: 12
+                    id: utilityRow
 
-                    TopIconButton {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        iconName: "volume"
+                    anchors.right: parent.right
+                    anchors.rightMargin: 36
+                    anchors.top: parent.top
+                    anchors.topMargin: 29
+                    height: 28
+                    spacing: 30
+
+                    UtilityIconButton {
+                        iconName: root.muted ? "volume-muted" : "volume"
                         badgeText: root.muted ? "0" : ""
                         hoverPopupType: "volume"
                         selected: root.activePopupType === "volume"
                         onClicked: function(centerX) { root.quickPopupRequested("volume", centerX) }
                     }
 
-                    TopIconButton {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
+                    UtilityIconButton {
                         iconName: "wifi"
                         hoverPopupType: "wifi"
                         selected: root.activePopupType === "wifi"
                         onClicked: function(centerX) { root.quickPopupRequested("wifi", centerX) }
                     }
 
-                    TopIconButton {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
+                    UtilityIconButton {
                         iconName: "brightness"
                         hoverPopupType: "brightness"
                         selected: root.activePopupType === "brightness"
                         onClicked: function(centerX) { root.quickPopupRequested("brightness", centerX) }
                     }
 
-                    TopIconButton {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
+                    UtilityIconButton {
                         iconName: "notifications"
                         badgeText: root.notificationCount > 0 ? String(Math.min(99, root.notificationCount)) : ""
                         hoverPopupType: "notifications"
@@ -368,22 +343,65 @@ Item {
                         onClicked: function(centerX) { root.quickPopupRequested("notifications", centerX) }
                     }
 
-                    TopIconButton {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
+                    UtilityIconButton {
                         iconName: "bluetooth"
                         hoverPopupType: "bluetooth"
                         selected: root.activePopupType === "bluetooth"
                         onClicked: function(centerX) { root.quickPopupRequested("bluetooth", centerX) }
                     }
 
-                    TopIconButton {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
+                    UtilityIconButton {
                         iconName: "battery"
+                        hoverPopupType: "battery"
+                        selected: root.activePopupType === "battery"
                         progress: root.batteryLevel()
-                        onClicked: function(centerX) { root.settingsRequested(centerX) }
+                        onClicked: function(centerX) { root.quickPopupRequested("battery", centerX) }
                     }
+                }
+            }
+
+            Item {
+                id: avatarButton
+
+                Layout.preferredWidth: 44
+                Layout.preferredHeight: 44
+
+                function centerX() {
+                    return avatarButton.mapToItem(root, avatarButton.width / 2, avatarButton.height / 2).x
+                }
+
+                Rectangle {
+                    anchors.fill: parent
+                    radius: width / 2
+                    color: Qt.rgba(1, 1, 1, 0.12)
+                    border.width: 1
+                    border.color: Qt.rgba(1, 1, 1, 0.36)
+                    antialiasing: true
+                }
+
+                Image {
+                    anchors.fill: parent
+                    anchors.margins: 2
+                    source: Quickshell.shellDir + "/assets/profile-avatar.png"
+                    fillMode: Image.PreserveAspectCrop
+                    smooth: true
+                    layer.enabled: true
+                    layer.effect: OpacityMask {
+                        maskSource: Rectangle {
+                            width: 40
+                            height: 40
+                            radius: 20
+                        }
+                    }
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onEntered: root.quickPopupHovered("profile", avatarButton.centerX())
+                    onExited: root.quickPopupHoverEnded("profile")
+                    onClicked: root.quickPopupRequested("profile", avatarButton.centerX())
                 }
             }
         }
@@ -456,6 +474,32 @@ Item {
         onExited: running = false
     }
 
+    component TopDivider: Rectangle {
+        Layout.preferredWidth: 1
+        Layout.preferredHeight: 58
+        color: Qt.rgba(1, 1, 1, 0.085)
+    }
+
+    component TopSection: Item {
+        id: section
+
+        property string title: ""
+        property int contentInset: root.sectionInset
+
+        Layout.fillHeight: true
+
+        Text {
+            anchors.left: parent.left
+            anchors.leftMargin: section.contentInset
+            anchors.top: parent.top
+            text: section.title
+            color: root.ink
+            font.family: root.uiFont
+            font.pixelSize: 11
+            font.weight: Font.Bold
+        }
+    }
+
     component TopButton: Rectangle {
         id: button
 
@@ -465,10 +509,10 @@ Item {
         property string hoverPopupType: ""
         signal clicked(real centerX)
 
-        radius: 10
-        color: selected ? root.alpha(root.accent, 0.22) : (mouse.containsMouse ? root.alpha(root.accent, 0.14) : root.alpha(root.card, root.darkSoft ? 0.30 : 0.42))
+        radius: 7
+        color: selected ? root.cardActive : (mouse.containsMouse ? root.cardHover : "transparent")
         border.width: 1
-        border.color: selected ? root.alpha(root.accent, 0.58) : (mouse.containsMouse ? root.alpha(root.accent, 0.42) : root.alpha(root.inkSoft, 0.10))
+        border.color: selected ? Qt.rgba(1, 1, 1, 0.16) : (mouse.containsMouse ? Qt.rgba(1, 1, 1, 0.11) : "transparent")
         scale: mouse.pressed ? 0.98 : (mouse.containsMouse ? 1.012 : 1)
         antialiasing: true
 
@@ -482,13 +526,13 @@ Item {
 
         RowLayout {
             anchors.fill: parent
-            anchors.leftMargin: 15
-            anchors.rightMargin: 12
-            spacing: 8
+            anchors.leftMargin: 6
+            anchors.rightMargin: 8
+            spacing: 6
 
             IconCanvas {
-                Layout.preferredWidth: 20
-                Layout.preferredHeight: 20
+                Layout.preferredWidth: 16
+                Layout.preferredHeight: 16
                 iconName: button.iconName
             }
 
@@ -497,7 +541,7 @@ Item {
                 text: button.label
                 color: root.ink
                 font.family: root.uiFont
-                font.pixelSize: 12
+                font.pixelSize: 10
                 font.weight: Font.Bold
                 elide: Text.ElideRight
                 layer.enabled: root.fontGlowEnabled()
@@ -528,10 +572,10 @@ Item {
         property int number: 1
         readonly property bool active: Hyprland.focusedWorkspace && Hyprland.focusedWorkspace.id === number
 
-        radius: 8
-        color: active ? root.alpha(root.accent, 0.72) : (mouse.containsMouse ? root.alpha(root.accent, 0.18) : root.alpha(root.card, root.darkSoft ? 0.30 : 0.54))
+        radius: 7
+        color: active ? root.cardActive : (mouse.containsMouse ? root.cardHover : root.card)
         border.width: 1
-        border.color: active ? root.alpha(root.accent, 0.74) : root.alpha(root.inkSoft, 0.10)
+        border.color: active ? Qt.rgba(1, 1, 1, 0.18) : Qt.rgba(1, 1, 1, 0.06)
         scale: mouse.pressed ? 0.96 : (mouse.containsMouse ? 1.035 : 1)
         antialiasing: true
 
@@ -542,10 +586,10 @@ Item {
         Text {
             anchors.centerIn: parent
             text: String(button.number)
-            color: button.active ? (root.theme ? root.theme.buttonPrimaryText : "white") : root.ink
+            color: button.active ? "#ffffff" : root.ink
             font.family: root.uiFont
             font.pixelSize: 12
-            font.weight: Font.Bold
+            font.weight: Font.DemiBold
             layer.enabled: root.fontGlowEnabled()
             layer.effect: FontGlowEffect {}
         }
@@ -569,10 +613,10 @@ Item {
         property string hoverPopupType: ""
         signal clicked(real centerX)
 
-        radius: 9
-        color: selected ? root.alpha(root.accent, 0.24) : (mouse.containsMouse ? root.alpha(root.accent, 0.16) : root.alpha(root.card, root.darkSoft ? 0.26 : 0.48))
+        radius: 6
+        color: selected ? root.cardActive : (mouse.containsMouse ? root.cardHover : root.card)
         border.width: 1
-        border.color: selected ? root.alpha(root.accent, 0.62) : (mouse.containsMouse ? root.alpha(root.accent, 0.44) : root.alpha(root.inkSoft, 0.10))
+        border.color: selected ? Qt.rgba(1, 1, 1, 0.18) : Qt.rgba(1, 1, 1, 0.06)
         scale: mouse.pressed ? 0.95 : (mouse.containsMouse ? 1.04 : 1)
         antialiasing: true
 
@@ -586,7 +630,7 @@ Item {
 
         IconCanvas {
             anchors.centerIn: parent
-            width: Math.min(22, parent.width - 8)
+            width: Math.min(20, parent.width - 8)
             height: width
             iconName: button.iconName
             progress: button.progress
@@ -617,6 +661,84 @@ Item {
         MouseArea {
             id: mouse
             anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onEntered: {
+                if (button.hoverPopupType.length > 0)
+                    root.quickPopupHovered(button.hoverPopupType, button.centerX())
+            }
+            onExited: {
+                if (button.hoverPopupType.length > 0)
+                    root.quickPopupHoverEnded(button.hoverPopupType)
+            }
+            onClicked: button.clicked(button.centerX())
+        }
+    }
+
+    component UtilityIconButton: Item {
+        id: button
+
+        property string iconName: "volume"
+        property string badgeText: ""
+        property real progress: -1
+        property bool selected: false
+        property string hoverPopupType: ""
+        signal clicked(real centerX)
+
+        Layout.preferredWidth: 18
+        Layout.preferredHeight: 28
+        scale: mouse.pressed ? 0.94 : (mouse.containsMouse ? 1.10 : 1)
+
+        function centerX() {
+            return button.mapToItem(root, button.width / 2, button.height / 2).x
+        }
+
+        Behavior on scale { NumberAnimation { duration: root.motionHover; easing.type: Easing.OutCubic } }
+
+        Rectangle {
+            anchors.centerIn: parent
+            width: 28
+            height: 28
+            radius: 14
+            color: button.selected || mouse.containsMouse ? root.cardHover : "transparent"
+            border.width: button.selected ? 1 : 0
+            border.color: Qt.rgba(1, 1, 1, 0.12)
+        }
+
+        IconCanvas {
+            anchors.centerIn: parent
+            width: 18
+            height: 18
+            iconName: button.iconName
+            progress: button.progress
+        }
+
+        Rectangle {
+            visible: button.badgeText.length > 0
+            x: parent.width - width + 5
+            y: 0
+            width: Math.max(14, utilityBadgeLabel.implicitWidth + 7)
+            height: 14
+            radius: 7
+            color: root.cardActive
+            border.width: 1
+            border.color: Qt.rgba(1, 1, 1, 0.20)
+
+            Text {
+                id: utilityBadgeLabel
+                anchors.centerIn: parent
+                text: button.badgeText
+                color: "#ffffff"
+                font.family: root.uiFont
+                font.pixelSize: 8
+                font.weight: Font.Bold
+            }
+        }
+
+        MouseArea {
+            id: mouse
+            anchors.fill: parent
+            anchors.margins: -5
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
             onEntered: {
@@ -672,7 +794,39 @@ Item {
             ctx.strokeStyle = fg
             ctx.fillStyle = fg
 
-            if (iconName === "search") {
+            if (iconName === "clock") {
+                ctx.strokeStyle = root.alpha(root.inkSoft, 0.82)
+                ctx.lineWidth = Math.max(1.15, w * 0.040)
+                ctx.beginPath()
+                ctx.arc(cx, cy, w * 0.38, 0, Math.PI * 2)
+                ctx.stroke()
+
+                ctx.strokeStyle = root.alpha(root.inkSoft, 0.42)
+                ctx.lineWidth = Math.max(0.75, w * 0.020)
+                for (let i = 0; i < 12; i += 1) {
+                    const a = -Math.PI / 2 + i * Math.PI / 6
+                    const outer = w * 0.34
+                    const inner = i % 3 === 0 ? w * 0.29 : w * 0.31
+                    ctx.beginPath()
+                    ctx.moveTo(cx + Math.cos(a) * inner, cy + Math.sin(a) * inner)
+                    ctx.lineTo(cx + Math.cos(a) * outer, cy + Math.sin(a) * outer)
+                    ctx.stroke()
+                }
+
+                ctx.strokeStyle = root.ink
+                ctx.lineWidth = Math.max(1.1, w * 0.035)
+                ctx.beginPath()
+                ctx.moveTo(cx, cy)
+                ctx.lineTo(cx + w * 0.15, cy - h * 0.18)
+                ctx.moveTo(cx, cy)
+                ctx.lineTo(cx - w * 0.03, cy - h * 0.26)
+                ctx.stroke()
+
+                ctx.fillStyle = root.ink
+                ctx.beginPath()
+                ctx.arc(cx, cy, w * 0.035, 0, Math.PI * 2)
+                ctx.fill()
+            } else if (iconName === "search") {
                 ctx.beginPath()
                 ctx.arc(cx - w * 0.08, cy - h * 0.08, w * 0.28, 0, Math.PI * 2)
                 ctx.stroke()
@@ -736,7 +890,7 @@ Item {
                 ctx.beginPath()
                 ctx.arc(cx + w * 0.04, cy, w * 0.20, Math.PI * 0.12, Math.PI * 1.55)
                 ctx.stroke()
-            } else if (iconName === "volume") {
+            } else if (iconName === "volume" || iconName === "volume-muted") {
                 ctx.fillStyle = soft
                 ctx.beginPath()
                 ctx.moveTo(w * 0.17, h * 0.43)
@@ -748,12 +902,21 @@ Item {
                 ctx.closePath()
                 ctx.fill()
                 ctx.strokeStyle = soft
-                ctx.beginPath()
-                ctx.arc(w * 0.56, h * 0.50, w * 0.17, -0.65, 0.65)
-                ctx.stroke()
-                ctx.beginPath()
-                ctx.arc(w * 0.56, h * 0.50, w * 0.28, -0.55, 0.55)
-                ctx.stroke()
+                if (iconName === "volume-muted") {
+                    ctx.beginPath()
+                    ctx.moveTo(w * 0.66, h * 0.38)
+                    ctx.lineTo(w * 0.86, h * 0.58)
+                    ctx.moveTo(w * 0.86, h * 0.38)
+                    ctx.lineTo(w * 0.66, h * 0.58)
+                    ctx.stroke()
+                } else {
+                    ctx.beginPath()
+                    ctx.arc(w * 0.56, h * 0.50, w * 0.17, -0.65, 0.65)
+                    ctx.stroke()
+                    ctx.beginPath()
+                    ctx.arc(w * 0.56, h * 0.50, w * 0.28, -0.55, 0.55)
+                    ctx.stroke()
+                }
             } else if (iconName === "wifi") {
                 ctx.strokeStyle = soft
                 for (let i = 0; i < 3; i += 1) {
@@ -805,6 +968,25 @@ Item {
                 ctx.lineTo(cx - w * 0.27, h * 0.31)
                 ctx.moveTo(cx - w * 0.04, h * 0.50)
                 ctx.lineTo(cx - w * 0.27, h * 0.69)
+                ctx.stroke()
+            } else if (iconName === "settings") {
+                ctx.strokeStyle = soft
+                ctx.lineWidth = Math.max(1.4, w * 0.075)
+                ctx.beginPath()
+                for (let i = 0; i < 16; i += 1) {
+                    const a = -Math.PI / 2 + i * Math.PI / 8
+                    const r = i % 2 === 0 ? w * 0.36 : w * 0.28
+                    const x = cx + Math.cos(a) * r
+                    const y = cy + Math.sin(a) * r
+                    if (i === 0)
+                        ctx.moveTo(x, y)
+                    else
+                        ctx.lineTo(x, y)
+                }
+                ctx.closePath()
+                ctx.stroke()
+                ctx.beginPath()
+                ctx.arc(cx, cy, w * 0.12, 0, Math.PI * 2)
                 ctx.stroke()
             } else if (iconName === "battery") {
                 const p = progress >= 0 ? Math.max(0, Math.min(1, progress)) : 0.70

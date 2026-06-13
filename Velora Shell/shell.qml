@@ -95,7 +95,7 @@ ShellRoot {
     readonly property int barPanelWidth: sideBarLayoutEnabled ? sidebarVisualWidth + sidebarOuterMargin : 0
     readonly property int barReserveWidth: sideBarLayoutEnabled ? barPanelWidth : 0
     readonly property int desktopFrameRadius: 10
-    readonly property bool frameVisualsEnabled: veloraTheme.desktopFrameEnabled
+    readonly property bool frameVisualsEnabled: veloraTheme.desktopFrameEnabled && !topBarLayout
     readonly property int frameVisualInset: frameVisualsEnabled ? desktopFrameMargin : 0
     readonly property bool frameVisualsMounted: frameVisualsEnabled || frameVisualsReveal > 0.01
     property real frameVisualsReveal: frameVisualsEnabled ? 1 : 0
@@ -404,8 +404,6 @@ ShellRoot {
         command: [root.topWallpaperApplyScript, "static", ""]
         onExited: {
             running = false
-            if (veloraTheme.themeId === "pywal16")
-                veloraTheme.reloadPywal16()
         }
     }
 
@@ -935,6 +933,15 @@ ShellRoot {
                     popup.requestSearchFocus()
             }
         }
+
+        if (typeof topBarPopupLoader !== "undefined") {
+            const popup = topBarPopupLoader.itemForType("search")
+            if (popup) {
+                popup.forceActiveFocus()
+                if (typeof popup.requestSearchFocus === "function")
+                    popup.requestSearchFocus()
+            }
+        }
     }
 
     function setTopBarPopupCenter(centerX) {
@@ -942,13 +949,49 @@ ShellRoot {
         topBarPopupCenterX = value > 0 ? value : Math.round(mainAreaX(1920) + mainAreaWidth(1920) / 2)
     }
 
+    function defaultTopBarPopupCenterX(type) {
+        const screenWidth = 1920
+        const stageWidth = Math.round(Math.min(1265, Math.max(1043, screenWidth * 0.658)))
+        const barX = Math.round((screenWidth - stageWidth) / 2)
+        const contentX = barX + 22
+        const utilityRight = barX + stageWidth - 18 - 44
+        const utilitiesX = utilityRight - 36 - (6 * 18 + 5 * 30)
+
+        if (type === "time")
+            return contentX + 73
+        if (type === "search")
+            return contentX + 224
+        if (type === "volume")
+            return utilitiesX + 9
+        if (type === "wifi")
+            return utilitiesX + 57
+        if (type === "brightness")
+            return utilitiesX + 105
+        if (type === "notifications")
+            return utilitiesX + 153
+        if (type === "bluetooth")
+            return utilitiesX + 201
+        if (type === "battery")
+            return utilitiesX + 249
+        if (type === "profile")
+            return barX + stageWidth - 40
+        return barX + stageWidth / 2
+    }
+
+    function normalizeTopBarPopupCenterX(type, centerX) {
+        const value = Number(centerX)
+        if (!(value > 0) || Math.abs(value - defaultQuickPopupCenterY(type)) < 0.5)
+            return defaultTopBarPopupCenterX(type)
+        return value
+    }
+
     function toggleTopBarQuickPopup(type, centerX) {
-        setTopBarPopupCenter(centerX)
+        setTopBarPopupCenter(normalizeTopBarPopupCenterX(type, centerX))
         toggleQuickPopup(type, defaultQuickPopupCenterY(type))
     }
 
     function previewTopBarPopup(type, centerX) {
-        setTopBarPopupCenter(centerX)
+        setTopBarPopupCenter(normalizeTopBarPopupCenterX(type, centerX))
         previewSidebarPopup(type, defaultQuickPopupCenterY(type))
     }
 
@@ -1705,7 +1748,9 @@ ShellRoot {
             required property var modelData
             readonly property int panelWidth: modelData.width > 0 ? modelData.width : 1920
             readonly property int panelHeight: modelData.height > 0 ? modelData.height : 1200
-            readonly property int stageWidth: Math.round(Math.min(1240, Math.max(760, root.mainAreaWidth(panelWidth) * 0.74)))
+            readonly property int topMargin: Math.round(Math.min(24, Math.max(20, panelHeight * 0.020)))
+            readonly property int barHeight: Math.round(Math.min(88, Math.max(72, panelHeight * 0.073)))
+            readonly property int stageWidth: Math.round(Math.min(1265, Math.max(1043, panelWidth * 0.658)))
             readonly property int popupWidth: root.topBarQuickPopupPanelVisible ? root.quickPopupWidthForScreen(root.visibleQuickPopupType, panelWidth) : 0
             readonly property int popupHeight: root.topBarQuickPopupPanelVisible ? root.quickPopupHeightForScreen(root.visibleQuickPopupType, panelHeight) : 0
             readonly property int popupGap: 12
@@ -1722,7 +1767,7 @@ ShellRoot {
             focusable: root.quickPopupType === "search" || root.quickPopupType === "agenda" || root.quickPopupType === "weatherPanel"
 
             WlrLayershell.layer: WlrLayer.Top
-            WlrLayershell.namespace: "velora-shell-topbar"
+            WlrLayershell.namespace: "velora-topbar"
             WlrLayershell.keyboardFocus: (root.quickPopupType === "search" || root.quickPopupType === "agenda" || root.quickPopupType === "weatherPanel") ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
 
             anchors {
@@ -1749,9 +1794,9 @@ ShellRoot {
                 theme: veloraTheme
                 activePopupType: root.activeQuickPopupType
                 width: topBarPanel.stageWidth
-                height: 64
-                x: Math.round(root.mainAreaX(topBarPanel.panelWidth) + (root.mainAreaWidth(topBarPanel.panelWidth) - width) / 2)
-                y: 0
+                height: topBarPanel.barHeight
+                x: Math.round((topBarPanel.panelWidth - width) / 2)
+                y: topBarPanel.topMargin
 
                 onSearchRequested: function(centerX) {
                     root.openAdaptiveBarPopup("search", topBar.x + centerX)
@@ -1783,69 +1828,143 @@ ShellRoot {
                 height: root.topBarQuickPopupPanelVisible ? topBarPopupLoader.height : 0
             }
 
-            Rectangle {
+            VeloraAttachedSurface {
                 id: topBarPopupSurface
 
+                theme: veloraTheme
+                attachSide: "left"
+                useCustomGlass: true
+                customGlass: veloraTheme.surfacePopup
+                lineReveal: true
+                transitionContrast: root.quickPopupSurfaceReveal < 0.98 ? 0.30 : 0.12
                 x: topBarPopupLoader.x
                 y: topBarPopupLoader.y
                 width: topBarPopupLoader.width
                 height: topBarPopupLoader.height
                 radius: topBarPopupLoader.cornerRadius
-                visible: root.topBarQuickPopupPanelVisible
-                color: veloraTheme.surfacePopup
-                border.width: 1
-                border.color: veloraTheme.themeId === "pywal16" ? veloraTheme.popupBorderGlow : veloraTheme.borderSoft
-                antialiasing: true
-                opacity: topBarPopupLoader.item ? topBarPopupLoader.item.revealProgress : 0
-                scale: 0.985 + opacity * 0.015
-                transformOrigin: Item.Top
+                revealProgress: root.quickPopupSurfaceReveal
+                visible: root.topBarQuickPopupPanelVisible && topBarPopupLoader.contentReady
                 z: 8
-                layer.enabled: true
-                layer.effect: DropShadow {
-                    transparentBorder: true
-                    radius: 30
-                    samples: 61
-                    horizontalOffset: 0
-                    verticalOffset: 10
-                    color: veloraTheme.alpha(veloraTheme.shadowColor, 0.14)
-                }
             }
 
-            Loader {
+            Item {
                 id: topBarPopupLoader
 
-                readonly property int cornerRadius: item ? item.cornerRadius : 13
+                property int cacheGeneration: 0
+                readonly property bool active: root.topBarQuickPopupPanelVisible || (root.topBarLayout && root.quickPopupPreloadEnabled)
+                readonly property int targetWidth: topBarPanel.popupWidth
+                readonly property int targetHeight: topBarPanel.popupHeight
+                readonly property int targetX: topBarPanel.popupX
+                readonly property int targetY: topBarPanel.popupY
+                readonly property int geometryDuration: Math.max(260, Math.round(veloraTheme.motionPanelGeometry * 0.72))
+                readonly property int fadeInDuration: Math.max(150, Math.round(veloraTheme.motionPanelIn * 0.42))
+                readonly property int switchFadeOutDuration: Math.max(170, Math.round(veloraTheme.motionPanelOut * 0.52))
+                readonly property int closeFadeOutDuration: Math.max(380, Math.round(root.quickPopupLineCloseDuration * 0.74))
+                readonly property int cornerRadius: {
+                    cacheGeneration
+                    const popup = itemForType(root.visibleQuickPopupType)
+                    return popup ? popup.cornerRadius : 13
+                }
+                readonly property real revealProgress: root.quickPopupSurfaceReveal
+                readonly property bool contentReady: {
+                    cacheGeneration
+                    if (!root.topBarQuickPopupPanelVisible || root.visibleQuickPopupType.length <= 0)
+                        return false
+                    return itemForType(root.visibleQuickPopupType) !== null
+                }
 
-                active: root.topBarQuickPopupPanelVisible || (root.topBarLayout && root.quickPopupPreloadEnabled)
-                asynchronous: false
                 z: 9
-                width: topBarPanel.popupWidth
-                height: topBarPanel.popupHeight
-                x: topBarPanel.popupX
-                y: topBarPanel.popupY
+                width: targetWidth
+                height: targetHeight
+                x: targetX
+                y: targetY
                 visible: root.topBarQuickPopupPanelVisible
+                clip: true
 
-                sourceComponent: Component {
-                    VeloraSidePopup {
-                        theme: veloraTheme
-                        externalSurface: true
-                        attachSide: "left"
-                        popupType: root.visibleQuickPopupType
-                        open: root.quickPopupVisible
-                        interactiveFocus: root.quickPopupType === "search" || root.quickPopupType === "agenda" || root.quickPopupType === "weatherPanel"
-                        width: topBarPopupLoader.width
-                        height: topBarPopupLoader.height
-                        visible: root.topBarQuickPopupPanelVisible
-                        onCloseRequested: root.closeQuickPopup()
-                        onPopupRequested: function(type) {
-                            root.openAdaptiveBarPopup(type, root.defaultQuickPopupCenterY(type))
+                onActiveChanged: if (!active) root.quickPopupHovering = false
+
+                function itemForType(type) {
+                    const index = root.cachedQuickPopupIndex(type)
+                    if (index < 0 || typeof topBarQuickPopupCache === "undefined")
+                        return null
+
+                    const loader = topBarQuickPopupCache.itemAt(index)
+                    return loader && loader.item ? loader.item : null
+                }
+
+                function opacityTransitionDuration(showing) {
+                    if (showing)
+                        return fadeInDuration
+                    return root.quickPopupVisible ? switchFadeOutDuration : closeFadeOutDuration
+                }
+
+                Repeater {
+                    id: topBarQuickPopupCache
+
+                    model: root.cachedQuickPopupTypes
+
+                    Loader {
+                        id: topBarPopupCacheLoader
+
+                        property string cacheType: String(modelData)
+                        readonly property bool showing: root.quickPopupVisible && root.visibleQuickPopupType === cacheType
+                        readonly property bool neededNow: root.visibleQuickPopupType === cacheType
+                            || root.activeQuickPopupType === cacheType
+                            || root.renderedQuickPopupType === cacheType
+
+                        active: neededNow
+                            || root.quickPopupTypeCached(cacheType)
+                            || (root.quickPopupPreloadEnabled && root.cachedQuickPopupIndex(cacheType) < root.quickPopupPreloadCount)
+                        asynchronous: false
+                        visible: root.topBarQuickPopupPanelVisible && (showing || opacity > 0.001)
+                        opacity: showing ? 1 : 0
+                        x: Math.round((topBarPopupLoader.width - width) / 2)
+                        y: Math.round((topBarPopupLoader.height - height) / 2)
+                        width: root.quickPopupWidthForScreen(cacheType, topBarPanel.panelWidth)
+                        height: root.quickPopupHeightForScreen(cacheType, topBarPanel.panelHeight)
+                        z: showing ? 2 : 1
+
+                        Behavior on opacity {
+                            enabled: veloraTheme.motionEnabled && topBarPopupLoader.active
+                            NumberAnimation {
+                                duration: topBarPopupLoader.opacityTransitionDuration(topBarPopupCacheLoader.showing)
+                                easing.type: topBarPopupCacheLoader.showing ? veloraTheme.motionEaseEnter : veloraTheme.motionEaseExit
+                            }
                         }
-                        onPointerInsideChanged: function(inside) {
-                            root.quickPopupHovering = inside
-                            if (inside)
-                                hoverCloseTimer.stop()
-                            else if (root.hoverPopupType.length > 0)
-                                root.scheduleHoverClose()
+
+                        onLoaded: {
+                            topBarPopupLoader.cacheGeneration += 1
+                            if (cacheType === "search" && root.quickPopupType === "search")
+                                root.scheduleSearchPopupFocus()
+                        }
+
+                        sourceComponent: Component {
+                            VeloraSidePopup {
+                                theme: veloraTheme
+                                externalSurface: true
+                                lineReveal: true
+                                warmSwitch: root.quickPopupSurfaceReveal > 0.35
+                                revealProgressOverride: root.quickPopupSurfaceReveal
+                                attachSide: "left"
+                                popupType: topBarPopupCacheLoader.cacheType
+                                open: topBarPopupCacheLoader.showing
+                                interactiveFocus: root.quickPopupType === topBarPopupCacheLoader.cacheType
+                                    && (topBarPopupCacheLoader.cacheType === "search" || topBarPopupCacheLoader.cacheType === "agenda" || topBarPopupCacheLoader.cacheType === "weatherPanel")
+                                width: topBarPopupCacheLoader.width
+                                height: topBarPopupCacheLoader.height
+                                visible: topBarPopupCacheLoader.visible
+                                onCloseRequested: root.closeQuickPopup()
+                                onPopupRequested: function(type) {
+                                    root.openAdaptiveBarPopup(type, root.defaultTopBarPopupCenterX(type))
+                                }
+                                onPointerInsideChanged: function(inside) {
+                                    root.quickPopupHovering = inside
+                                    if (inside)
+                                        hoverCloseTimer.stop()
+                                    else if (root.hoverPopupType.length > 0)
+                                        root.scheduleHoverClose()
+                                }
+                            }
                         }
                     }
                 }
@@ -1853,29 +1972,34 @@ ShellRoot {
                 Keys.onEscapePressed: root.closeQuickPopup()
 
                 Behavior on x {
-                    enabled: veloraTheme.motionEnabled
+                    enabled: veloraTheme.motionEnabled && topBarPopupLoader.active
                     NumberAnimation {
-                        duration: veloraTheme.motionPanelGeometry
-                        easing.type: veloraTheme.motionEaseEmphasized
-                        easing.bezierCurve: veloraTheme.motionEmphasizedCurve
+                        duration: topBarPopupLoader.geometryDuration
+                        easing.type: veloraTheme.motionEaseEnter
+                    }
+                }
+
+                Behavior on y {
+                    enabled: veloraTheme.motionEnabled && topBarPopupLoader.active
+                    NumberAnimation {
+                        duration: topBarPopupLoader.geometryDuration
+                        easing.type: veloraTheme.motionEaseEnter
                     }
                 }
 
                 Behavior on width {
-                    enabled: veloraTheme.motionEnabled
+                    enabled: veloraTheme.motionEnabled && topBarPopupLoader.active
                     NumberAnimation {
-                        duration: veloraTheme.motionPanelGeometry
-                        easing.type: veloraTheme.motionEaseEmphasized
-                        easing.bezierCurve: veloraTheme.motionEmphasizedCurve
+                        duration: topBarPopupLoader.geometryDuration
+                        easing.type: veloraTheme.motionEaseEnter
                     }
                 }
 
                 Behavior on height {
-                    enabled: veloraTheme.motionEnabled
+                    enabled: veloraTheme.motionEnabled && topBarPopupLoader.active
                     NumberAnimation {
-                        duration: veloraTheme.motionPanelGeometry
-                        easing.type: veloraTheme.motionEaseEmphasized
-                        easing.bezierCurve: veloraTheme.motionEmphasizedCurve
+                        duration: topBarPopupLoader.geometryDuration
+                        easing.type: veloraTheme.motionEaseEnter
                     }
                 }
             }
@@ -3581,10 +3705,43 @@ ShellRoot {
 
                         const top = popupCutTopPx()
                         const bottom = popupCutBottomPx()
-                        const left = popupCutLeftPx()
-                        const right = popupCutRightPx()
-                        if (bottom > top && right > left)
+                        const left = 0
+                        const right = width
+                        if (bottom <= top || right <= left)
+                            return
+
+                        if (!veloraTheme.visualizerGradientEnabled) {
                             ctx.clearRect(left, top, right - left, bottom - top)
+                            return
+                        }
+
+                        const cutWidth = right - left
+                        const fade = Math.max(42, Math.min(112, Math.round(height * 0.12)))
+
+                        ctx.save()
+                        ctx.globalCompositeOperation = "destination-out"
+                        ctx.fillStyle = "rgba(0,0,0,1)"
+                        ctx.fillRect(left, top, cutWidth, bottom - top)
+
+                        if (top > 0) {
+                            const fadeTop = Math.max(0, top - fade)
+                            const topGradient = ctx.createLinearGradient(0, fadeTop, 0, top)
+                            topGradient.addColorStop(0.0, "rgba(0,0,0,0)")
+                            topGradient.addColorStop(1.0, "rgba(0,0,0,1)")
+                            ctx.fillStyle = topGradient
+                            ctx.fillRect(left, fadeTop, cutWidth, top - fadeTop)
+                        }
+
+                        if (bottom < height) {
+                            const fadeBottom = Math.min(height, bottom + fade)
+                            const bottomGradient = ctx.createLinearGradient(0, bottom, 0, fadeBottom)
+                            bottomGradient.addColorStop(0.0, "rgba(0,0,0,1)")
+                            bottomGradient.addColorStop(1.0, "rgba(0,0,0,0)")
+                            ctx.fillStyle = bottomGradient
+                            ctx.fillRect(left, bottom, cutWidth, fadeBottom - bottom)
+                        }
+
+                        ctx.restore()
                     }
 
                     onPaint: {
@@ -3666,6 +3823,7 @@ ShellRoot {
                     function onVisualizerStrengthChanged() { if (root.sideVisualizerMounted) sideVisualizerRail.requestWaveformPaint(true) }
                     function onVisualizerModeChanged() { if (root.sideVisualizerMounted) sideVisualizerRail.requestWaveformPaint(true) }
                     function onVisualizerPixelSizeChanged() { if (root.sideVisualizerMounted) sideVisualizerRail.requestWaveformPaint(true) }
+                    function onVisualizerGradientEnabledChanged() { if (root.sideVisualizerMounted) sideVisualizerRail.requestWaveformPaint(true) }
                     function onSurfaceBaseChanged() { if (root.sideVisualizerMounted) sideVisualizerRail.requestWaveformPaint(true) }
                     function onSurfaceSidebarChanged() { if (root.sideVisualizerMounted) sideVisualizerRail.requestWaveformPaint(true) }
                     function onSidebarBorderGlowChanged() { if (root.sideVisualizerMounted) sideVisualizerRail.requestWaveformPaint(true) }
