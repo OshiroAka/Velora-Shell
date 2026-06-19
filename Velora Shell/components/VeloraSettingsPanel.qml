@@ -248,6 +248,10 @@ Item {
                 "visualizerWave": "Wave",
                 "visualizerPixels": "Pixels",
                 "visualizerPixelSize": "ピクセルサイズ",
+                "visualizerGradientOn": "グラデーション ON",
+                "visualizerGradientOff": "グラデーション OFF",
+                "screenVisualizerOn": "画面枠 ON",
+                "screenVisualizerOff": "画面枠 OFF",
                 "adapt": "自動",
                 "zenRestartOn": "Zen 自動 ON",
                 "zenRestartOff": "Zen 自動 OFF",
@@ -353,6 +357,10 @@ Item {
                 "visualizerWave": "Wave",
                 "visualizerPixels": "Pixels",
                 "visualizerPixelSize": "Pixel size",
+                "visualizerGradientOn": "Gradient ON",
+                "visualizerGradientOff": "Gradient OFF",
+                "screenVisualizerOn": "Screen frame ON",
+                "screenVisualizerOff": "Screen frame OFF",
                 "adapt": "Adapt",
                 "zenRestartOn": "Zen auto ON",
                 "zenRestartOff": "Zen auto OFF",
@@ -458,6 +466,10 @@ Item {
                 "visualizerWave": "Wave",
                 "visualizerPixels": "Pixels",
                 "visualizerPixelSize": "Tamanho dos pixels",
+                "visualizerGradientOn": "Gradiente ON",
+                "visualizerGradientOff": "Gradiente OFF",
+                "screenVisualizerOn": "Moldura da tela ON",
+                "screenVisualizerOff": "Moldura da tela OFF",
                 "adapt": "Adaptar",
                 "zenRestartOn": "Zen auto ON",
                 "zenRestartOff": "Zen auto OFF",
@@ -867,8 +879,6 @@ Item {
         command: [root.applyScript, root.currentWallpaperKind(), root.currentWallpaperPath(), root.currentWallpaperPreview(), root.wallpaperTransition, root.wallpaperTransitionDuration.toFixed(2), root.wallpaperStaticDelay.toFixed(2)]
         onExited: {
             running = false
-            if (root.theme && root.theme.themeId === "pywal16")
-                root.theme.reloadPywal16()
         }
     }
 
@@ -2582,7 +2592,7 @@ Item {
                     }
 
                     SettingsCard {
-                        Layout.preferredHeight: 226
+                        Layout.preferredHeight: 330
                         title: root.tr("visualizer")
                         subtitle: root.tr("visualizerHint")
 
@@ -2592,6 +2602,13 @@ Item {
                             anchors.bottom: parent.bottom
                             anchors.margins: 18
                             spacing: 10
+
+                            SettingsToggleRow {
+                                Layout.fillWidth: true
+                                label: root.theme && root.theme.screenVisualizerEnabled ? root.tr("screenVisualizerOn") : root.tr("screenVisualizerOff")
+                                checked: root.theme ? root.theme.screenVisualizerEnabled : true
+                                onClicked: if (root.theme) root.theme.setScreenVisualizerEnabled(!root.theme.screenVisualizerEnabled)
+                            }
 
                             SettingsSlider {
                                 Layout.fillWidth: true
@@ -2610,6 +2627,13 @@ Item {
                                 value: root.theme ? root.theme.visualizerPixelSize : 7
                                 valueText: Math.round(root.theme ? root.theme.visualizerPixelSize : 7) + " px"
                                 onMoved: function(v) { if (root.theme) root.theme.setVisualizerPixelSize(v) }
+                            }
+
+                            SettingsToggleRow {
+                                Layout.fillWidth: true
+                                label: root.theme && root.theme.visualizerGradientEnabled ? root.tr("visualizerGradientOn") : root.tr("visualizerGradientOff")
+                                checked: root.theme ? root.theme.visualizerGradientEnabled : true
+                                onClicked: if (root.theme) root.theme.setVisualizerGradientEnabled(!root.theme.visualizerGradientEnabled)
                             }
                         }
                     }

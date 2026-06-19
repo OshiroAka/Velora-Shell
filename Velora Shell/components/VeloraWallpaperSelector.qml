@@ -729,8 +729,6 @@ Item {
         command: [root.applyScript, root.currentWallpaperKind(), root.currentWallpaperPath(), root.currentWallpaperPreview()]
         onExited: {
             running = false
-            if (root.theme && root.theme.themeId === "pywal16")
-                root.theme.reloadPywal16()
         }
     }
 

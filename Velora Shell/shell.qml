@@ -1,3 +1,8 @@
+//@ pragma DefaultEnv QS_NO_RELOAD_POPUP=1
+//@ pragma DefaultEnv QS_DROP_EXPENSIVE_FONTS=1
+//@ pragma DefaultEnv QSG_RENDER_LOOP=threaded
+//@ pragma DefaultEnv QT_QUICK_FLICKABLE_WHEEL_DECELERATION=10000
+
 import QtQuick
 import Qt5Compat.GraphicalEffects
 import Quickshell
@@ -48,7 +53,6 @@ ShellRoot {
     property bool settingsPanelPreloadEnabled: false
     property bool quickPopupPreloadEnabled: false
     property int quickPopupPreloadCount: 0
-    property string quickPopupMountedTypes: ""
     property string appLaunchCommand: ""
     property int searchPopupFocusAttempts: 0
     property bool rightDashboardOpen: false
@@ -100,8 +104,12 @@ ShellRoot {
     readonly property bool frameVisualsMounted: frameVisualsEnabled || frameVisualsReveal > 0.01
     property real frameVisualsReveal: frameVisualsEnabled ? 1 : 0
     property bool sideVisualizerWithoutFrame: true
-    readonly property bool sideVisualizerMounted: sideBarLayoutEnabled && veloraTheme.visualizerStrength > 0.01 && (frameVisualsMounted || sideVisualizerWithoutFrame)
+    readonly property bool screenVisualizerWanted: sideBarLayoutEnabled && veloraTheme.screenVisualizerEnabled && veloraTheme.visualizerStrength > 0.01
+    readonly property bool sideVisualizerMounted: sideBarLayoutEnabled && !screenVisualizerWanted && veloraTheme.visualizerStrength > 0.01 && (frameVisualsMounted || sideVisualizerWithoutFrame)
+    readonly property bool screenVisualizerMounted: screenVisualizerWanted
+    readonly property bool audioVisualizerMounted: sideVisualizerMounted || screenVisualizerMounted
     readonly property real sideVisualizerReveal: frameVisualsMounted ? frameVisualsReveal : (sideVisualizerMounted ? 1 : 0)
+    property real screenVisualizerReveal: screenVisualizerMounted ? 1 : 0
     readonly property real desktopFrameMatteOpacity: sidebarPanelGlassAlpha()
     readonly property int popupFrameGap: veloraTheme.popupAttachedToBar ? 0 : 14
     readonly property int sideQuickPopupBarClearance: 14
@@ -165,8 +173,8 @@ ShellRoot {
     property real quickPopupSurfaceReveal: 0
     readonly property int quickPopupLineCloseDuration: veloraTheme.motionEnabled ? Math.max(700, Math.round(veloraTheme.motionPanelOut * 1.90)) : 1
     readonly property bool sideQuickPopupAttachedToBar: sideQuickPopupPanelVisible && quickPopupTypeAttachedToBar(visibleQuickPopupType)
-    readonly property int sideQuickPopupBridgeWidth: sideQuickPopupAttachedToBar && sideVisualizerMounted ? Math.max(popupFrameGap, sideQuickPopupBarClearance) : 0
-    readonly property bool quickPopupJoinedToBar: sideQuickPopupBridgeWidth > 0
+    readonly property int sideQuickPopupBridgeWidth: sideQuickPopupAttachedToBar && sideVisualizerMounted && barOnRight ? Math.max(popupFrameGap, sideQuickPopupBarClearance) : 0
+    readonly property bool quickPopupJoinedToBar: sideQuickPopupAttachedToBar && (popupFrameGap <= 0 || sideQuickPopupBridgeWidth > 0)
     readonly property real quickPopupTransitionContrast: sideQuickPopupPanelVisible ? (quickPopupSurfaceReveal < 0.98 ? 0.30 : 0.12) : 0
 
     function shellQuote(value) {
@@ -472,6 +480,8 @@ ShellRoot {
         "brightness",
         "notifications",
         "bluetooth",
+        "battery",
+        "settings",
         "avatar"
     ]
     readonly property string focusTarget: focusItems[Math.max(0, Math.min(focusIndex, focusItems.length - 1))]
@@ -489,6 +499,14 @@ ShellRoot {
         NumberAnimation {
             duration: root.topWallpaperPopupOpen ? veloraTheme.motionPanelIn : veloraTheme.motionPanelOut
             easing.type: root.topWallpaperPopupOpen ? veloraTheme.motionEaseEnter : veloraTheme.motionEaseExit
+        }
+    }
+
+    Behavior on screenVisualizerReveal {
+        enabled: veloraTheme.motionEnabled
+        NumberAnimation {
+            duration: root.screenVisualizerMounted ? veloraTheme.motionPanelIn : veloraTheme.motionPanelOut
+            easing.type: root.screenVisualizerMounted ? veloraTheme.motionEaseEnter : veloraTheme.motionEaseExit
         }
     }
 
@@ -701,6 +719,8 @@ ShellRoot {
             return "notifications"
         if (target === "bluetooth")
             return "bluetooth"
+        if (target === "battery")
+            return "battery"
         return ""
     }
 
@@ -712,25 +732,11 @@ ShellRoot {
         return -1
     }
 
-    function quickPopupTypeCached(type) {
-        return type && type.length > 0 && quickPopupMountedTypes.indexOf("|" + type + "|") >= 0
-    }
-
-    function cacheQuickPopupType(type) {
-        if (!type || type.length <= 0 || cachedQuickPopupIndex(type) < 0 || quickPopupTypeCached(type))
-            return
-
-        quickPopupMountedTypes += "|" + type + "|"
-    }
-
     onActiveQuickPopupTypeChanged: {
         if (quickPopupVisible && activeQuickPopupType.length > 0) {
-            cacheQuickPopupType(activeQuickPopupType)
             renderedQuickPopupType = activeQuickPopupType
         }
     }
-
-    onVisibleQuickPopupTypeChanged: cacheQuickPopupType(visibleQuickPopupType)
 
     onQuickPopupVisibleChanged: {
         if (quickPopupVisible) {
@@ -1086,23 +1092,9 @@ ShellRoot {
         }
 
         closeTopBarPopup()
-
-        if (barOnRight) {
-            toggleQuickPopup(type, centerY)
-            return
-        }
-
-        exitFocus()
-        discardQuickPopupAnimation()
+        closeLegacyLeftMenu()
         closeRightDashboard()
-        wallpaperSelectorOpen = false
-        settingsPanelOpen = false
-        leftMediaWindowOpen = false
-        leftMediaWindowEntranceHold = false
-        leftDetailSwitchProgress = 1
-        leftMenuPinned = true
-        leftMenuInteractiveFocus = type === "search"
-        openLeftMenu()
+        toggleQuickPopup(type, centerY)
     }
 
     function openTopBarPopup(type, centerX) {
@@ -1119,13 +1111,9 @@ ShellRoot {
             return
         }
 
-        if (barOnRight) {
-            previewSidebarPopup(type, centerY)
-            return
-        }
-
-        discardQuickPopupAnimation()
+        closeLegacyLeftMenu()
         closeRightDashboard()
+        previewSidebarPopup(type, centerY)
     }
 
     function endAdaptiveBarPopupHover(type) {
@@ -1134,8 +1122,7 @@ ShellRoot {
             return
         }
 
-        if (barOnRight)
-            endSidebarPopupHover(type)
+        endSidebarPopupHover(type)
     }
 
     function openRightDashboard(section) {
@@ -1153,9 +1140,22 @@ ShellRoot {
         rightDashboardOpen = false
     }
 
-    function openLeftMenu() {
+    function closeLegacyLeftMenu() {
+        leftMenuPinned = false
+        leftMenuInteractiveFocus = false
+        leftMenuOpen = false
+        leftMenuTriggerHovering = false
+        leftMenuPanelHovering = false
+        leftMediaWindowOpen = false
+        leftMediaWindowHovering = false
+        leftMediaWindowEntranceHold = false
+        leftDetailSwitchProgress = 1
         leftMenuCloseTimer.stop()
-        leftMenuOpen = true
+        leftMediaWindowEntranceHoldTimer.stop()
+    }
+
+    function openLeftMenu() {
+        closeLegacyLeftMenu()
     }
 
     function updateLeftMenuHovering() {
@@ -1363,6 +1363,12 @@ ShellRoot {
         return quickPopupHeight(type)
     }
 
+    function quickPopupTopMargin(type) {
+        if (type === "time" || type === "search")
+            return Math.max(frameVisualInset + popupFrameGap, 38)
+        return frameVisualInset + popupFrameGap
+    }
+
     function quickPopupY(type, panelHeight, screenHeight) {
         const edgeMargin = frameVisualInset + popupFrameGap
         if (type === "agenda" || type === "weatherPanel") {
@@ -1371,8 +1377,12 @@ ShellRoot {
         }
 
         const center = quickPopupCenterY > 0 ? quickPopupCenterY : defaultQuickPopupCenterY(type)
+        const topMargin = quickPopupTopMargin(type)
+        const maxY = screenHeight - panelHeight - edgeMargin
         const wanted = center - panelHeight / 2
-        return Math.round(Math.max(edgeMargin, Math.min(screenHeight - panelHeight - edgeMargin, wanted)))
+        if (maxY < topMargin)
+            return Math.round(Math.max(edgeMargin, maxY))
+        return Math.round(Math.max(topMargin, Math.min(maxY, wanted)))
     }
 
     Timer {
@@ -1430,7 +1440,7 @@ ShellRoot {
         id: quickPopupPreloadTimer
 
         interval: 1000
-        running: root.sideBarLayoutEnabled
+        running: false
         repeat: false
         onTriggered: {
             root.quickPopupPreloadEnabled = true
@@ -1908,15 +1918,14 @@ ShellRoot {
 
                         property string cacheType: String(modelData)
                         readonly property bool showing: root.quickPopupVisible && root.visibleQuickPopupType === cacheType
-                        readonly property bool neededNow: root.visibleQuickPopupType === cacheType
-                            || root.activeQuickPopupType === cacheType
-                            || root.renderedQuickPopupType === cacheType
+                        readonly property bool closing: !root.quickPopupVisible && root.quickPopupWindowOpen && root.visibleQuickPopupType === cacheType
 
-                        active: neededNow
-                            || root.quickPopupTypeCached(cacheType)
+                        active: showing
+                            || closing
+                            || opacity > 0.001
                             || (root.quickPopupPreloadEnabled && root.cachedQuickPopupIndex(cacheType) < root.quickPopupPreloadCount)
                         asynchronous: false
-                        visible: root.topBarQuickPopupPanelVisible && (showing || opacity > 0.001)
+                        visible: root.topBarQuickPopupPanelVisible && (showing || closing || opacity > 0.001)
                         opacity: showing ? 1 : 0
                         x: Math.round((topBarPopupLoader.width - width) / 2)
                         y: Math.round((topBarPopupLoader.height - height) / 2)
@@ -2564,7 +2573,7 @@ ShellRoot {
     }
 
     Variants {
-        model: Quickshell.screens
+        model: []
 
         PanelWindow {
             id: leftMenuPanel
@@ -3428,6 +3437,323 @@ ShellRoot {
             }
 
             Item {
+                id: screenVisualizerFrame
+
+                readonly property int frameX: Math.round(root.mainAreaX(parent.width))
+                readonly property int frameY: Math.round(root.desktopFrameY(parent.height))
+                readonly property int frameWidth: Math.round(root.mainAreaWidth(parent.width))
+                readonly property int frameHeight: Math.round(root.desktopFrameHeight(parent.height))
+                readonly property int band: Math.max(18, Math.min(64, Math.round(16 + veloraTheme.visualizerStrength * 70)))
+                readonly property bool activeForPaint: root.screenVisualizerReveal > 0.001 && visible && panel.visible && frameWidth > 0 && frameHeight > 0
+
+                anchors.fill: parent
+                visible: root.screenVisualizerReveal > 0.001
+                opacity: root.screenVisualizerReveal
+                z: 1
+
+                function requestFramePaint(force) {
+                    if (!activeForPaint) {
+                        screenVisualizerPaintTimer.stop()
+                        if (force)
+                            screenVisualizerCanvas.requestPaint()
+                        return
+                    }
+
+                    if (force) {
+                        screenVisualizerPaintTimer.stop()
+                        screenVisualizerCanvas.requestPaint()
+                        return
+                    }
+
+                    if (!screenVisualizerPaintTimer.running)
+                        screenVisualizerPaintTimer.restart()
+                }
+
+                onActiveForPaintChanged: requestFramePaint(true)
+                onFrameXChanged: requestFramePaint(true)
+                onFrameYChanged: requestFramePaint(true)
+                onFrameWidthChanged: requestFramePaint(true)
+                onFrameHeightChanged: requestFramePaint(true)
+                onBandChanged: requestFramePaint(true)
+
+                Canvas {
+                    id: screenVisualizerCanvas
+
+                    readonly property int sampleCount: Math.max(96, Math.min(260, Math.round((width + height) / 12)))
+                    readonly property real perimeter: Math.max(1, width * 2 + height * 2)
+                    readonly property bool pixelMode: veloraTheme.visualizerMode === "pixels"
+
+                    x: screenVisualizerFrame.frameX
+                    y: screenVisualizerFrame.frameY
+                    width: screenVisualizerFrame.frameWidth
+                    height: screenVisualizerFrame.frameHeight
+                    visible: screenVisualizerFrame.visible && width > 0 && height > 0
+                    antialiasing: true
+
+                    function rgbaCss(colorValue, opacityValue) {
+                        const alphaValue = Math.max(0, Math.min(1, opacityValue))
+                        return "rgba(" + Math.round(colorValue.r * 255) + "," + Math.round(colorValue.g * 255) + "," + Math.round(colorValue.b * 255) + "," + alphaValue.toFixed(3) + ")"
+                    }
+
+                    function accentColor() {
+                        if (veloraTheme.themeId === "pywal16")
+                            return veloraTheme.sidebarBorderGlow
+                        return veloraTheme.accentPrimary
+                    }
+
+                    function rawVisualizerValue(index) {
+                        if (!barRoot.cavaValues || barRoot.cavaValues.length <= 0)
+                            return 0
+
+                        const value = Number(barRoot.cavaValues[Math.max(0, Math.min(index, barRoot.cavaValues.length - 1))])
+                        return Math.max(0, Math.min(1, isNaN(value) ? 0 : value))
+                    }
+
+                    function interpolatedVisualizerValue(unit) {
+                        const count = Math.max(2, barRoot.cavaBandCount || 28)
+                        const normalized = ((unit % 1) + 1) % 1
+                        const scaled = normalized * count
+                        const left = Math.floor(scaled) % count
+                        const right = (left + 1) % count
+                        const mix = scaled - left
+                        return rawVisualizerValue(left) * (1 - mix) + rawVisualizerValue(right) * mix
+                    }
+
+                    function sampleValue(unit) {
+                        return interpolatedVisualizerValue(unit)
+                    }
+
+                    function sideForDistance(distance) {
+                        const w = Math.max(1, width)
+                        const h = Math.max(1, height)
+                        const d = ((distance % perimeter) + perimeter) % perimeter
+
+                        if (d <= w)
+                            return "top"
+                        if (d <= w + h)
+                            return "right"
+                        if (d <= w * 2 + h)
+                            return "bottom"
+                        return "left"
+                    }
+
+                    function sideStrength(side) {
+                        if (side === "left")
+                            return 1.0
+                        if (side === "right")
+                            return 0.18
+                        return 0.14
+                    }
+
+                    function amplitudeFor(unit, sample, side) {
+                        const value = sampleValue(unit)
+                        const strength = sideStrength(side)
+                        const base = side === "left"
+                            ? Math.max(5, Math.min(12, screenVisualizerFrame.band * 0.15))
+                            : Math.max(2, Math.min(5, screenVisualizerFrame.band * 0.075))
+                        const maxAmp = Math.max(base + 1, screenVisualizerFrame.band * Math.min(0.86, 0.30 + veloraTheme.visualizerStrength * 0.62) * strength)
+                        const pulse = 0.90 + Math.sin(sample * 0.61) * 0.07
+                        return Math.max(3, Math.min(screenVisualizerFrame.band - 1, base + Math.pow(value, 0.76) * maxAmp * pulse))
+                    }
+
+                    function pointAtUnit(unit, sample) {
+                        const distance = ((unit % 1) + 1) % 1 * perimeter
+                        const side = sideForDistance(distance)
+                        const amp = amplitudeFor(unit, sample, side)
+                        const w = Math.max(1, width)
+                        const h = Math.max(1, height)
+
+                        if (distance <= w)
+                            return { x: distance, y: amp, side: side }
+
+                        if (distance <= w + h)
+                            return { x: w - amp, y: distance - w, side: side }
+
+                        if (distance <= w * 2 + h)
+                            return { x: w - (distance - w - h), y: h - amp, side: side }
+
+                        return { x: amp, y: h - (distance - w * 2 - h), side: side }
+                    }
+
+                    function pixelPointAtDistance(distance, inward, cell) {
+                        const w = Math.max(1, width)
+                        const h = Math.max(1, height)
+                        const d = ((distance % perimeter) + perimeter) % perimeter
+
+                        if (d <= w)
+                            return { x: Math.min(w - cell, Math.max(0, d - cell / 2)), y: inward, side: "top" }
+
+                        if (d <= w + h)
+                            return { x: w - cell - inward, y: Math.min(h - cell, Math.max(0, d - w - cell / 2)), side: "right" }
+
+                        if (d <= w * 2 + h)
+                            return { x: Math.min(w - cell, Math.max(0, w - (d - w - h) - cell / 2)), y: h - cell - inward, side: "bottom" }
+
+                        return { x: inward, y: Math.min(h - cell, Math.max(0, h - (d - w * 2 - h) - cell / 2)), side: "left" }
+                    }
+
+                    function traceClosedPath(ctx, points) {
+                        if (points.length <= 0)
+                            return
+
+                        ctx.moveTo(points[0].x, points[0].y)
+                        for (var i = 1; i <= points.length; i += 1) {
+                            const previous = points[(i - 1) % points.length]
+                            const current = points[i % points.length]
+                            const midX = (previous.x + current.x) / 2
+                            const midY = (previous.y + current.y) / 2
+                            ctx.quadraticCurveTo(previous.x, previous.y, midX, midY)
+                        }
+                    }
+
+                    function paintWaveFrame(ctx, points, peak) {
+                        const materialAlpha = Math.max(0.035, Math.min(0.08, root.sidebarPanelGlassAlpha() * 0.08))
+                        const accentAlpha = Math.min(0.13, 0.035 + peak * 0.12)
+                        const accent = accentColor()
+                        var fill = rgbaCss(veloraTheme.surfaceSidebar, materialAlpha)
+
+                        if (veloraTheme.visualizerGradientEnabled) {
+                            fill = ctx.createLinearGradient(0, 0, width, height)
+                            fill.addColorStop(0.0, rgbaCss(veloraTheme.surfaceSidebar, materialAlpha))
+                            fill.addColorStop(0.46, rgbaCss(accent, accentAlpha))
+                            fill.addColorStop(1.0, rgbaCss(veloraTheme.surfaceSidebar, materialAlpha))
+                        }
+
+                        ctx.save()
+                        ctx.fillStyle = fill
+                        ctx.beginPath()
+                        ctx.moveTo(0, 0)
+                        ctx.lineTo(width, 0)
+                        ctx.lineTo(width, height)
+                        ctx.lineTo(0, height)
+                        ctx.closePath()
+                        ctx.moveTo(points[points.length - 1].x, points[points.length - 1].y)
+                        for (var i = points.length - 2; i >= 0; i -= 1)
+                            ctx.lineTo(points[i].x, points[i].y)
+                        ctx.closePath()
+                        ctx.fill()
+
+                        ctx.lineCap = "round"
+                        ctx.lineJoin = "round"
+
+                        for (var i = 0; i < points.length; i += 1) {
+                            const current = points[i]
+                            const next = points[(i + 1) % points.length]
+                            const segmentStrength = Math.min(sideStrength(current.side), sideStrength(next.side))
+                            const segmentAlpha = Math.min(0.62, (0.16 + peak * 0.46) * (0.30 + segmentStrength * 0.70))
+                            ctx.strokeStyle = rgbaCss(accent, segmentAlpha)
+                            ctx.lineWidth = current.side === "left" || next.side === "left" ? 1.15 : 0.65
+                            ctx.beginPath()
+                            ctx.moveTo(current.x, current.y)
+                            ctx.quadraticCurveTo(current.x, current.y, next.x, next.y)
+                            ctx.stroke()
+                        }
+
+                        ctx.restore()
+                    }
+
+                    function paintPixelFrame(ctx, peak) {
+                        const cell = Math.max(3, Math.min(12, Math.round(veloraTheme.visualizerPixelSize)))
+                        const gap = Math.max(1, Math.round(cell * 0.30))
+                        const slots = Math.max(24, Math.floor((perimeter + gap) / (cell + gap)))
+                        const steps = Math.max(1, Math.floor((screenVisualizerFrame.band + gap) / (cell + gap)))
+                        const accent = accentColor()
+
+                        ctx.save()
+                        for (var slot = 0; slot < slots; slot += 1) {
+                            const unit = slot / Math.max(1, slots)
+                            const value = sampleValue(unit)
+                            const side = sideForDistance(unit * perimeter)
+                            const sideScale = sideStrength(side)
+                            const activeSteps = peak >= 0.025
+                                ? Math.min(steps, Math.max(1, Math.ceil(Math.pow(value, 0.72) * steps * Math.max(0.16, veloraTheme.visualizerStrength) * sideScale)))
+                                : 0
+                            const distance = unit * perimeter
+
+                            for (var step = 0; step < activeSteps; step += 1) {
+                                const alphaValue = Math.min(0.56, 0.16 + value * 0.42) * (0.35 + sideScale * 0.65) * (1 - step / Math.max(1, steps) * 0.30)
+                                const point = pixelPointAtDistance(distance, step * (cell + gap), cell)
+
+                                ctx.fillStyle = rgbaCss(accent, alphaValue)
+                                ctx.fillRect(Math.round(point.x), Math.round(point.y), cell, cell)
+                            }
+                        }
+                        ctx.restore()
+                    }
+
+                    onPaint: {
+                        const ctx = getContext("2d")
+                        const points = []
+                        var peak = 0
+
+                        ctx.clearRect(0, 0, width, height)
+                        if (!screenVisualizerFrame.activeForPaint || width <= 0 || height <= 0)
+                            return
+
+                        for (var i = 0; i < sampleCount; i += 1) {
+                            const unit = i / Math.max(1, sampleCount)
+                            peak = Math.max(peak, sampleValue(unit))
+                            points.push(pointAtUnit(unit, i))
+                        }
+
+                        if (pixelMode) {
+                            paintPixelFrame(ctx, peak)
+                            return
+                        }
+
+                        paintWaveFrame(ctx, points, peak)
+                    }
+
+                    Component.onCompleted: screenVisualizerFrame.requestFramePaint(true)
+                    onWidthChanged: screenVisualizerFrame.requestFramePaint(true)
+                    onHeightChanged: screenVisualizerFrame.requestFramePaint(true)
+                    onVisibleChanged: if (visible) screenVisualizerFrame.requestFramePaint(true)
+                }
+
+                Timer {
+                    id: screenVisualizerPaintTimer
+
+                    interval: 16
+                    repeat: false
+                    onTriggered: {
+                        if (screenVisualizerFrame.activeForPaint)
+                            screenVisualizerCanvas.requestPaint()
+                    }
+                }
+
+                Connections {
+                    target: barRoot
+                    function onCavaValuesChanged() {
+                        if (root.screenVisualizerReveal > 0.001)
+                            screenVisualizerFrame.requestFramePaint(false)
+                    }
+                }
+
+                Connections {
+                    target: veloraTheme
+                    function onActiveTextChanged() { screenVisualizerFrame.requestFramePaint(true) }
+                    function onThemeModeChanged() { screenVisualizerFrame.requestFramePaint(true) }
+                    function onThemeIdChanged() { screenVisualizerFrame.requestFramePaint(true) }
+                    function onVisualizerStrengthChanged() { screenVisualizerFrame.requestFramePaint(true) }
+                    function onVisualizerModeChanged() { screenVisualizerFrame.requestFramePaint(true) }
+                    function onVisualizerPixelSizeChanged() { screenVisualizerFrame.requestFramePaint(true) }
+                    function onVisualizerGradientEnabledChanged() { screenVisualizerFrame.requestFramePaint(true) }
+                    function onScreenVisualizerEnabledChanged() { screenVisualizerFrame.requestFramePaint(true) }
+                    function onSurfaceSidebarChanged() { screenVisualizerFrame.requestFramePaint(true) }
+                    function onSidebarBorderGlowChanged() { screenVisualizerFrame.requestFramePaint(true) }
+                    function onBorderSoftChanged() { screenVisualizerFrame.requestFramePaint(true) }
+                }
+
+                Connections {
+                    target: root
+                    function onBarOnRightChanged() { screenVisualizerFrame.requestFramePaint(true) }
+                    function onDesktopFrameMarginChanged() { screenVisualizerFrame.requestFramePaint(true) }
+                    function onScreenVisualizerRevealChanged() { screenVisualizerFrame.requestFramePaint(true) }
+                    function onTopWallpaperFrameRevealChanged() { screenVisualizerFrame.requestFramePaint(true) }
+                }
+            }
+
+            Item {
                 id: sideVisualizerRail
 
                 readonly property int frameEdgeX: Math.round(root.barOnRight
@@ -4218,7 +4544,7 @@ ShellRoot {
                 focusMode: root.focusMode
                 focusIndex: root.focusIndex
                 focusTarget: root.focusTarget
-                visualizerActive: root.sideVisualizerMounted && sideVisualizerRail.activeForPaint
+                visualizerActive: root.audioVisualizerMounted
                 shellDrawsPanelSurface: root.sideBarLayoutEnabled && root.frameVisualsMounted
                 activePopupType: root.wallpaperSelectorOpen ? "theme" : root.quickPopupType
                 onMoveFocusRequested: function(dir) {
@@ -4291,7 +4617,7 @@ ShellRoot {
                     z: 20
                     theme: veloraTheme
                     attachSide: root.popupAttachSide
-                    useCustomGlass: root.visibleQuickPopupType === "time" && root.frameVisualsMounted
+                    useCustomGlass: root.frameVisualsMounted
                     customGlass: root.sidebarBarMaterialColor()
                     flattenAttachedEdge: root.quickPopupJoinedToBar
                     lineReveal: true
@@ -4368,15 +4694,14 @@ ShellRoot {
 
 	                        property string cacheType: String(modelData)
 	                        readonly property bool showing: root.quickPopupVisible && root.visibleQuickPopupType === cacheType
-	                        readonly property bool neededNow: root.visibleQuickPopupType === cacheType
-	                            || root.activeQuickPopupType === cacheType
-	                            || root.renderedQuickPopupType === cacheType
+	                        readonly property bool closing: !root.quickPopupVisible && root.quickPopupWindowOpen && root.visibleQuickPopupType === cacheType
 
-	                        active: neededNow
-	                            || root.quickPopupTypeCached(cacheType)
+	                        active: showing
+	                            || closing
+	                            || opacity > 0.001
 	                            || (root.quickPopupPreloadEnabled && root.cachedQuickPopupIndex(cacheType) < root.quickPopupPreloadCount)
 	                        asynchronous: false
-	                        visible: root.sideQuickPopupPanelVisible && (showing || opacity > 0.001)
+	                        visible: root.sideQuickPopupPanelVisible && (showing || closing || opacity > 0.001)
 	                        opacity: showing ? 1 : 0
 	                        x: root.barOnRight ? Math.round(inlineQuickPopupLoader.width - width) : 0
 	                        y: Math.round((inlineQuickPopupLoader.height - height) / 2)

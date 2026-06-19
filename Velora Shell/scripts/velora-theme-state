@@ -13,6 +13,8 @@ font_file="${state_dir}/font"
 visualizer_file="${state_dir}/visualizer"
 visualizer_mode_file="${state_dir}/visualizer-mode"
 visualizer_pixel_size_file="${state_dir}/visualizer-pixel-size"
+visualizer_gradient_file="${state_dir}/visualizer-gradient"
+screen_visualizer_file="${state_dir}/screen-visualizer"
 topbar_file="${state_dir}/topbar"
 popup_attach_file="${state_dir}/popup-attach"
 popup_bubbles_file="${state_dir}/popup-bubbles"
@@ -143,6 +145,8 @@ case "$command" in
     visualizer="0.46"
     visualizer_mode="wave"
     visualizer_pixel_size="7.00"
+    visualizer_gradient="on"
+    screen_visualizer="on"
     topbar="off"
     popup_attach="on"
     popup_bubbles="matched"
@@ -159,6 +163,8 @@ case "$command" in
     [[ -s "$visualizer_file" ]] && visualizer="$(cat "$visualizer_file")"
     [[ -s "$visualizer_mode_file" ]] && visualizer_mode="$(normalize_visualizer_mode "$(cat "$visualizer_mode_file")")"
     [[ -s "$visualizer_pixel_size_file" ]] && visualizer_pixel_size="$(clamp_decimal "$(cat "$visualizer_pixel_size_file")" "7.00" "3" "12")"
+    [[ -s "$visualizer_gradient_file" ]] && visualizer_gradient="$(normalize_on_off "$(cat "$visualizer_gradient_file")")"
+    [[ -s "$screen_visualizer_file" ]] && screen_visualizer="$(normalize_on_off "$(cat "$screen_visualizer_file")")"
     [[ -s "$topbar_file" ]] && topbar="$(cat "$topbar_file")"
     [[ -s "$popup_attach_file" ]] && popup_attach="$(normalize_on_off "$(cat "$popup_attach_file")")"
     [[ -s "$popup_bubbles_file" ]] && popup_bubbles="$(normalize_popup_bubbles "$(cat "$popup_bubbles_file")")"
@@ -174,6 +180,8 @@ case "$command" in
     printf 'visualizer|%s\n' "$visualizer"
     printf 'visualizerMode|%s\n' "$visualizer_mode"
     printf 'visualizerPixelSize|%s\n' "$visualizer_pixel_size"
+    printf 'visualizerGradient|%s\n' "$visualizer_gradient"
+    printf 'screenVisualizer|%s\n' "$screen_visualizer"
     printf 'topBar|%s\n' "$topbar"
     printf 'popupAttach|%s\n' "$popup_attach"
     printf 'popupBubbles|%s\n' "$popup_bubbles"
@@ -454,6 +462,54 @@ case "$command" in
         ;;
     esac
     ;;
+  visualizer-gradient)
+    subcommand="${2:-get}"
+    case "$subcommand" in
+      get)
+        if [[ -s "$visualizer_gradient_file" ]]; then
+          normalize_on_off "$(cat "$visualizer_gradient_file")"
+        else
+          printf 'on\n'
+        fi
+        ;;
+      set)
+        enabled="$(normalize_on_off "${3:-on}")"
+        mkdir -p "$state_dir"
+        printf '%s\n' "$enabled" > "$visualizer_gradient_file"
+        ;;
+      reset)
+        rm -f "$visualizer_gradient_file"
+        ;;
+      *)
+        printf 'usage: %s visualizer-gradient get|set|reset [on|off]\n' "$0" >&2
+        exit 2
+        ;;
+    esac
+    ;;
+  screen-visualizer)
+    subcommand="${2:-get}"
+    case "$subcommand" in
+      get)
+        if [[ -s "$screen_visualizer_file" ]]; then
+          normalize_on_off "$(cat "$screen_visualizer_file")"
+        else
+          printf 'on\n'
+        fi
+        ;;
+      set)
+        enabled="$(normalize_on_off "${3:-on}")"
+        mkdir -p "$state_dir"
+        printf '%s\n' "$enabled" > "$screen_visualizer_file"
+        ;;
+      reset)
+        rm -f "$screen_visualizer_file"
+        ;;
+      *)
+        printf 'usage: %s screen-visualizer get|set|reset [on|off]\n' "$0" >&2
+        exit 2
+        ;;
+    esac
+    ;;
   popup-attach)
     subcommand="${2:-get}"
     case "$subcommand" in
@@ -553,7 +609,7 @@ case "$command" in
     esac
     ;;
   *)
-    printf 'usage: %s get|dump|set [theme] | opacity get|set|reset [sidebar popup card] | bar-opacity get|set|reset [opacity] | glow get|set|reset [general sidebar_border popup_border icon text] | border get|set|reset [adapt|manual hue] | layout get|set|reset [left|right] [0|1] | language get|set|reset [ja|en|pt-BR] | font get|set|reset [noto|adwaita|cantarell|dejavu|liberation|fantasque] | visualizer get|set|reset [strength] | visualizer-mode get|set|reset [wave|pixels] | visualizer-pixel-size get|set|reset [3-12] | popup-attach get|set|reset [on|off] | popup-bubbles get|set|reset [solid|matched] | topbar get|set|reset [on|off] | wallpaper-transition get|set|reset [transition duration delay]\n' "$0" >&2
+    printf 'usage: %s get|dump|set [theme] | opacity get|set|reset [sidebar popup card] | bar-opacity get|set|reset [opacity] | glow get|set|reset [general sidebar_border popup_border icon text] | border get|set|reset [adapt|manual hue] | layout get|set|reset [left|right] [0|1] | language get|set|reset [ja|en|pt-BR] | font get|set|reset [noto|adwaita|cantarell|dejavu|liberation|fantasque] | visualizer get|set|reset [strength] | visualizer-mode get|set|reset [wave|pixels] | visualizer-pixel-size get|set|reset [3-12] | visualizer-gradient get|set|reset [on|off] | popup-attach get|set|reset [on|off] | popup-bubbles get|set|reset [solid|matched] | topbar get|set|reset [on|off] | wallpaper-transition get|set|reset [transition duration delay]\n' "$0" >&2
     exit 2
     ;;
 esac

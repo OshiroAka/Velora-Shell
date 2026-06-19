@@ -7,6 +7,18 @@ preview="${3:-}"
 transition_arg="${4:-}"
 duration_arg="${5:-}"
 static_delay_arg="${6:-}"
+worker_stamp=""
+worker_img=""
+
+if [ "$kind" = "__theme-worker" ]; then
+  worker_stamp="${2:-}"
+  worker_img="${3:-}"
+  path="$worker_img"
+  preview="$worker_img"
+  transition_arg=""
+  duration_arg=""
+  static_delay_arg=""
+fi
 
 if [ $# -eq 1 ]; then
   kind="static"
@@ -20,20 +32,26 @@ fi
 theme_path="$path"
 [ -n "$preview" ] && [ -f "$preview" ] && theme_path="$preview"
 
+script_path="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 base_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 theme_state_script="${base_dir}/scripts/velora-theme-state"
 pywal_theme_script="${base_dir}/scripts/velora-pywal-theme.py"
 desktop_theme_script="${base_dir}/scripts/velora-desktop-theme.py"
 discord_theme_script="${base_dir}/scripts/velora-discord-theme.py"
 zen_theme_script="${base_dir}/scripts/velora-zen-theme.py"
+terminal_theme_script="${base_dir}/scripts/velora-terminal-theme.py"
 vscode_theme_script="${base_dir}/scripts/velora-vscode-theme.py"
 obsidian_theme_script="${base_dir}/scripts/velora-obsidian-theme.py"
 spotify_theme_script="${base_dir}/scripts/velora-spotify-theme.py"
 zen_live_script="${base_dir}/scripts/velora-zen-live-apply"
+state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/velora-shell"
+static_cache_dir="$HOME/.cache/velora-shell/static-display"
+theme_stamp_file="${state_dir}/wallpaper-theme.stamp"
+theme_log_file="/tmp/velora-wallpaper-theme.log"
 
-mkdir -p "$HOME/.cache/velora-shell"
+mkdir -p "$HOME/.cache/velora-shell" "$static_cache_dir" "$state_dir"
 
-if command -v flock >/dev/null 2>&1; then
+if [ "$kind" != "__theme-worker" ] && command -v flock >/dev/null 2>&1; then
   lock_file="$HOME/.cache/velora-shell/wallpaper-apply.lock"
   exec 9>"$lock_file"
   flock -n 9 >/dev/null 2>&1 || exit 0
@@ -75,8 +93,18 @@ esac
 
 transition_duration="$(clamp_decimal "$transition_duration" "1.00" "0.15" "3.00")"
 static_apply_delay="$(clamp_decimal "$static_apply_delay" "0.12" "0" "0.80")"
+live_fallback_duration="$(clamp_decimal "$transition_duration" "0.25" "0.15" "0.28")"
+live_fallback_ready_delay="0.05"
+live_reveal_delay="0.45"
+theme_core_delay="1.10"
+theme_shell_reload_delay="0.65"
+theme_desktop_delay="4.25"
+theme_apps_stage_delay="2.40"
+theme_spotify_stage_delay="2.80"
 
-printf '%s|%s|%s\n' "$kind" "$path" "$preview" > "$HOME/.cache/velora-shell/current_wallpaper"
+if [ "$kind" != "__theme-worker" ]; then
+  printf '%s|%s|%s\n' "$kind" "$path" "$preview" > "$HOME/.cache/velora-shell/current_wallpaper"
+fi
 
 kill_matching_processes() {
   local pattern="$1"
@@ -113,21 +141,113 @@ stop_swww_wallpapers() {
   fi
 }
 
+wallpaper_target_size() {
+  local size
+
+  size="$(hyprctl monitors -j 2>/dev/null | python3 -c '
+import json
+import sys
+
+try:
+    monitors = json.load(sys.stdin)
+except Exception:
+    monitors = []
+
+width = 0
+height = 0
+for monitor in monitors:
+    try:
+        width = max(width, int(monitor.get("width") or 0))
+        height = max(height, int(monitor.get("height") or 0))
+    except Exception:
+        pass
+
+if width > 0 and height > 0:
+    print(f"{width} {height}")
+' 2>/dev/null || true)"
+
+  if [ -n "$size" ]; then
+    printf '%s\n' "$size"
+  else
+    printf '1920 1200\n'
+  fi
+}
+
+static_display_image() {
+  local img="$1"
+  local target_width target_height
+  local source_width source_height
+  local stat_size stat_mtime
+  local key out tmp
+
+  [ -f "$img" ] || return 1
+
+  if ! command -v magick >/dev/null 2>&1 || ! command -v identify >/dev/null 2>&1; then
+    printf '%s\n' "$img"
+    return 0
+  fi
+
+  read -r target_width target_height <<EOF
+$(wallpaper_target_size)
+EOF
+
+  read -r source_width source_height <<EOF
+$(identify -format '%w %h' "$img" 2>/dev/null || printf '0 0')
+EOF
+
+  if [ "${source_width:-0}" -le 0 ] || [ "${source_height:-0}" -le 0 ]; then
+    printf '%s\n' "$img"
+    return 0
+  fi
+
+  if [ "$source_width" -le "$target_width" ] && [ "$source_height" -le "$target_height" ]; then
+    printf '%s\n' "$img"
+    return 0
+  fi
+
+  stat_size="$(stat -c '%s' "$img" 2>/dev/null || printf '0')"
+  stat_mtime="$(stat -c '%Y' "$img" 2>/dev/null || printf '0')"
+  key="$(printf '%s|%s|%s|%sx%s|static-display-v1\n' "$img" "$stat_size" "$stat_mtime" "$target_width" "$target_height" | sha256sum | awk '{print $1}')"
+  out="${static_cache_dir}/${key}.jpg"
+
+  if [ -s "$out" ]; then
+    printf '%s\n' "$out"
+    return 0
+  fi
+
+  tmp="${static_cache_dir}/${key}.$$.tmp.jpg"
+  if magick "$img" -auto-orient -resize "${target_width}x${target_height}^" -gravity center -extent "${target_width}x${target_height}" -strip -quality 92 "jpg:${tmp}" >/dev/null 2>&1; then
+    mv -f "$tmp" "$out"
+    printf '%s\n' "$out"
+    return 0
+  fi
+
+  rm -f "$tmp"
+  printf '%s\n' "$img"
+}
+
 show_static_fallback() {
   local img="$1"
+  local duration="${2:-0.25}"
+  local display_img
 
-  [ -f "$img" ] || return 0
+  [ -f "$img" ] || return 1
+  display_img="$(static_display_image "$img")"
 
   if command -v awww >/dev/null 2>&1; then
-    start_awww_daemon || return 0
-    awww img "$img" --transition-type fade --transition-duration 0.25 --transition-fps 60 >/dev/null 2>&1 || true
+    start_awww_daemon || return 1
+    awww img "$display_img" --transition-type fade --transition-duration "$duration" --transition-fps 60 >/dev/null 2>&1 || return 1
+    return 0
   elif command -v swww >/dev/null 2>&1; then
     if ! pgrep -x swww-daemon >/dev/null 2>&1; then
       nohup swww-daemon >/dev/null 2>&1 9>&- &
       sleep 0.20
     fi
-    swww img "$img" --transition-type fade --transition-duration 0.25 >/dev/null 2>&1 || true
+    swww img "$display_img" --transition-type fade --transition-duration "$duration" >/dev/null 2>&1 || return 1
+    return 0
   fi
+
+  return 1
 }
 
 any_pid_alive() {
@@ -213,7 +333,7 @@ start_mpv_wallpaper() {
 
   mpvpaper_bin="$(command -v mpvpaper)"
   unit="velora-mpvpaper-$(unit_safe_name "$mon")"
-  options='no-audio loop-file=inf panscan=1.0 video-unscaled=no hwdec=auto-safe scale=bilinear cscale=bilinear dscale=bilinear interpolation=no deband=no'
+  options='no-audio loop-file=inf image-display-duration=inf panscan=1.0 video-unscaled=no hwdec=auto-safe scale=bilinear cscale=bilinear dscale=bilinear interpolation=no deband=no'
   ensure_wayland_env
 
   if command -v systemd-run >/dev/null 2>&1; then
@@ -222,10 +342,18 @@ start_mpv_wallpaper() {
       --setenv="XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR}" \
       --setenv="WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-}" \
       --setenv="DBUS_SESSION_BUS_ADDRESS=${DBUS_SESSION_BUS_ADDRESS:-}" \
+      --property=StandardOutput=null \
+      --property=StandardError=null \
       --unit="$unit" \
       --collect \
       --quiet \
       "$mpvpaper_bin" -o "$options" "$mon" "$file" >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+
+  if "$mpvpaper_bin" --fork -o "$options" "$mon" "$file" >/tmp/velora-mpvpaper.log 2>&1 </dev/null 9>&-; then
+    if wait_for_wallpaper_process '(^|/)mpvpaper([[:space:]]|$)' 8 0.05; then
       return 0
     fi
   fi
@@ -248,6 +376,8 @@ start_engine_wallpaper_process() {
       --setenv="XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR}" \
       --setenv="WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-}" \
       --setenv="DBUS_SESSION_BUS_ADDRESS=${DBUS_SESSION_BUS_ADDRESS:-}" \
+      --property=StandardOutput=null \
+      --property=StandardError=null \
       --unit="$unit" \
       --collect \
       --quiet \
@@ -262,117 +392,355 @@ start_engine_wallpaper_process() {
 apply_theme() {
   local img="$1"
 
+  apply_theme_core "$img"
+  apply_theme_external "$img"
+}
+
+run_low_priority() {
+  if command -v ionice >/dev/null 2>&1 && ionice -c 3 true >/dev/null 2>&1; then
+    ionice -c 3 nice -n 15 "$@"
+  elif command -v nice >/dev/null 2>&1; then
+    nice -n 15 "$@"
+  else
+    "$@"
+  fi
+}
+
+theme_stamp_matches() {
+  local expected="$1"
+  local current_stamp
+  local current_img
+
+  [ -s "$theme_stamp_file" ] || return 1
+  IFS='|' read -r current_stamp current_img < "$theme_stamp_file" || return 1
+  [ "$current_stamp" = "$expected" ]
+}
+
+stop_stale_theme_workers() {
+  local keep_stamp="$1"
+  local unit
+  local rest
+
+  if command -v systemctl >/dev/null 2>&1; then
+    while read -r unit rest; do
+      case "$unit" in
+        velora-wallpaper-theme-"${keep_stamp}".service) ;;
+        velora-wallpaper-theme-*.service)
+          systemctl --user stop "$unit" >/dev/null 2>&1 || true
+          ;;
+      esac
+    done < <(systemctl --user list-units 'velora-wallpaper-theme-*.service' --no-legend --plain 2>/dev/null || true)
+  fi
+
+  # Fallback workers started by setsid/nohup are not tied to a transient unit.
+  pkill -TERM -f 'velora-wallpaper-apply __theme-worker' >/dev/null 2>&1 || true
+}
+
+log_theme_stage() {
+  local stamp="$1"
+  shift
+  printf '[%s] stamp=%s %s\n' "$(date --iso-8601=seconds)" "$stamp" "$*"
+}
+
+apply_theme_core() {
+  local img="$1"
+  local expected_stamp="${2:-}"
+
   [ -f "$img" ] || return 0
   if command -v wal >/dev/null 2>&1; then
-    wal -i "$img" -n -q >/dev/null 2>&1 || true
+    run_low_priority wal -i "$img" -n -q >/dev/null 2>&1 || true
+  fi
+
+  if [ -n "$expected_stamp" ] && ! theme_stamp_matches "$expected_stamp"; then
+    return 1
   fi
 
   if [ -x "$pywal_theme_script" ]; then
-    "$pywal_theme_script" >/dev/null 2>&1 || true
+    run_low_priority "$pywal_theme_script" --no-ipc >/dev/null 2>&1 || true
   fi
+
+  if [ -n "$expected_stamp" ] && ! theme_stamp_matches "$expected_stamp"; then
+    return 1
+  fi
+}
+
+reload_shell_pywal_stage() {
+  if command -v qs >/dev/null 2>&1; then
+    qs ipc -p "$base_dir" call velora reloadPywal16 >/dev/null 2>&1 || true
+  fi
+}
+
+apply_theme_external() {
+  local img="$1"
+
+  [ -f "$img" ] || return 0
+
+  apply_theme_desktop_stage "$img"
+  sleep "$theme_apps_stage_delay" || true
+  apply_theme_apps_stage "$img"
+  sleep "$theme_spotify_stage_delay" || true
+  apply_theme_spotify_stage "$img"
+}
+
+apply_theme_desktop_stage() {
+  local img="$1"
+
+  [ -f "$img" ] || return 0
 
   if [ -x "$desktop_theme_script" ]; then
-    "$desktop_theme_script" --quiet >/dev/null 2>&1 || true
+    run_low_priority "$desktop_theme_script" --quiet >/dev/null 2>&1 || true
   fi
+}
+
+apply_theme_apps_stage() {
+  local img="$1"
+
+  [ -f "$img" ] || return 0
 
   if [ -x "$zen_theme_script" ]; then
-    "$zen_theme_script" --quiet >/dev/null 2>&1 || true
+    run_low_priority "$zen_theme_script" --quiet >/dev/null 2>&1 || true
+  fi
+
+  if [ -x "$terminal_theme_script" ]; then
+    run_low_priority "$terminal_theme_script" --quiet >/dev/null 2>&1 || true
   fi
 
   if [ -x "$vscode_theme_script" ]; then
-    "$vscode_theme_script" --quiet >/dev/null 2>&1 || true
+    run_low_priority "$vscode_theme_script" --quiet >/dev/null 2>&1 || true
   fi
 
   if [ -x "$obsidian_theme_script" ]; then
-    "$obsidian_theme_script" --quiet >/dev/null 2>&1 || true
-  fi
-
-  if [ -x "$spotify_theme_script" ]; then
-    "$spotify_theme_script" --quiet >/dev/null 2>&1 || true
+    run_low_priority "$obsidian_theme_script" --quiet >/dev/null 2>&1 || true
   fi
 
   if [ -x "$discord_theme_script" ]; then
-    "$discord_theme_script" >/dev/null 2>&1 || true
+    run_low_priority "$discord_theme_script" >/dev/null 2>&1 || true
   fi
 
   if [ -x "$zen_live_script" ]; then
-    "$zen_live_script" --debounced >/dev/null 2>&1 || true
+    run_low_priority "$zen_live_script" --debounced >/dev/null 2>&1 || true
   fi
+}
+
+apply_theme_spotify_stage() {
+  local img="$1"
+
+  [ -f "$img" ] || return 0
+
+  if [ -x "$spotify_theme_script" ]; then
+    run_low_priority "$spotify_theme_script" --quiet --no-restart >/dev/null 2>&1 || true
+  fi
+}
+
+apply_theme_async() {
+  local img="$1"
+  local stamp
+
+  [ -f "$img" ] || return 0
+  stamp="$(date +%s%N)"
+  printf '%s|%s\n' "$stamp" "$img" > "$theme_stamp_file"
+  log_theme_stage "$stamp" "queued theme img=$img" > "$theme_log_file"
+
+  stop_stale_theme_workers "$stamp"
+  start_theme_worker "$stamp" "$img" || log_theme_stage "$stamp" "worker start failed" >> "$theme_log_file"
+}
+
+start_theme_worker() {
+  local stamp="$1"
+  local img="$2"
+  local unit="velora-wallpaper-theme-${stamp}"
+
+  if command -v systemd-run >/dev/null 2>&1; then
+    systemctl --user reset-failed "${unit}.service" >/dev/null 2>&1 || true
+    if systemd-run --user \
+      --unit="$unit" \
+      --collect \
+      --quiet \
+      "$script_path" "__theme-worker" "$stamp" "$img" >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+
+  setsid -f "$script_path" "__theme-worker" "$stamp" "$img" >/dev/null 2>&1 </dev/null 9>&- && return 0
+  nohup "$script_path" "__theme-worker" "$stamp" "$img" >/dev/null 2>&1 </dev/null 9>&- &
+}
+
+theme_worker() {
+  local stamp="$1"
+  local img="$2"
+
+  [ -n "$stamp" ] || exit 2
+  [ -f "$img" ] || exit 0
+
+  sleep "$theme_core_delay" || true
+  theme_stamp_matches "$stamp" || exit 0
+  log_theme_stage "$stamp" "core start"
+  apply_theme_core "$img" "$stamp" || exit 0
+  theme_stamp_matches "$stamp" || exit 0
+  log_theme_stage "$stamp" "core done"
+
+  sleep "$theme_shell_reload_delay" || true
+  theme_stamp_matches "$stamp" || exit 0
+  log_theme_stage "$stamp" "shell reload start"
+  reload_shell_pywal_stage
+  theme_stamp_matches "$stamp" || exit 0
+  log_theme_stage "$stamp" "shell reload done"
+
+  sleep "$theme_desktop_delay" || true
+  theme_stamp_matches "$stamp" || exit 0
+  log_theme_stage "$stamp" "desktop stage start"
+  apply_theme_desktop_stage "$img"
+  theme_stamp_matches "$stamp" || exit 0
+  log_theme_stage "$stamp" "desktop stage done"
+
+  sleep "$theme_apps_stage_delay" || true
+  theme_stamp_matches "$stamp" || exit 0
+  log_theme_stage "$stamp" "apps stage start"
+  apply_theme_apps_stage "$img"
+  theme_stamp_matches "$stamp" || exit 0
+  log_theme_stage "$stamp" "apps stage done"
+
+  sleep "$theme_spotify_stage_delay" || true
+  theme_stamp_matches "$stamp" || exit 0
+  log_theme_stage "$stamp" "spotify stage start"
+  apply_theme_spotify_stage "$img"
+  theme_stamp_matches "$stamp" || exit 0
+  log_theme_stage "$stamp" "spotify stage done"
+}
+
+wait_for_wallpaper_process() {
+  local pattern="$1"
+  local tries="${2:-6}"
+  local delay="${3:-0.05}"
+  local i
+
+  for ((i = 0; i < tries; i++)); do
+    if pgrep -f "$pattern" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep "$delay"
+  done
+
+  return 1
 }
 
 static_wallpaper() {
   local img="$1"
+  local display_img
+  local monitors
+  local mon
+  local has_static_fallback=0
 
   [ -f "$img" ] || exit 2
+  display_img="$(static_display_image "$img")"
 
   stop_engine_wallpapers
   stop_mpv_wallpapers
   sleep "$static_apply_delay" || true
 
+  if command -v mpvpaper >/dev/null 2>&1; then
+    monitors="$(hyprctl monitors -j 2>/dev/null | python3 -c 'import json,sys; data=json.load(sys.stdin); print(" ".join(m.get("name","") for m in data if m.get("name")))' 2>/dev/null || true)"
+    [ -n "$monitors" ] || monitors="eDP-1"
+
+    if show_static_fallback "$display_img" "$live_fallback_duration"; then
+      has_static_fallback=1
+      sleep "$live_fallback_ready_delay" || true
+    fi
+
+    : > /tmp/velora-mpvpaper.log
+    for mon in $monitors; do
+      start_mpv_wallpaper "$mon" "$display_img" || true
+    done
+
+    if wait_for_wallpaper_process '(^|/)mpvpaper([[:space:]]|$)' 8 0.04; then
+      if [ "$has_static_fallback" -eq 1 ]; then
+        sleep "$live_reveal_delay" || true
+      fi
+      stop_static_wallpapers
+      apply_theme_async "$img"
+      return 0
+    fi
+  fi
+
   if command -v awww >/dev/null 2>&1; then
     start_awww_daemon
-    awww img "$img" --transition-type "$transition" --transition-duration "$transition_duration" --transition-fps 60 \
-      || awww img "$img" --transition-type fade --transition-duration "$transition_duration" --transition-fps 60
+    awww img "$display_img" --transition-type "$transition" --transition-duration "$transition_duration" --transition-fps 60 \
+      || awww img "$display_img" --transition-type fade --transition-duration "$transition_duration" --transition-fps 60
     stop_swww_wallpapers
   elif command -v swww >/dev/null 2>&1; then
     if ! pgrep -x swww-daemon >/dev/null 2>&1; then
       nohup swww-daemon >/dev/null 2>&1 9>&- &
       sleep 0.20
     fi
-    swww img "$img" --transition-type "$transition" --transition-duration "$transition_duration" \
-      || swww img "$img" --transition-type fade --transition-duration "$transition_duration"
+    swww img "$display_img" --transition-type "$transition" --transition-duration "$transition_duration" \
+      || swww img "$display_img" --transition-type fade --transition-duration "$transition_duration"
     awww kill >/dev/null 2>&1 || true
   else
     exit 127
   fi
 
-  apply_theme "$img"
+  apply_theme_async "$img"
 }
 
 live_wallpaper() {
   local file="$1"
   local monitors
   local mon
+  local has_static_fallback=0
 
   [ -f "$file" ] || exit 2
-  apply_theme "$theme_path"
 
   monitors="$(hyprctl monitors -j 2>/dev/null | python3 -c 'import json,sys; data=json.load(sys.stdin); print(" ".join(m.get("name","") for m in data if m.get("name")))' 2>/dev/null || true)"
   [ -n "$monitors" ] || monitors="eDP-1"
 
-  show_static_fallback "$theme_path"
+  if show_static_fallback "$theme_path" "$live_fallback_duration"; then
+    has_static_fallback=1
+    sleep "$live_fallback_ready_delay" || true
+  fi
+
   stop_engine_wallpapers
   stop_mpv_wallpapers
-  sleep 0.10
   : > /tmp/velora-mpvpaper.log
   for mon in $monitors; do
     start_mpv_wallpaper "$mon" "$file" || true
   done
 
-  sleep 0.70
-  if pgrep -f '(^|/)mpvpaper([[:space:]]|$)' >/dev/null 2>&1; then
+  if wait_for_wallpaper_process '(^|/)mpvpaper([[:space:]]|$)' 8 0.04; then
+    if [ "$has_static_fallback" -eq 1 ]; then
+      sleep "$live_reveal_delay" || true
+    fi
     stop_static_wallpapers
   fi
+  apply_theme_async "$theme_path"
 }
 
 engine_wallpaper() {
   local id="$1"
+  local has_static_fallback=0
 
-  apply_theme "$theme_path"
-  show_static_fallback "$theme_path"
+  if show_static_fallback "$theme_path" "$live_fallback_duration"; then
+    has_static_fallback=1
+    sleep "$live_fallback_ready_delay" || true
+  fi
+
   stop_mpv_wallpapers
   stop_engine_wallpapers
-  sleep 0.10
   : > /tmp/velora-wallpaperengine.log
   start_engine_wallpaper_process "$id" || true
 
-  sleep 0.70
-  if pgrep -f '(^|/)linux-wallpaperengine([[:space:]]|$)' >/dev/null 2>&1; then
+  if wait_for_wallpaper_process '(^|/)linux-wallpaperengine([[:space:]]|$)' 12 0.05; then
+    if [ "$has_static_fallback" -eq 1 ]; then
+      sleep "$live_reveal_delay" || true
+    fi
     stop_static_wallpapers
   fi
+  apply_theme_async "$theme_path"
 }
 
 case "$kind" in
+  __theme-worker)
+    theme_worker "$worker_stamp" "$worker_img" >>"$theme_log_file" 2>&1
+    ;;
   static|bg)
     static_wallpaper "$path"
     ;;

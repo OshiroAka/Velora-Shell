@@ -21,8 +21,12 @@ QtObject {
     property bool borderAdaptEnabled: true
     property bool paletteApplying: false
     property bool paletteAnimatedApply: false
+    property bool stagedPaletteActive: false
+    property var stagedThemeData: ({})
+    property int stagedPaletteStep: 0
     readonly property bool paletteBehaviorEnabled: !paletteApplying || paletteAnimatedApply
-    readonly property int paletteTransitionDuration: paletteAnimatedApply ? 560 : 260
+    readonly property int paletteTransitionDuration: paletteAnimatedApply ? (stagedPaletteActive ? 320 : 560) : 260
+    readonly property int stagedPaletteStepDelay: 700
     property bool motionEnabled: true
     readonly property int motionFast: motionEnabled ? 120 : 1
     readonly property int motionNormal: motionEnabled ? 200 : 1
@@ -70,6 +74,8 @@ QtObject {
     property real visualizerStrength: 0.46
     property string visualizerMode: "wave"
     property real visualizerPixelSize: 7
+    property bool visualizerGradientEnabled: true
+    property bool screenVisualizerEnabled: true
 
     property color surfaceBase: Qt.rgba(255 / 255, 250 / 255, 254 / 255, 0.86)
     property color surfaceSidebar: Qt.rgba(255 / 255, 247 / 255, 253 / 255, 0.88)
@@ -221,6 +227,9 @@ QtObject {
     }
 
     function beginPaletteApply(animate) {
+        stagedThemeTimer.stop()
+        stagedPaletteActive = false
+        stagedThemeData = ({})
         paletteAnimatedApply = animate === true
         paletteApplying = true
     }
@@ -549,50 +558,167 @@ QtObject {
         return Qt.rgba(parts[0] / 255, parts[1] / 255, parts[2] / 255, parts.length > 3 && !isNaN(parts[3]) ? parts[3] : 1)
     }
 
+    function buildThemePalette(data) {
+        return {
+            id: data.id || "pywal16",
+            themeName: data.themeName || data.id || "pywal16",
+            themeMode: data.themeMode || "balanced",
+            notice: data.notice || "",
+            surfaceBase: fromCss(data.surfaceBase, surfaceBase),
+            surfaceSidebar: fromCss(data.surfaceSidebar, surfaceSidebar),
+            surfacePopup: fromCss(data.surfacePopup, surfacePopup),
+            surfaceCard: fromCss(data.surfaceCard, surfaceCard),
+            surfaceInput: fromCss(data.surfaceInput, surfaceInput),
+            surfaceButton: fromCss(data.surfaceButton, surfaceButton),
+            textPrimary: fromCss(data.textPrimary, textPrimary),
+            textSecondary: fromCss(data.textSecondary, textSecondary),
+            textMuted: fromCss(data.textMuted, textMuted),
+            accentPrimary: fromCss(data.accentPrimary, accentPrimary),
+            accentSecondary: fromCss(data.accentSecondary, accentSecondary),
+            accentTertiary: fromCss(data.accentTertiary, accentTertiary),
+            borderSoft: fromCss(data.borderSoft, borderSoft),
+            borderActive: fromCss(data.borderActive, borderActive),
+            borderGlow: fromCss(data.borderGlow, borderGlow),
+            sidebarBorderGlow: fromCss(data.sidebarBorderGlow, borderGlow),
+            popupBorderGlow: fromCss(data.popupBorderGlow, borderGlow),
+            buttonPrimaryBg: fromCss(data.buttonPrimaryBg, buttonPrimaryBg),
+            buttonPrimaryText: fromCss(data.buttonPrimaryText, buttonPrimaryText),
+            buttonPrimaryGlow: fromCss(data.buttonPrimaryGlow, buttonPrimaryGlow),
+            buttonSecondaryBg: fromCss(data.buttonSecondaryBg, buttonSecondaryBg),
+            buttonSecondaryText: fromCss(data.buttonSecondaryText, buttonSecondaryText),
+            activeBg: fromCss(data.activeBg, activeBg),
+            activeText: fromCss(data.activeText, activeText),
+            hoverBg: fromCss(data.hoverBg, hoverBg),
+            shadowColor: fromCss(data.shadowColor, shadowColor),
+            sidebarGlow: fromCss(data.sidebarGlow, sidebarGlow),
+            popupGlow: fromCss(data.popupGlow, popupGlow),
+            textGlow: fromCss(data.textGlow, textGlow),
+            iconGlow: fromCss(data.iconGlow, iconGlow),
+            glassBlur: Number(data.glassBlur || glassBlur)
+        }
+    }
+
+    function applyThemeMeta(palette, idOverride, notice) {
+        themeId = idOverride || palette.id || "pywal16"
+        themeName = palette.themeName || themeId
+        themeMode = palette.themeMode || "balanced"
+        themeNotice = notice || palette.notice || ""
+    }
+
+    function applyThemeBarStage(palette) {
+        paletteSurfaceBase = palette.surfaceBase
+        paletteSurfaceSidebar = palette.surfaceSidebar
+        surfaceBase = palette.surfaceBase
+        surfaceSidebar = palette.surfaceSidebar
+        borderSoft = palette.borderSoft
+        sidebarBorderGlow = palette.sidebarBorderGlow
+        syncBarOpacityFromSurface()
+    }
+
+    function applyThemeTextStage(palette) {
+        textPrimary = palette.textPrimary
+        textSecondary = palette.textSecondary
+        textMuted = palette.textMuted
+        buttonPrimaryText = palette.buttonPrimaryText
+        buttonSecondaryText = palette.buttonSecondaryText
+        activeText = palette.activeText
+    }
+
+    function applyThemePanelStage(palette) {
+        paletteSurfacePopup = palette.surfacePopup
+        paletteSurfaceCard = palette.surfaceCard
+        paletteSurfaceInput = palette.surfaceInput
+        paletteSurfaceButton = palette.surfaceButton
+        surfacePopup = palette.surfacePopup
+        surfaceCard = palette.surfaceCard
+        surfaceInput = palette.surfaceInput
+        surfaceButton = palette.surfaceButton
+        accentPrimary = palette.accentPrimary
+        accentSecondary = palette.accentSecondary
+        accentTertiary = palette.accentTertiary
+        borderActive = palette.borderActive
+        borderGlow = palette.borderGlow
+        popupBorderGlow = palette.popupBorderGlow
+        buttonPrimaryBg = palette.buttonPrimaryBg
+        buttonSecondaryBg = palette.buttonSecondaryBg
+        activeBg = palette.activeBg
+        hoverBg = palette.hoverBg
+    }
+
+    function applyThemeGlowStage(palette) {
+        buttonPrimaryGlow = palette.buttonPrimaryGlow
+        shadowColor = palette.shadowColor
+        sidebarGlow = palette.sidebarGlow
+        popupGlow = palette.popupGlow
+        textGlow = palette.textGlow
+        iconGlow = palette.iconGlow
+        glassBlur = palette.glassBlur
+        applyLoadedBorderOverrides()
+        applyLoadedGlowOverrides()
+        applyLoadedOpacityOverrides()
+    }
+
+    function applyCompleteThemePalette(palette) {
+        applyThemeBarStage(palette)
+        applyThemeTextStage(palette)
+        applyThemePanelStage(palette)
+        applyThemeGlowStage(palette)
+    }
+
+    function startStagedThemePalette(palette, idOverride, notice) {
+        stagedPaletteActive = true
+        stagedThemeData = {
+            palette: palette,
+            idOverride: idOverride || "",
+            notice: notice || ""
+        }
+        stagedPaletteStep = 0
+        applyThemeMeta(palette, idOverride, notice)
+        applyNextStagedThemeStep()
+    }
+
+    function applyNextStagedThemeStep() {
+        const staged = stagedThemeData || {}
+        const palette = staged.palette
+        if (!palette) {
+            stagedPaletteActive = false
+            endPaletteApply()
+            return
+        }
+
+        if (stagedPaletteStep === 0)
+            applyThemeBarStage(palette)
+        else if (stagedPaletteStep === 1)
+            applyThemeTextStage(palette)
+        else if (stagedPaletteStep === 2)
+            applyThemePanelStage(palette)
+        else
+            applyThemeGlowStage(palette)
+
+        if (stagedPaletteStep >= 3) {
+            stagedPaletteActive = false
+            stagedThemeData = ({})
+            endPaletteApply()
+            return
+        }
+
+        stagedPaletteStep += 1
+        stagedThemeTimer.restart()
+    }
+
     function applyThemeData(data, idOverride, notice, animate) {
         if (!data)
             return false
 
+        const palette = buildThemePalette(data)
         beginPaletteApply(animate === true)
-        themeId = idOverride || data.id || "pywal16"
-        themeName = data.themeName || themeId
-        themeMode = data.themeMode || "balanced"
-        themeNotice = notice || data.notice || ""
-        const nextSurfaceBase = fromCss(data.surfaceBase, surfaceBase)
-        const nextSurfaceSidebar = fromCss(data.surfaceSidebar, surfaceSidebar)
-        const nextSurfacePopup = fromCss(data.surfacePopup, surfacePopup)
-        const nextSurfaceCard = fromCss(data.surfaceCard, surfaceCard)
-        const nextSurfaceInput = fromCss(data.surfaceInput, surfaceInput)
-        const nextSurfaceButton = fromCss(data.surfaceButton, surfaceButton)
-        setPaletteSurfaces(nextSurfaceBase, nextSurfaceSidebar, nextSurfacePopup, nextSurfaceCard, nextSurfaceInput, nextSurfaceButton)
-        textPrimary = fromCss(data.textPrimary, textPrimary)
-        textSecondary = fromCss(data.textSecondary, textSecondary)
-        textMuted = fromCss(data.textMuted, textMuted)
-        accentPrimary = fromCss(data.accentPrimary, accentPrimary)
-        accentSecondary = fromCss(data.accentSecondary, accentSecondary)
-        accentTertiary = fromCss(data.accentTertiary, accentTertiary)
-        borderSoft = fromCss(data.borderSoft, borderSoft)
-        borderActive = fromCss(data.borderActive, borderActive)
-        borderGlow = fromCss(data.borderGlow, borderGlow)
-        sidebarBorderGlow = fromCss(data.sidebarBorderGlow, borderGlow)
-        popupBorderGlow = fromCss(data.popupBorderGlow, borderGlow)
-        buttonPrimaryBg = fromCss(data.buttonPrimaryBg, buttonPrimaryBg)
-        buttonPrimaryText = fromCss(data.buttonPrimaryText, buttonPrimaryText)
-        buttonPrimaryGlow = fromCss(data.buttonPrimaryGlow, buttonPrimaryGlow)
-        buttonSecondaryBg = fromCss(data.buttonSecondaryBg, buttonSecondaryBg)
-        buttonSecondaryText = fromCss(data.buttonSecondaryText, buttonSecondaryText)
-        activeBg = fromCss(data.activeBg, activeBg)
-        activeText = fromCss(data.activeText, activeText)
-        hoverBg = fromCss(data.hoverBg, hoverBg)
-        shadowColor = fromCss(data.shadowColor, shadowColor)
-        sidebarGlow = fromCss(data.sidebarGlow, sidebarGlow)
-        popupGlow = fromCss(data.popupGlow, popupGlow)
-        textGlow = fromCss(data.textGlow, textGlow)
-        iconGlow = fromCss(data.iconGlow, iconGlow)
-        glassBlur = Number(data.glassBlur || glassBlur)
-        applyLoadedBorderOverrides()
-        applyLoadedGlowOverrides()
-        applyLoadedOpacityOverrides()
+        if (animate === true && (idOverride || palette.id) === "pywal16") {
+            startStagedThemePalette(palette, idOverride, notice)
+            return true
+        }
+
+        applyThemeMeta(palette, idOverride, notice)
+        applyCompleteThemePalette(palette)
         endPaletteApply()
         return true
     }
@@ -908,11 +1034,48 @@ QtObject {
         }
     }
 
+    function setVisualizerGradientEnabled(enabled, persist) {
+        visualizerGradientEnabled = enabled === true || String(enabled) === "1" || String(enabled) === "true" || String(enabled) === "on"
+        if (persist !== false)
+            saveVisualizerGradientEnabled()
+    }
+
+    function saveVisualizerGradientEnabled() {
+        const enabled = visualizerGradientEnabled ? "on" : "off"
+        if (visualizerGradientSaveProc.running)
+            visualizerGradientSaveProc.pending = enabled
+        else {
+            visualizerGradientSaveProc.command = [root.stateScript, "visualizer-gradient", "set", enabled]
+            visualizerGradientSaveProc.running = true
+        }
+    }
+
+    function setScreenVisualizerEnabled(enabled, persist) {
+        screenVisualizerEnabled = enabled === true || String(enabled) === "1" || String(enabled) === "true" || String(enabled) === "on"
+        if (persist !== false)
+            saveScreenVisualizerEnabled()
+    }
+
+    function saveScreenVisualizerEnabled() {
+        const enabled = screenVisualizerEnabled ? "on" : "off"
+        if (screenVisualizerSaveProc.running)
+            screenVisualizerSaveProc.pending = enabled
+        else {
+            screenVisualizerSaveProc.command = [root.stateScript, "screen-visualizer", "set", enabled]
+            screenVisualizerSaveProc.running = true
+        }
+    }
+
     function setTopBarEnabled(enabled, persist) {
         const nextEnabled = enabled === true || String(enabled) === "1" || String(enabled) === "true" || String(enabled) === "on"
         topBarEnabled = nextEnabled
-        if (persist !== false)
+        if (nextEnabled)
+            desktopFrameEnabled = false
+        if (persist !== false) {
             saveTopBarEnabled()
+            if (nextEnabled)
+                saveLayout()
+        }
     }
 
     function toggleTopBarEnabled() {
@@ -1145,6 +1308,12 @@ QtObject {
 
         if (key === "visualizerPixelSize" && line.length > 0)
             root.setVisualizerPixelSize(line, false)
+
+        if (key === "visualizerGradient")
+            root.setVisualizerGradientEnabled(line !== "off" && line !== "0" && line !== "false", false)
+
+        if (key === "screenVisualizer")
+            root.setScreenVisualizerEnabled(line !== "off" && line !== "0" && line !== "false", false)
 
         if (key === "topBar")
             root.setTopBarEnabled(line === "on" || line === "1" || line === "true", false)
@@ -1430,6 +1599,38 @@ QtObject {
         }
     }
 
+    property Process visualizerGradientSaveProc: Process {
+        property string pending: ""
+
+        running: false
+        command: [root.stateScript, "visualizer-gradient", "set", "on"]
+        onExited: {
+            running = false
+            if (pending.length > 0) {
+                const next = pending
+                pending = ""
+                command = [root.stateScript, "visualizer-gradient", "set", next]
+                running = true
+            }
+        }
+    }
+
+    property Process screenVisualizerSaveProc: Process {
+        property string pending: ""
+
+        running: false
+        command: [root.stateScript, "screen-visualizer", "set", "on"]
+        onExited: {
+            running = false
+            if (pending.length > 0) {
+                const next = pending
+                pending = ""
+                command = [root.stateScript, "screen-visualizer", "set", next]
+                running = true
+            }
+        }
+    }
+
     property Process topBarSaveProc: Process {
         property string pending: ""
 
@@ -1575,6 +1776,12 @@ QtObject {
         }
 
         onExited: running = false
+    }
+
+    property Timer stagedThemeTimer: Timer {
+        interval: root.stagedPaletteStepDelay
+        repeat: false
+        onTriggered: root.applyNextStagedThemeStep()
     }
 
     property Process pywalLoadProc: Process {

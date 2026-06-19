@@ -594,7 +594,7 @@ patch_hyprland() {
 
   include_dir="$(dirname "$HYPR_INCLUDE")"
   mkdir -p "$include_dir"
-  cat > "$HYPR_INCLUDE" <<EOF
+cat > "$HYPR_INCLUDE" <<EOF
 # Velora Shell Hyprland rules
 # Matches velora-shell and every velora-shell-* layer namespace.
 exec-once = powerprofilesctl set performance

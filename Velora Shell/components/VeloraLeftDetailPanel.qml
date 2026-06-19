@@ -393,8 +393,6 @@ Item {
         onExited: {
             running = false
             root.wallpaperApplyState = ""
-            if (root.theme && root.theme.themeId === "pywal16")
-                root.theme.reloadPywal16()
         }
     }
 

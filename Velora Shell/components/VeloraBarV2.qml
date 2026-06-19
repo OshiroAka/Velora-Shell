@@ -321,6 +321,8 @@ Item {
         if (focusTarget === "brightness") return slotBrightness
         if (focusTarget === "notifications") return slotNotifications
         if (focusTarget === "bluetooth") return slotBluetooth
+        if (focusTarget === "battery") return slotBattery
+        if (focusTarget === "settings") return slotSettings
         if (focusTarget === "avatar") return slotAvatar
         return slotClock
     }
@@ -478,6 +480,17 @@ Item {
 
         if (focusTarget === "bluetooth") {
             root.quickPopupRequested("bluetooth", root.itemCenterY(slotBluetooth))
+            return
+        }
+
+        if (focusTarget === "battery") {
+            root.quickPopupRequested("battery", root.itemCenterY(slotBattery))
+            return
+        }
+
+        if (focusTarget === "settings") {
+            root.settingsRequested(root.itemCenterY(slotSettings))
+            root.exitFocusRequested()
             return
         }
 
@@ -1038,6 +1051,14 @@ Item {
                 selected: root.activePopupType === "battery"
                 iconName: "battery"
                 onTriggered: root.quickPopupRequested("battery", root.itemCenterY(slotBattery))
+            }
+
+            UtilityButton {
+                id: slotSettings
+
+                iconName: "settings"
+                selected: false
+                onTriggered: root.settingsRequested(root.itemCenterY(slotSettings))
             }
         }
 

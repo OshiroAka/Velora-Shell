@@ -2678,93 +2678,111 @@ Item {
             border.color: root.alpha(root.theme ? root.theme.borderSoft : Qt.rgba(1, 1, 1, 1), root.neon ? 0.22 : 0.18)
         }
 
-        ProfileView {
-            anchors.fill: parent
-            anchors.margins: 18
-            visible: root.popupType === "profile"
+        PopupViewLoader {
+            viewType: "profile"
+            viewMargins: 18
+            sourceComponent: Component { ProfileView {} }
         }
 
-        TimeView {
-            anchors.fill: parent
-            anchors.margins: 18
-            visible: root.popupType === "time"
+        PopupViewLoader {
+            viewType: "time"
+            viewMargins: 18
+            sourceComponent: Component { TimeView {} }
         }
 
-        AgendaView {
-            anchors.fill: parent
-            anchors.margins: 0
-            visible: root.popupType === "agenda"
+        PopupViewLoader {
+            viewType: "agenda"
+            sourceComponent: Component { AgendaView {} }
         }
 
-        WeatherView {
-            anchors.fill: parent
-            anchors.margins: 0
-            visible: root.popupType === "weatherPanel"
+        PopupViewLoader {
+            viewType: "weatherPanel"
+            sourceComponent: Component { WeatherView {} }
         }
 
-        VeloraSearchPopup {
-            anchors.fill: parent
-            anchors.margins: 18
-            popup: root
-            visible: root.popupType === "search"
+        PopupViewLoader {
+            viewType: "search"
+            viewMargins: 18
+            sourceComponent: Component {
+                VeloraSearchPopup {
+                    popup: root
+                }
+            }
         }
 
-        FilesView {
-            anchors.fill: parent
-            anchors.margins: 18
-            visible: root.popupType === "files"
+        PopupViewLoader {
+            viewType: "files"
+            viewMargins: 18
+            sourceComponent: Component { FilesView {} }
         }
 
-        BrowserView {
-            anchors.fill: parent
-            anchors.margins: 22
-            visible: root.popupType === "browser"
+        PopupViewLoader {
+            viewType: "browser"
+            viewMargins: 22
+            sourceComponent: Component { BrowserView {} }
         }
 
-        VolumeView {
-            anchors.fill: parent
-            anchors.margins: 22
-            visible: root.popupType === "volume"
+        PopupViewLoader {
+            viewType: "volume"
+            viewMargins: 22
+            sourceComponent: Component { VolumeView {} }
         }
 
-        WifiView {
-            anchors.fill: parent
-            anchors.margins: 16
-            visible: root.popupType === "wifi"
+        PopupViewLoader {
+            viewType: "wifi"
+            viewMargins: 16
+            sourceComponent: Component { WifiView {} }
         }
 
-        BrightnessView {
-            anchors.fill: parent
-            anchors.margins: 22
-            visible: root.popupType === "brightness"
+        PopupViewLoader {
+            viewType: "brightness"
+            viewMargins: 22
+            sourceComponent: Component { BrightnessView {} }
         }
 
-        VeloraNotificationsPopup {
-            anchors.fill: parent
-            anchors.margins: 16
-            popup: root
-            notificationsModel: notificationModel
-            visible: root.popupType === "notifications"
+        PopupViewLoader {
+            viewType: "notifications"
+            viewMargins: 16
+            sourceComponent: Component {
+                VeloraNotificationsPopup {
+                    popup: root
+                    notificationsModel: notificationModel
+                }
+            }
         }
 
-        VeloraBatteryPopup {
-            anchors.fill: parent
-            anchors.margins: 18
-            popup: root
-            visible: root.popupType === "battery"
+        PopupViewLoader {
+            viewType: "battery"
+            viewMargins: 18
+            sourceComponent: Component {
+                VeloraBatteryPopup {
+                    popup: root
+                }
+            }
         }
 
-        BluetoothView {
-            anchors.fill: parent
-            anchors.margins: 16
-            visible: root.popupType === "bluetooth"
+        PopupViewLoader {
+            viewType: "bluetooth"
+            viewMargins: 16
+            sourceComponent: Component { BluetoothView {} }
         }
 
-        WallpaperVisibilityView {
-            anchors.fill: parent
-            anchors.margins: 15
-            visible: root.popupType === "wallpaperVisibility"
+        PopupViewLoader {
+            viewType: "wallpaperVisibility"
+            viewMargins: 15
+            sourceComponent: Component { WallpaperVisibilityView {} }
         }
+    }
+
+    component PopupViewLoader: Loader {
+        property string viewType: ""
+        property int viewMargins: 0
+
+        anchors.fill: parent
+        anchors.margins: viewMargins
+        active: root.popupType === viewType
+        visible: active
+        asynchronous: false
     }
 
     component WinCard: Rectangle {
@@ -3206,6 +3224,19 @@ Item {
                 Layout.preferredHeight: 92
                 opacity: root.popupIntroOpacity(70, 210)
                 transform: Translate { y: root.popupIntroTranslateY(70, 12) }
+
+                Rectangle {
+                    id: clockBubble
+
+                    anchors.centerIn: parent
+                    anchors.verticalCenterOffset: 3
+                    width: Math.min(parent.width - 12, 392)
+                    height: Math.min(parent.height - 6, 82)
+                    radius: height / 2.5
+                    color: root.theme ? root.theme.alpha(root.card, root.theme.themeMode === "dark" ? 0.07 : 0.10) : Qt.rgba(1, 1, 1, 0.09)
+                    border.width: 1
+                    border.color: root.theme ? root.theme.alpha(root.borderSoft, root.theme.themeMode === "dark" ? 0.09 : 0.13) : Qt.rgba(1, 1, 1, 0.12)
+                }
 
                 Canvas {
                     id: outlineClock
