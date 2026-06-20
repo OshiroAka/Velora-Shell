@@ -182,6 +182,86 @@ shell_quote() {
   printf "'%s'" "$(printf '%s' "$value" | sed "s/'/'\\\\''/g")"
 }
 
+default_xdg_runtime_dir() {
+  local runtime_dir
+
+  if [ -n "${XDG_RUNTIME_DIR:-}" ]; then
+    return 0
+  fi
+
+  runtime_dir="/run/user/$(id -u)"
+  if [ -d "$runtime_dir" ]; then
+    export XDG_RUNTIME_DIR="$runtime_dir"
+  fi
+}
+
+discover_wayland_display() {
+  local socket
+
+  default_xdg_runtime_dir
+  [ -n "${XDG_RUNTIME_DIR:-}" ] || return 1
+
+  for socket in "$XDG_RUNTIME_DIR"/wayland-*; do
+    [ -S "$socket" ] || continue
+    export WAYLAND_DISPLAY="${socket##*/}"
+    return 0
+  done
+
+  return 1
+}
+
+wayland_display_available() {
+  local display
+
+  display="${WAYLAND_DISPLAY:-}"
+  [ -n "$display" ] || return 1
+
+  case "$display" in
+    /*)
+      [ -S "$display" ]
+      ;;
+    *)
+      default_xdg_runtime_dir
+      [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -S "$XDG_RUNTIME_DIR/$display" ]
+      ;;
+  esac
+}
+
+discover_hyprland_instance() {
+  local socket sig_dir
+
+  default_xdg_runtime_dir
+  [ -n "${XDG_RUNTIME_DIR:-}" ] || return 1
+
+  for socket in "$XDG_RUNTIME_DIR"/hypr/*/.socket.sock; do
+    [ -S "$socket" ] || continue
+    sig_dir="$(dirname "$socket")"
+    export HYPRLAND_INSTANCE_SIGNATURE="${sig_dir##*/}"
+    return 0
+  done
+
+  return 1
+}
+
+prepare_graphical_session_env() {
+  default_xdg_runtime_dir
+
+  if ! wayland_display_available; then
+    unset WAYLAND_DISPLAY
+    discover_wayland_display || true
+  fi
+
+  if [ -z "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
+    discover_hyprland_instance || true
+  fi
+
+  if [ -n "${WAYLAND_DISPLAY:-}" ] && [ -z "${QT_QPA_PLATFORM:-}" ]; then
+    export QT_QPA_PLATFORM=wayland
+  fi
+
+  wayland_display_available
+}
+
 detect_pkg_manager() {
   if [ -n "$AUR_HELPER" ]; then
     if command -v "$AUR_HELPER" >/dev/null 2>&1; then
@@ -320,6 +400,22 @@ audio_feature_packages() {
   esac
 }
 
+qt_platform_packages() {
+  local manager="$1"
+
+  case "$manager" in
+    yay|paru|pacman)
+      printf '%s\n' xcb-util-cursor
+      ;;
+    apt)
+      printf '%s\n' libxcb-cursor0
+      ;;
+    dnf|zypper)
+      printf '%s\n' xcb-util-cursor
+      ;;
+  esac
+}
+
 package_installed() {
   local manager="$1"
   local package="$2"
@@ -404,7 +500,7 @@ missing_dependency_commands() {
 }
 
 install_missing_dependencies() {
-  local manager missing missing_audio packages manual cmd pkg package noninteractive_args
+  local manager missing missing_audio missing_qt packages manual cmd pkg package noninteractive_args
 
   if [ "$CHECK_DEPS" != "1" ] && [ "$INSTALL_DEPS" != "1" ] && [ "$DEPS_DRY_RUN" != "1" ]; then
     return 0
@@ -436,7 +532,18 @@ install_missing_dependencies() {
   done < <(audio_feature_packages "$manager")
   missing_audio="$(dedupe_words $missing_audio)"
 
-  if [ -z "$missing" ] && [ -z "$missing_audio" ]; then
+  missing_qt=""
+  log "checking Qt platform packages"
+  while IFS= read -r package; do
+    [ -n "$package" ] || continue
+    log "checking package: $package"
+    if ! package_installed "$manager" "$package"; then
+      missing_qt="${missing_qt}${missing_qt:+ }${package}"
+    fi
+  done < <(qt_platform_packages "$manager")
+  missing_qt="$(dedupe_words $missing_qt)"
+
+  if [ -z "$missing" ] && [ -z "$missing_audio" ] && [ -z "$missing_qt" ]; then
     log "all checked dependencies are available"
     return 0
   fi
@@ -456,12 +563,16 @@ install_missing_dependencies() {
   if [ -n "$missing_audio" ]; then
     packages="${packages}${packages:+ }${missing_audio}"
   fi
+  if [ -n "$missing_qt" ]; then
+    packages="${packages}${packages:+ }${missing_qt}"
+  fi
 
   packages="$(dedupe_words $packages)"
   manual="$(dedupe_words $manual)"
 
   [ -z "$missing" ] || warn "missing commands: $missing"
   [ -z "$missing_audio" ] || warn "missing audio packages: $missing_audio"
+  [ -z "$missing_qt" ] || warn "missing Qt platform packages: $missing_qt"
 
   if [ "$INSTALL_DEPS" != "1" ] && [ "$DEPS_DRY_RUN" != "1" ]; then
     warn "run ./install.sh --deps to try installing them automatically"
@@ -604,6 +715,107 @@ velora_qs_env=(
   QT_QUICK_FLICKABLE_WHEEL_DECELERATION=10000
 )
 
+default_xdg_runtime_dir() {
+  local runtime_dir
+
+  if [ -n "\${XDG_RUNTIME_DIR:-}" ]; then
+    return 0
+  fi
+
+  runtime_dir="/run/user/\$(id -u)"
+  if [ -d "\$runtime_dir" ]; then
+    export XDG_RUNTIME_DIR="\$runtime_dir"
+  fi
+}
+
+discover_wayland_display() {
+  local socket
+
+  default_xdg_runtime_dir
+  [ -n "\${XDG_RUNTIME_DIR:-}" ] || return 1
+
+  for socket in "\$XDG_RUNTIME_DIR"/wayland-*; do
+    [ -S "\$socket" ] || continue
+    export WAYLAND_DISPLAY="\${socket##*/}"
+    return 0
+  done
+
+  return 1
+}
+
+wayland_display_available() {
+  local display
+
+  display="\${WAYLAND_DISPLAY:-}"
+  [ -n "\$display" ] || return 1
+
+  case "\$display" in
+    /*)
+      [ -S "\$display" ]
+      ;;
+    *)
+      default_xdg_runtime_dir
+      [ -n "\${XDG_RUNTIME_DIR:-}" ] && [ -S "\$XDG_RUNTIME_DIR/\$display" ]
+      ;;
+  esac
+}
+
+discover_hyprland_instance() {
+  local socket sig_dir
+
+  default_xdg_runtime_dir
+  [ -n "\${XDG_RUNTIME_DIR:-}" ] || return 1
+
+  for socket in "\$XDG_RUNTIME_DIR"/hypr/*/.socket.sock; do
+    [ -S "\$socket" ] || continue
+    sig_dir="\$(dirname "\$socket")"
+    export HYPRLAND_INSTANCE_SIGNATURE="\${sig_dir##*/}"
+    return 0
+  done
+
+  return 1
+}
+
+prepare_graphical_session_env() {
+  default_xdg_runtime_dir
+
+  if ! wayland_display_available; then
+    unset WAYLAND_DISPLAY
+    discover_wayland_display || true
+  fi
+
+  if [ -z "\${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
+    discover_hyprland_instance || true
+  fi
+
+  if [ -n "\${WAYLAND_DISPLAY:-}" ] && [ -z "\${QT_QPA_PLATFORM:-}" ]; then
+    export QT_QPA_PLATFORM=wayland
+  fi
+
+  wayland_display_available
+}
+
+require_graphical_session_env() {
+  local runtime_dir
+
+  if prepare_graphical_session_env; then
+    return 0
+  fi
+
+  runtime_dir="\${XDG_RUNTIME_DIR:-/run/user/\$(id -u)}"
+  printf 'velora: no active Wayland session was found.\\n' >&2
+  printf 'velora: checked %s/wayland-*; start from Hyprland or keep the graphical user session active before running over SSH.\\n' "\$runtime_dir" >&2
+  exit 1
+}
+
+stop_external_notification_daemon() {
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl --user stop mako.service >/dev/null 2>&1 || true
+  elif command -v pkill >/dev/null 2>&1; then
+    pkill -x mako >/dev/null 2>&1 || true
+  fi
+}
+
 is_running() {
   qs list --all 2>/dev/null | grep -F "Config path: \$shell_file" >/dev/null 2>&1
 }
@@ -613,11 +825,8 @@ case "\$command" in
     if is_running; then
       exit 0
     fi
-    if command -v systemctl >/dev/null 2>&1; then
-      systemctl --user stop mako.service >/dev/null 2>&1 || true
-    elif command -v pkill >/dev/null 2>&1; then
-      pkill -x mako >/dev/null 2>&1 || true
-    fi
+    require_graphical_session_env
+    stop_external_notification_daemon
     env "\${velora_qs_env[@]}" qs -d -p "\$install_dir"
     ;;
   stop|Stop|kill|Kill)
@@ -625,11 +834,8 @@ case "\$command" in
     ;;
   restart|Restart)
     qs kill -p "\$install_dir" >/dev/null 2>&1 || true
-    if command -v systemctl >/dev/null 2>&1; then
-      systemctl --user stop mako.service >/dev/null 2>&1 || true
-    elif command -v pkill >/dev/null 2>&1; then
-      pkill -x mako >/dev/null 2>&1 || true
-    fi
+    require_graphical_session_env
+    stop_external_notification_daemon
     env "\${velora_qs_env[@]}" qs -d -p "\$install_dir"
     ;;
   *)
@@ -795,6 +1001,7 @@ EOF
   log "Hyprland backup created: $backup_file"
 
   if command -v hyprctl >/dev/null 2>&1; then
+    prepare_graphical_session_env || true
     log "reloading Hyprland"
     if command -v timeout >/dev/null 2>&1; then
       if timeout 8s hyprctl reload >/dev/null 2>&1; then
@@ -819,6 +1026,11 @@ validate_quickshell() {
 
   if ! command -v qs >/dev/null 2>&1; then
     warn "qs not found; skipping Quickshell validation"
+    return 0
+  fi
+
+  if ! prepare_graphical_session_env; then
+    warn "no active Wayland session found; skipping Quickshell validation"
     return 0
   fi
 
@@ -880,6 +1092,11 @@ start_shell() {
 
   if ! command -v qs >/dev/null 2>&1; then
     warn "qs not found; cannot start Velora Shell"
+    return 0
+  fi
+
+  if ! prepare_graphical_session_env; then
+    warn "no active Wayland session found; cannot start Velora Shell"
     return 0
   fi
 
