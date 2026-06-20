@@ -18,26 +18,34 @@ ShellRoot {
         id: veloraTheme
     }
 
-    Component.onCompleted: {
-        NotificationServer.keepOnReload = true
-        NotificationServer.persistenceSupported = true
-        NotificationServer.bodySupported = true
-        NotificationServer.bodyMarkupSupported = true
-        NotificationServer.actionsSupported = true
-        NotificationServer.imageSupported = true
-    }
+    NotificationServer {
+        id: veloraNotificationServer
 
-    Connections {
-        target: NotificationServer
+        keepOnReload: true
+        persistenceSupported: true
+        actionsSupported: true
+        bodyHyperlinksSupported: true
+        bodyImagesSupported: true
+        bodyMarkupSupported: true
+        imageSupported: true
 
-        function onNotification(notification) {
+        onNotification: function(notification) {
             if (!notification)
                 return
 
             notification.tracked = true
+            console.log("[velora-notification] received", notification.summary, notification.appName)
+            root.showNotificationToast(notification)
         }
     }
 
+    property bool notificationToastVisible: false
+    property bool notificationToastMounted: false
+    property string notificationToastTitle: ""
+    property string notificationToastBody: ""
+    property string notificationToastApp: ""
+    property string notificationToastIconKey: "bell"
+    property int notificationToastSerial: 0
     property bool wallpaperSelectorOpen: false
     property bool settingsPanelOpen: false
     property bool idlePreloadEnabled: false
@@ -187,6 +195,92 @@ ShellRoot {
 
         appLaunchCommand = command
         appLaunchProcess.running = true
+    }
+
+    function notificationField(notification, keys, fallback) {
+        if (!notification)
+            return fallback || ""
+
+        for (let i = 0; i < keys.length; ++i) {
+            const value = notification[keys[i]]
+            if (value !== undefined && value !== null && String(value).trim().length > 0)
+                return String(value).replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim()
+        }
+
+        return fallback || ""
+    }
+
+    function notificationIconKey(appName, title) {
+        const value = String((appName || "") + " " + (title || "")).toLowerCase()
+        if (value.indexOf("whatsapp") >= 0)
+            return "whatsapp"
+        if (value.indexOf("discord") >= 0 || value.indexOf("vesktop") >= 0)
+            return "discord"
+        if (value.indexOf("spotify") >= 0)
+            return "spotify"
+        if (value.indexOf("telegram") >= 0)
+            return "telegram"
+        if (value.indexOf("firefox") >= 0 || value.indexOf("zen") >= 0 || value.indexOf("browser") >= 0)
+            return "browser"
+        if (value.indexOf("velora") >= 0)
+            return "velora"
+        return "bell"
+    }
+
+    function notificationIconSurfaceColor(iconKey) {
+        if (iconKey === "whatsapp")
+            return Qt.rgba(46 / 255, 168 / 255, 101 / 255, 0.82)
+        if (iconKey === "discord")
+            return Qt.rgba(112 / 255, 132 / 255, 255 / 255, 0.82)
+        if (iconKey === "spotify")
+            return Qt.rgba(34 / 255, 197 / 255, 94 / 255, 0.82)
+        if (iconKey === "telegram")
+            return Qt.rgba(56 / 255, 164 / 255, 220 / 255, 0.82)
+        if (iconKey === "browser")
+            return Qt.rgba(69 / 255, 160 / 255, 245 / 255, 0.82)
+        if (iconKey === "velora")
+            return veloraTheme.alpha(veloraTheme.accentPrimary, 0.82)
+        return veloraTheme.alpha(veloraTheme.accentTertiary, 0.78)
+    }
+
+    function showNotificationToast(notification) {
+        const summary = notificationField(notification, ["summary", "title"], "")
+        const body = notificationField(notification, ["body"], "")
+        const appName = notificationField(notification, ["appName", "app", "app_name", "application", "desktopEntry", "desktop_entry", "app-name"], "Velora")
+        const title = summary.length > 0 ? summary : (body.length > 0 ? body : "通知")
+
+        notificationToastTitle = title
+        notificationToastBody = summary.length > 0 ? body : ""
+        notificationToastApp = appName
+        notificationToastIconKey = notificationIconKey(appName, title)
+        notificationToastSerial += 1
+        notificationToastUnmountTimer.stop()
+        notificationToastMounted = true
+        notificationToastVisible = true
+        console.log("[velora-notification] visible", notificationToastTitle, notificationToastMounted, notificationToastVisible)
+        notificationToastHideTimer.restart()
+    }
+
+    function hideNotificationToast() {
+        notificationToastHideTimer.stop()
+        notificationToastVisible = false
+        notificationToastUnmountTimer.restart()
+    }
+
+    Timer {
+        id: notificationToastHideTimer
+
+        interval: 4300
+        repeat: false
+        onTriggered: root.hideNotificationToast()
+    }
+
+    Timer {
+        id: notificationToastUnmountTimer
+
+        interval: veloraTheme.motionEnabled ? 360 : 1
+        repeat: false
+        onTriggered: if (!root.notificationToastVisible) root.notificationToastMounted = false
     }
 
     function clockAlertCommand(title, message) {
@@ -3134,7 +3228,7 @@ ShellRoot {
             exclusionMode: ExclusionMode.Normal
             focusable: wantsDrawerKeyboard
 
-            WlrLayershell.layer: WlrLayer.Top
+            WlrLayershell.layer: WlrLayer.Overlay
             WlrLayershell.namespace: "velora-shell-drawers"
             WlrLayershell.keyboardFocus: wantsDrawerKeyboard ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
 
@@ -3169,6 +3263,11 @@ ShellRoot {
                 Region {
                     item: topWallpaperStrip
                     radius: 0
+                }
+
+                Region {
+                    item: inlineNotificationToastInputMask
+                    radius: inlineNotificationToastBubble.radius
                 }
             }
 
@@ -3362,6 +3461,33 @@ ShellRoot {
                     ctx.restore()
                 }
 
+                function paintInlineNotificationToast(ctx) {
+                    if (!root.notificationToastMounted || inlineNotificationToastStage.width <= 0 || inlineNotificationToastStage.height <= 0 || inlineNotificationToastStage.opacity <= 0.01)
+                        return
+
+                    const tx = Math.round(inlineNotificationToastStage.x)
+                    const ty = Math.round(inlineNotificationToastStage.y)
+                    const tw = Math.round(inlineNotificationToastStage.width)
+                    const th = Math.round(inlineNotificationToastStage.height)
+                    const radius = Math.min(inlineNotificationToastStage.bubbleRadius, Math.max(0, tw / 2), Math.max(0, th / 2))
+
+                    ctx.save()
+                    ctx.clearRect(tx - 1, ty - 1, tw + 2, th + 2)
+                    ctx.globalAlpha = root.frameVisualsReveal * inlineNotificationToastStage.opacity
+                    ctx.fillStyle = root.desktopFrameMatteColor()
+                    ctx.beginPath()
+                    ctx.moveTo(tx, ty)
+                    ctx.lineTo(tx + tw, ty)
+                    ctx.lineTo(tx + tw, ty + th - radius)
+                    ctx.arcTo(tx + tw, ty + th, tx + tw - radius, ty + th, radius)
+                    ctx.lineTo(tx + radius, ty + th)
+                    ctx.arcTo(tx, ty + th, tx, ty + th - radius, radius)
+                    ctx.lineTo(tx, ty)
+                    ctx.closePath()
+                    ctx.fill()
+                    ctx.restore()
+                }
+
                 onPaint: {
                     const ctx = getContext("2d")
                     const fx = root.mainAreaX(width)
@@ -3404,6 +3530,7 @@ ShellRoot {
 
                     paintSidebarGutterFill(ctx)
                     paintSidebarSurface(ctx)
+                    paintInlineNotificationToast(ctx)
                 }
 
                 Component.onCompleted: if (root.frameVisualsMounted) requestPaint()
@@ -3423,6 +3550,13 @@ ShellRoot {
                 function onPopupBorderGlowChanged() { if (root.frameVisualsMounted) unifiedFrameCanvas.requestPaint() }
                 function onSidebarBorderGlowChanged() { if (root.frameVisualsMounted) unifiedFrameCanvas.requestPaint() }
                 function onBorderSoftChanged() { if (root.frameVisualsMounted) unifiedFrameCanvas.requestPaint() }
+            }
+
+            Connections {
+                target: root
+                function onNotificationToastMountedChanged() { if (root.frameVisualsMounted) unifiedFrameCanvas.requestPaint() }
+                function onNotificationToastVisibleChanged() { if (root.frameVisualsMounted) unifiedFrameCanvas.requestPaint() }
+                function onNotificationToastSerialChanged() { if (root.frameVisualsMounted) unifiedFrameCanvas.requestPaint() }
             }
 
             Connections {
@@ -4257,7 +4391,7 @@ ShellRoot {
                 height: Math.max(0, parent.height - root.desktopFrameMargin - frameBottomY - topGap - bottomGap)
                 visible: root.topWallpaperMounted && reveal > 0.01 && width > 420 && height > 78
                 opacity: root.topWallpaperSurfaceReveal * Math.min(1, reveal * 1.25)
-                z: 4
+                z: 60
                 clip: false
                 focus: root.topWallpaperKeyboardFocus
 
@@ -4530,6 +4664,179 @@ ShellRoot {
                         cursorShape: Qt.PointingHandCursor
                         onClicked: root.moveTopWallpaper(1)
                     }
+                }
+            }
+
+            Item {
+                id: inlineNotificationToastInputMask
+
+                x: inlineNotificationToastStage.x
+                y: inlineNotificationToastStage.y
+                width: root.notificationToastMounted ? inlineNotificationToastStage.width : 0
+                height: root.notificationToastMounted ? inlineNotificationToastStage.height : 0
+            }
+
+            Item {
+                id: inlineNotificationToastStage
+
+                readonly property int safeWidth: Math.max(320, parent.width - 96)
+                readonly property int bubbleRadius: Math.min(20, height / 2)
+
+                width: Math.round(Math.min(safeWidth, Math.max(330, parent.width * 0.18)))
+                height: 58
+                x: Math.round((parent.width - width) / 2)
+                y: root.notificationToastVisible ? 0 : -height - 18
+                z: 140
+                visible: root.notificationToastMounted
+                opacity: root.notificationToastVisible ? 1 : 0
+                scale: root.notificationToastVisible ? 1 : 0.965
+                transformOrigin: Item.Top
+
+                onYChanged: if (root.frameVisualsMounted) unifiedFrameCanvas.requestPaint()
+                onOpacityChanged: if (root.frameVisualsMounted) unifiedFrameCanvas.requestPaint()
+                onWidthChanged: if (root.frameVisualsMounted) unifiedFrameCanvas.requestPaint()
+                onHeightChanged: if (root.frameVisualsMounted) unifiedFrameCanvas.requestPaint()
+
+                Behavior on y {
+                    enabled: veloraTheme.motionEnabled
+                    NumberAnimation {
+                        duration: root.notificationToastVisible ? 360 : 280
+                        easing.type: root.notificationToastVisible ? Easing.OutCubic : Easing.InCubic
+                    }
+                }
+
+                Behavior on opacity {
+                    enabled: veloraTheme.motionEnabled
+                    NumberAnimation {
+                        duration: root.notificationToastVisible ? 220 : 180
+                        easing.type: Easing.OutCubic
+                    }
+                }
+
+                Rectangle {
+                    id: inlineNotificationToastBubble
+
+                    anchors.fill: parent
+                    radius: inlineNotificationToastStage.bubbleRadius
+                    color: "transparent"
+                    border.width: 0
+                    antialiasing: true
+                }
+
+                Item {
+                    id: inlineNotificationToastIcon
+
+                    width: 40
+                    height: 40
+                    x: 13
+                    y: Math.round((parent.height - height) / 2)
+
+                    Rectangle {
+                        anchors.fill: parent
+                        radius: 12
+                        color: root.notificationIconSurfaceColor(root.notificationToastIconKey)
+                        border.width: 1
+                        border.color: Qt.rgba(1, 1, 1, 0.24)
+                        antialiasing: true
+                    }
+
+                    Rectangle {
+                        anchors {
+                            left: parent.left
+                            right: parent.right
+                            top: parent.top
+                        }
+                        height: parent.height * 0.42
+                        radius: 12
+                        color: Qt.rgba(1, 1, 1, 0.14)
+                    }
+
+                    Canvas {
+                        id: inlineNotificationToastIconCanvas
+
+                        anchors.fill: parent
+                        antialiasing: true
+
+                        function drawBell(ctx) {
+                            ctx.beginPath()
+                            ctx.moveTo(27, 15)
+                            ctx.bezierCurveTo(19, 16, 17, 24, 17, 31)
+                            ctx.lineTo(14, 37)
+                            ctx.quadraticCurveTo(27, 42, 40, 37)
+                            ctx.lineTo(37, 31)
+                            ctx.bezierCurveTo(37, 24, 35, 16, 27, 15)
+                            ctx.stroke()
+                            ctx.beginPath()
+                            ctx.arc(27, 41, 3.1, 0, Math.PI, false)
+                            ctx.stroke()
+                        }
+
+                        function drawWhatsapp(ctx) {
+                            ctx.beginPath()
+                            ctx.arc(27, 26, 15, 0.22 * Math.PI, 1.86 * Math.PI, false)
+                            ctx.stroke()
+                            ctx.beginPath()
+                            ctx.moveTo(17, 37)
+                            ctx.lineTo(14, 45)
+                            ctx.lineTo(23, 41)
+                            ctx.stroke()
+                            ctx.beginPath()
+                            ctx.moveTo(22, 20)
+                            ctx.bezierCurveTo(20, 22, 22, 28, 27, 33)
+                            ctx.bezierCurveTo(31, 37, 36, 38, 38, 35)
+                            ctx.moveTo(23, 20)
+                            ctx.lineTo(26, 25)
+                            ctx.moveTo(31, 32)
+                            ctx.lineTo(37, 35)
+                            ctx.stroke()
+                        }
+
+                        onPaint: {
+                            const ctx = getContext("2d")
+                            ctx.clearRect(0, 0, width, height)
+                            ctx.save()
+                            ctx.scale(width / 54, height / 54)
+                            ctx.lineWidth = 3
+                            ctx.lineCap = "round"
+                            ctx.lineJoin = "round"
+                            ctx.strokeStyle = Qt.rgba(1, 1, 1, 0.88)
+                            ctx.fillStyle = Qt.rgba(1, 1, 1, 0.88)
+                            if (root.notificationToastIconKey === "whatsapp")
+                                drawWhatsapp(ctx)
+                            else
+                                drawBell(ctx)
+                            ctx.restore()
+                        }
+
+                        Component.onCompleted: requestPaint()
+
+                        Connections {
+                            target: root
+                            function onNotificationToastIconKeyChanged() { inlineNotificationToastIconCanvas.requestPaint() }
+                            function onNotificationToastSerialChanged() { inlineNotificationToastIconCanvas.requestPaint() }
+                        }
+                    }
+                }
+
+                Text {
+                    x: inlineNotificationToastIcon.x + inlineNotificationToastIcon.width + 16
+                    y: Math.round((parent.height - height) / 2) - 1
+                    width: parent.width - x - 24
+                    text: root.notificationToastTitle
+                    color: veloraTheme.textPrimary
+                    font.family: veloraTheme.uiFont
+                    font.pixelSize: 17
+                    font.weight: Font.DemiBold
+                    elide: Text.ElideRight
+                    maximumLineCount: 1
+                    horizontalAlignment: Text.AlignLeft
+                    verticalAlignment: Text.AlignVCenter
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    acceptedButtons: Qt.LeftButton | Qt.RightButton
+                    onClicked: root.hideNotificationToast()
                 }
             }
 

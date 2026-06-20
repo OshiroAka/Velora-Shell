@@ -508,6 +508,11 @@ case "\$command" in
     if is_running; then
       exit 0
     fi
+    if command -v systemctl >/dev/null 2>&1; then
+      systemctl --user stop mako.service >/dev/null 2>&1 || true
+    elif command -v pkill >/dev/null 2>&1; then
+      pkill -x mako >/dev/null 2>&1 || true
+    fi
     qs -d -p "\$install_dir"
     ;;
   stop|Stop|kill|Kill)
@@ -515,6 +520,11 @@ case "\$command" in
     ;;
   restart|Restart)
     qs kill -p "\$install_dir" >/dev/null 2>&1 || true
+    if command -v systemctl >/dev/null 2>&1; then
+      systemctl --user stop mako.service >/dev/null 2>&1 || true
+    elif command -v pkill >/dev/null 2>&1; then
+      pkill -x mako >/dev/null 2>&1 || true
+    fi
     qs -d -p "\$install_dir"
     ;;
   *)
@@ -598,6 +608,7 @@ cat > "$HYPR_INCLUDE" <<EOF
 # Velora Shell Hyprland rules
 # Matches velora-shell and every velora-shell-* layer namespace.
 exec-once = powerprofilesctl set performance
+exec-once = systemctl --user stop mako.service
 exec-once = qs -d -p "$INSTALL_DIR"
 layerrule = blur on, match:namespace ^velora-shell($|-.*)
 layerrule = blur_popups on, match:namespace ^velora-shell($|-.*)
@@ -725,6 +736,14 @@ stop_existing_shell() {
   done
 }
 
+stop_external_notification_daemon() {
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl --user stop mako.service >/dev/null 2>&1 || true
+  elif command -v pkill >/dev/null 2>&1; then
+    pkill -x mako >/dev/null 2>&1 || true
+  fi
+}
+
 start_shell() {
   if [ "$START_AFTER" != "1" ]; then
     return 0
@@ -736,6 +755,7 @@ start_shell() {
   fi
 
   stop_existing_shell
+  stop_external_notification_daemon
   qs -d -p "$INSTALL_DIR"
 }
 
@@ -750,6 +770,9 @@ install_runtime
 install_cli_launcher
 install_default_wallpapers
 patch_hyprland
+if [ "$START_AFTER" = "1" ] || [ "$VALIDATE_AFTER" = "1" ]; then
+  stop_external_notification_daemon
+fi
 validate_quickshell
 start_shell
 
