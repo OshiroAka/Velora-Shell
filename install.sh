@@ -2,13 +2,22 @@
 set -euo pipefail
 
 APP_NAME="velora-shell"
+VELORA_QS_ENV=(
+  QS_NO_RELOAD_POPUP=1
+  QS_DROP_EXPENSIVE_FONTS=1
+  QSG_RENDER_LOOP=threaded
+  QT_QUICK_FLICKABLE_WHEEL_DECELERATION=10000
+)
+VELORA_QS_ENV_LINE="${VELORA_QS_ENV[*]}"
 START_AFTER=0
 VALIDATE_AFTER=0
 INSTALL_DEPS=0
 DEPS_ONLY=0
 DEPS_DRY_RUN=0
+DEPS_NONINTERACTIVE="${VELORA_DEPS_NONINTERACTIVE:-1}"
 CHECK_DEPS=1
 SKIP_HYPR="${VELORA_SKIP_HYPR:-0}"
+AUR_HELPER="${VELORA_AUR_HELPER:-}"
 INSTALL_DIR="${VELORA_INSTALL_DIR:-}"
 BIN_DIR="${VELORA_BIN_DIR:-}"
 HYPR_CONFIG="${VELORA_HYPR_CONFIG:-}"
@@ -27,9 +36,11 @@ usage() {
     "  --hypr-config PATH   Hyprland config file to patch" \
     "  --hypr-include PATH  Velora Hyprland snippet path" \
     "  --hypr-mode MODE     include, inline, or file-only (default: include)" \
-    "  --deps               Install missing runtime/feature dependencies" \
-    "  --deps-only          Only check/install dependencies, then exit" \
+    "  --deps               Install missing runtime/feature dependencies, then exit" \
+    "  --deps-only          Same as --deps" \
     "  --deps-dry-run       Print dependency install plan without installing" \
+    "  --deps-interactive   Let package managers ask questions during --deps" \
+    "  --aur-helper NAME    Prefer yay or paru for Arch/AUR deps" \
     "  --no-deps-check      Do not warn about missing dependencies" \
     "  --skip-hypr          Do not edit Hyprland config or write blur rules" \
     "  --start              Start Velora Shell after install" \
@@ -79,6 +90,7 @@ while [ $# -gt 0 ]; do
       ;;
     --deps)
       INSTALL_DEPS=1
+      DEPS_ONLY=1
       shift
       ;;
     --deps-only)
@@ -90,6 +102,18 @@ while [ $# -gt 0 ]; do
       DEPS_DRY_RUN=1
       CHECK_DEPS=1
       shift
+      ;;
+    --deps-interactive)
+      DEPS_NONINTERACTIVE=0
+      shift
+      ;;
+    --aur-helper)
+      [ $# -ge 2 ] || fail "--aur-helper needs yay or paru"
+      case "$2" in
+        yay|paru) AUR_HELPER="$2" ;;
+        *) fail "--aur-helper needs yay or paru" ;;
+      esac
+      shift 2
       ;;
     --no-deps-check)
       CHECK_DEPS=0
@@ -130,6 +154,10 @@ HYPR_INCLUDE="${HYPR_INCLUDE:-$(dirname "$HYPR_CONFIG")/velora-hyprland.conf}"
 [ -f "$SOURCE_DIR/shell.qml" ] || fail "shell.qml not found in: $SOURCE_DIR"
 [ -d "$SOURCE_DIR/components" ] || fail "components/ not found in: $SOURCE_DIR"
 
+log "source: $SOURCE_DIR"
+log "install target: $INSTALL_DIR"
+log "launcher dir: $BIN_DIR"
+
 dedupe_words() {
   local item seen out
   seen=" "
@@ -155,10 +183,18 @@ shell_quote() {
 }
 
 detect_pkg_manager() {
-  if command -v yay >/dev/null 2>&1; then
-    printf 'yay\n'
-  elif command -v paru >/dev/null 2>&1; then
+  if [ -n "$AUR_HELPER" ]; then
+    if command -v "$AUR_HELPER" >/dev/null 2>&1; then
+      printf '%s\n' "$AUR_HELPER"
+      return 0
+    fi
+    warn "requested AUR helper not found: $AUR_HELPER"
+  fi
+
+  if command -v paru >/dev/null 2>&1; then
     printf 'paru\n'
+  elif command -v yay >/dev/null 2>&1; then
+    printf 'yay\n'
   elif command -v pacman >/dev/null 2>&1; then
     printf 'pacman\n'
   elif command -v dnf >/dev/null 2>&1; then
@@ -290,7 +326,11 @@ package_installed() {
 
   case "$manager" in
     yay|paru|pacman)
-      pacman -Q "$package" >/dev/null 2>&1
+      if command -v timeout >/dev/null 2>&1; then
+        timeout 6s pacman -Q "$package" >/dev/null 2>&1
+      else
+        pacman -Q "$package" >/dev/null 2>&1
+      fi
       ;;
     apt)
       dpkg-query -W -f='${Status}' "$package" 2>/dev/null | grep -q 'install ok installed'
@@ -302,6 +342,26 @@ package_installed() {
       return 1
       ;;
   esac
+}
+
+run_root_command() {
+  if [ "$(id -u)" -eq 0 ]; then
+    "$@"
+    return
+  fi
+
+  command -v sudo >/dev/null 2>&1 || fail "sudo not found; run as root or install sudo"
+  sudo "$@"
+}
+
+refresh_sudo() {
+  if [ "$(id -u)" -eq 0 ]; then
+    return 0
+  fi
+
+  command -v sudo >/dev/null 2>&1 || fail "sudo not found; run as root or install sudo"
+  log "sudo may ask for your password now"
+  sudo -v
 }
 
 missing_audio_feature_packages() {
@@ -344,16 +404,36 @@ missing_dependency_commands() {
 }
 
 install_missing_dependencies() {
-  local manager missing missing_audio packages manual cmd pkg sudo_cmd
+  local manager missing missing_audio packages manual cmd pkg package noninteractive_args
 
   if [ "$CHECK_DEPS" != "1" ] && [ "$INSTALL_DEPS" != "1" ] && [ "$DEPS_DRY_RUN" != "1" ]; then
     return 0
   fi
 
+  log "checking dependencies"
   manager="$(detect_pkg_manager)"
-  missing="$(dependency_commands | missing_dependency_commands | tr '\n' ' ')"
+  log "detected package manager: $manager"
+
+  missing=""
+  log "checking command availability"
+  while IFS= read -r cmd; do
+    [ -n "$cmd" ] || continue
+    log "checking command: $cmd"
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+      missing="${missing}${missing:+ }${cmd}"
+    fi
+  done < <(dependency_commands)
   missing="$(dedupe_words $missing)"
-  missing_audio="$(missing_audio_feature_packages "$manager" | tr '\n' ' ')"
+
+  missing_audio=""
+  log "checking audio feature packages"
+  while IFS= read -r package; do
+    [ -n "$package" ] || continue
+    log "checking package: $package"
+    if ! package_installed "$manager" "$package"; then
+      missing_audio="${missing_audio}${missing_audio:+ }${package}"
+    fi
+  done < <(audio_feature_packages "$manager")
   missing_audio="$(dedupe_words $missing_audio)"
 
   if [ -z "$missing" ] && [ -z "$missing_audio" ]; then
@@ -403,27 +483,41 @@ install_missing_dependencies() {
     return 0
   }
 
-  sudo_cmd=""
-  if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
-    sudo_cmd="sudo"
+  noninteractive_args=""
+  if [ "$DEPS_NONINTERACTIVE" = "1" ]; then
+    noninteractive_args="--noconfirm"
+    log "dependency install is non-interactive; pass --deps-interactive to allow prompts"
   fi
+
+  log "starting dependency installation; this can take a while on first install"
 
   case "$manager" in
     yay|paru)
-      "$manager" -S --needed $packages
+      refresh_sudo
+      log "running: $manager -S --needed ${noninteractive_args:+$noninteractive_args }$packages"
+      "$manager" -S --needed $noninteractive_args $packages
       ;;
     pacman)
-      $sudo_cmd pacman -S --needed $packages
+      refresh_sudo
+      log "running: pacman -S --needed ${noninteractive_args:+$noninteractive_args }$packages"
+      run_root_command pacman -S --needed $noninteractive_args $packages
       ;;
     apt)
-      $sudo_cmd apt-get update
-      $sudo_cmd apt-get install -y $packages
+      refresh_sudo
+      log "running: apt-get update"
+      run_root_command apt-get update
+      log "running: apt-get install -y $packages"
+      run_root_command env DEBIAN_FRONTEND=noninteractive apt-get install -y $packages
       ;;
     dnf)
-      $sudo_cmd dnf install -y $packages
+      refresh_sudo
+      log "running: dnf install -y $packages"
+      run_root_command dnf install -y $packages
       ;;
     zypper)
-      $sudo_cmd zypper install -y $packages
+      refresh_sudo
+      log "running: zypper install -y $packages"
+      run_root_command zypper install -y $packages
       ;;
     *)
       warn "no supported package manager found; install manually: $missing"
@@ -434,6 +528,8 @@ install_missing_dependencies() {
 
 install_runtime() {
   local backup_dir
+
+  log "installing runtime"
 
   if ! command -v rsync >/dev/null 2>&1; then
     fail "rsync is required to install cleanly; run ./install.sh --deps first"
@@ -446,11 +542,12 @@ install_runtime() {
 
     if [ -d "$INSTALL_DIR" ] && [ -n "$(find "$INSTALL_DIR" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]; then
       backup_dir="${INSTALL_DIR}.bak-$(date +%Y%m%d-%H%M%S)"
-      cp -a "$INSTALL_DIR" "$backup_dir"
-      log "backup created: $backup_dir"
+      log "moving previous runtime to backup: $backup_dir"
+      mv "$INSTALL_DIR" "$backup_dir"
     fi
 
     mkdir -p "$INSTALL_DIR"
+    log "copying runtime files"
     rsync -a --delete \
       --exclude='.git' \
       --exclude='.gitignore' \
@@ -487,6 +584,8 @@ install_runtime() {
 install_cli_launcher() {
   local launcher quoted_install_dir
 
+  log "installing terminal launchers"
+
   mkdir -p "$BIN_DIR"
   quoted_install_dir="$(shell_quote "$INSTALL_DIR")"
   launcher="$BIN_DIR/velora"
@@ -498,6 +597,12 @@ set -euo pipefail
 command="\${1:-shell}"
 install_dir=$quoted_install_dir
 shell_file="\$install_dir/shell.qml"
+velora_qs_env=(
+  QS_NO_RELOAD_POPUP=1
+  QS_DROP_EXPENSIVE_FONTS=1
+  QSG_RENDER_LOOP=threaded
+  QT_QUICK_FLICKABLE_WHEEL_DECELERATION=10000
+)
 
 is_running() {
   qs list --all 2>/dev/null | grep -F "Config path: \$shell_file" >/dev/null 2>&1
@@ -513,7 +618,7 @@ case "\$command" in
     elif command -v pkill >/dev/null 2>&1; then
       pkill -x mako >/dev/null 2>&1 || true
     fi
-    qs -d -p "\$install_dir"
+    env "\${velora_qs_env[@]}" qs -d -p "\$install_dir"
     ;;
   stop|Stop|kill|Kill)
     qs kill -p "\$install_dir" >/dev/null 2>&1 || true
@@ -525,7 +630,7 @@ case "\$command" in
     elif command -v pkill >/dev/null 2>&1; then
       pkill -x mako >/dev/null 2>&1 || true
     fi
-    qs -d -p "\$install_dir"
+    env "\${velora_qs_env[@]}" qs -d -p "\$install_dir"
     ;;
   *)
     printf 'usage: velora shell|start|stop|restart\\n' >&2
@@ -548,6 +653,8 @@ EOF
 
 install_default_wallpapers() {
   local static_dir selector_dir live_dir source_png_dir source_file target_file legacy_name
+
+  log "checking default wallpapers"
 
   source_png_dir="$SOURCE_DIR/velora-shell-pngs"
   [ -d "$source_png_dir" ] || return 0
@@ -580,7 +687,16 @@ install_default_wallpapers() {
   done
 
   if [ -x "$INSTALL_DIR/scripts/velora-wallpaper-scan" ]; then
-    "$INSTALL_DIR/scripts/velora-wallpaper-scan" --refresh >/dev/null 2>&1 || true
+    log "refreshing wallpaper cache"
+    if command -v timeout >/dev/null 2>&1; then
+      if timeout 15s "$INSTALL_DIR/scripts/velora-wallpaper-scan" --refresh >/dev/null 2>&1; then
+        log "wallpaper cache refreshed"
+      else
+        warn "wallpaper cache refresh timed out or failed; continuing"
+      fi
+    else
+      "$INSTALL_DIR/scripts/velora-wallpaper-scan" --refresh >/dev/null 2>&1 || warn "wallpaper cache refresh failed; continuing"
+    fi
   fi
 
   log "default wallpapers available at: $HOME/Pictures/Wallpapers"
@@ -602,6 +718,7 @@ patch_hyprland() {
     *) fail "--hypr-mode must be include, inline, or file-only" ;;
   esac
 
+  log "writing Hyprland integration"
   include_dir="$(dirname "$HYPR_INCLUDE")"
   mkdir -p "$include_dir"
 cat > "$HYPR_INCLUDE" <<EOF
@@ -609,10 +726,13 @@ cat > "$HYPR_INCLUDE" <<EOF
 # Matches velora-shell and every velora-shell-* layer namespace.
 exec-once = powerprofilesctl set performance
 exec-once = systemctl --user stop mako.service
-exec-once = qs -d -p "$INSTALL_DIR"
+exec-once = env $VELORA_QS_ENV_LINE qs -d -p "$INSTALL_DIR"
 layerrule = blur on, match:namespace ^velora-shell($|-.*)
 layerrule = blur_popups on, match:namespace ^velora-shell($|-.*)
 layerrule = ignore_alpha 0.02, match:namespace ^velora-shell($|-.*)
+layerrule = blur on, match:namespace ^velora-notification-frame$
+layerrule = blur_popups on, match:namespace ^velora-notification-frame$
+layerrule = ignore_alpha 0.02, match:namespace ^velora-notification-frame$
 layerrule = blur on, match:namespace ^velora-topbar$
 layerrule = ignore_alpha 0.28, match:namespace ^velora-topbar$
 bind = SUPER, K, exec, qs ipc -p "$INSTALL_DIR" call velora topWallpaper
@@ -644,9 +764,11 @@ EOF
     /^[[:space:]]*source[[:space:]]*=[[:space:]]*.*velora-hyprland\.conf[[:space:]]*$/ { next }
     /^[[:space:]]*#[[:space:]]*Velora Shell[[:space:]]*$/ { legacy = 1; next }
     legacy == 1 && /^[[:space:]]*layerrule[[:space:]]*=.*match:namespace[[:space:]]+\^?velora-shell/ { next }
+    legacy == 1 && /^[[:space:]]*layerrule[[:space:]]*=.*match:namespace[[:space:]]+\^?velora-notification-frame/ { next }
     legacy == 1 && /^[[:space:]]*bind[[:space:]]*=.*SUPER[[:space:]]*,[[:space:]]*K[[:space:]]*,.*velora.*(wallpaper|leftWallpaper)/ { next }
     legacy == 1 && /^[[:space:]]*$/ { legacy = 0; next }
     /^[[:space:]]*layerrule[[:space:]]*=.*match:namespace[[:space:]]+\^?velora-shell/ { next }
+    /^[[:space:]]*layerrule[[:space:]]*=.*match:namespace[[:space:]]+\^?velora-notification-frame/ { next }
     /^[[:space:]]*bind[[:space:]]*=.*SUPER[[:space:]]*,[[:space:]]*K[[:space:]]*,.*velora.*(wallpaper|leftWallpaper)/ { next }
     skip != 1 { print }
   ' "$HYPR_CONFIG" > "$tmp_file"
@@ -673,7 +795,14 @@ EOF
   log "Hyprland backup created: $backup_file"
 
   if command -v hyprctl >/dev/null 2>&1; then
-    if hyprctl reload >/dev/null 2>&1; then
+    log "reloading Hyprland"
+    if command -v timeout >/dev/null 2>&1; then
+      if timeout 8s hyprctl reload >/dev/null 2>&1; then
+        log "Hyprland reloaded"
+      else
+        warn "hyprctl reload timed out or failed; reload Hyprland manually"
+      fi
+    elif hyprctl reload >/dev/null 2>&1; then
       log "Hyprland reloaded"
     else
       warn "hyprctl reload failed; reload Hyprland manually"
@@ -695,7 +824,7 @@ validate_quickshell() {
 
   log_file="${TMPDIR:-/tmp}/velora-shell-install-validate.log"
   status=0
-  timeout 8s qs -p "$INSTALL_DIR" --no-color --log-times >"$log_file" 2>&1 || status=$?
+  timeout 8s env "${VELORA_QS_ENV[@]}" qs -p "$INSTALL_DIR" --no-color --log-times >"$log_file" 2>&1 || status=$?
 
   if grep -q "Configuration Loaded" "$log_file"; then
     log "Quickshell validation passed"
@@ -756,7 +885,7 @@ start_shell() {
 
   stop_existing_shell
   stop_external_notification_daemon
-  qs -d -p "$INSTALL_DIR"
+  env "${VELORA_QS_ENV[@]}" qs -d -p "$INSTALL_DIR"
 }
 
 install_missing_dependencies
@@ -766,6 +895,7 @@ if [ "$DEPS_ONLY" = "1" ] || [ "$DEPS_DRY_RUN" = "1" ]; then
   exit 0
 fi
 
+log "starting install"
 install_runtime
 install_cli_launcher
 install_default_wallpapers

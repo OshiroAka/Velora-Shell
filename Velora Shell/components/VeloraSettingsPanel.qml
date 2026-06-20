@@ -2603,13 +2603,6 @@ Item {
                             anchors.margins: 18
                             spacing: 10
 
-                            SettingsToggleRow {
-                                Layout.fillWidth: true
-                                label: root.theme && root.theme.screenVisualizerEnabled ? root.tr("screenVisualizerOn") : root.tr("screenVisualizerOff")
-                                checked: root.theme ? root.theme.screenVisualizerEnabled : true
-                                onClicked: if (root.theme) root.theme.setScreenVisualizerEnabled(!root.theme.screenVisualizerEnabled)
-                            }
-
                             SettingsSlider {
                                 Layout.fillWidth: true
                                 label: root.tr("visualizerStrength")

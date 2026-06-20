@@ -4,6 +4,13 @@ Velora Shell/themes/pywal16.json
 *.log
 *.tmp
 
+# Local secrets
+.env
+.env.*
+!.env.example
+gemini.env
+**/gemini.env
+
 # Direct copies from a live ~/.config/quickshell tree
 Velora Shell/.git/
 Velora Shell/.git

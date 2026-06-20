@@ -1,8 +1,3 @@
-//@ pragma DefaultEnv QS_NO_RELOAD_POPUP=1
-//@ pragma DefaultEnv QS_DROP_EXPENSIVE_FONTS=1
-//@ pragma DefaultEnv QSG_RENDER_LOOP=threaded
-//@ pragma DefaultEnv QT_QUICK_FLICKABLE_WHEEL_DECELERATION=10000
-
 import QtQuick
 import Qt5Compat.GraphicalEffects
 import Quickshell
@@ -34,7 +29,6 @@ ShellRoot {
                 return
 
             notification.tracked = true
-            console.log("[velora-notification] received", notification.summary, notification.appName)
             root.showNotificationToast(notification)
         }
     }
@@ -51,6 +45,7 @@ ShellRoot {
     property bool idlePreloadEnabled: false
     property string quickPopupType: ""
     property string hoverPopupType: ""
+    property bool quickPopupHoldOpen: false
     property bool sidebarPopupHovering: false
     property bool quickPopupHovering: false
     property bool wallpaperSelectorHovering: false
@@ -112,7 +107,7 @@ ShellRoot {
     readonly property bool frameVisualsMounted: frameVisualsEnabled || frameVisualsReveal > 0.01
     property real frameVisualsReveal: frameVisualsEnabled ? 1 : 0
     property bool sideVisualizerWithoutFrame: true
-    readonly property bool screenVisualizerWanted: sideBarLayoutEnabled && veloraTheme.screenVisualizerEnabled && veloraTheme.visualizerStrength > 0.01
+    readonly property bool screenVisualizerWanted: false
     readonly property bool sideVisualizerMounted: sideBarLayoutEnabled && !screenVisualizerWanted && veloraTheme.visualizerStrength > 0.01 && (frameVisualsMounted || sideVisualizerWithoutFrame)
     readonly property bool screenVisualizerMounted: screenVisualizerWanted
     readonly property bool audioVisualizerMounted: sideVisualizerMounted || screenVisualizerMounted
@@ -257,30 +252,35 @@ ShellRoot {
         notificationToastUnmountTimer.stop()
         notificationToastMounted = true
         notificationToastVisible = true
-        console.log("[velora-notification] visible", notificationToastTitle, notificationToastMounted, notificationToastVisible)
+        notificationToastHideTimer.toastSerial = notificationToastSerial
         notificationToastHideTimer.restart()
     }
 
     function hideNotificationToast() {
         notificationToastHideTimer.stop()
         notificationToastVisible = false
+        notificationToastUnmountTimer.toastSerial = notificationToastSerial
         notificationToastUnmountTimer.restart()
     }
 
     Timer {
         id: notificationToastHideTimer
 
+        property int toastSerial: -1
+
         interval: 4300
         repeat: false
-        onTriggered: root.hideNotificationToast()
+        onTriggered: if (toastSerial === root.notificationToastSerial) root.hideNotificationToast()
     }
 
     Timer {
         id: notificationToastUnmountTimer
 
+        property int toastSerial: -1
+
         interval: veloraTheme.motionEnabled ? 360 : 1
         repeat: false
-        onTriggered: if (!root.notificationToastVisible) root.notificationToastMounted = false
+        onTriggered: if (toastSerial === root.notificationToastSerial && !root.notificationToastVisible) root.notificationToastMounted = false
     }
 
     function clockAlertCommand(title, message) {
@@ -1000,6 +1000,8 @@ ShellRoot {
 
     function openQuickPopup(type, centerY) {
         exitFocus()
+        if (type !== "search")
+            quickPopupHoldOpen = false
         setQuickPopupCenter(type, centerY)
         renderedQuickPopupType = type
         quickPopupWindowOpen = true
@@ -1107,6 +1109,7 @@ ShellRoot {
 
     function closeQuickPopup() {
         prepareQuickPopupCloseAnimation()
+        quickPopupHoldOpen = false
         quickPopupType = ""
         hoverPopupType = ""
         sidebarPopupHovering = false
@@ -1130,6 +1133,9 @@ ShellRoot {
         if (wallpaperSelectorOpen || settingsPanelOpen)
             return
 
+        if (type !== "search")
+            quickPopupHoldOpen = false
+
         exitFocus()
         setQuickPopupCenter(type, centerY)
         renderedQuickPopupType = type
@@ -1152,11 +1158,15 @@ ShellRoot {
     }
 
     function scheduleHoverClose() {
+        if (quickPopupHoldOpen)
+            return
         if (hoverPopupType.length > 0)
             hoverCloseTimer.restart()
     }
 
     function clearHoveredSidebarPopup() {
+        if (quickPopupHoldOpen)
+            return
         if (quickPopupType.length > 0 || wallpaperSelectorOpen || settingsPanelOpen)
             return
 
@@ -1172,11 +1182,28 @@ ShellRoot {
         hoverCloseTimer.stop()
         if (quickPopupType === type) {
             prepareQuickPopupCloseAnimation()
+            quickPopupHoldOpen = false
             quickPopupType = ""
             return
         }
 
         openQuickPopup(type, centerY)
+    }
+
+    function setQuickPopupHoldOpen(type, held) {
+        if (type !== "search")
+            return
+
+        const nextHeld = held === true && (quickPopupType === "search" || hoverPopupType === "search" || activeQuickPopupType === "search")
+        quickPopupHoldOpen = nextHeld
+        if (!nextHeld)
+            return
+
+        hoverCloseTimer.stop()
+        if (hoverPopupType === "search" && quickPopupType.length <= 0) {
+            hoverPopupType = ""
+            quickPopupType = "search"
+        }
     }
 
     function openAdaptiveBarPopup(type, centerY) {
@@ -1872,7 +1899,7 @@ ShellRoot {
 
             WlrLayershell.layer: WlrLayer.Top
             WlrLayershell.namespace: "velora-topbar"
-            WlrLayershell.keyboardFocus: (root.quickPopupType === "search" || root.quickPopupType === "agenda" || root.quickPopupType === "weatherPanel") ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
+            WlrLayershell.keyboardFocus: root.quickPopupType === "search" ? WlrKeyboardFocus.Exclusive : ((root.quickPopupType === "agenda" || root.quickPopupType === "weatherPanel") ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None)
 
             anchors {
                 top: true
@@ -1889,6 +1916,11 @@ ShellRoot {
                 Region {
                     item: topBarPopupInputMask
                     radius: topBarPopupLoader.cornerRadius
+                }
+
+                Region {
+                    item: topBarPopupOutsideInputMask
+                    radius: 0
                 }
             }
 
@@ -1930,6 +1962,23 @@ ShellRoot {
                 y: topBarPopupLoader.y
                 width: root.topBarQuickPopupPanelVisible ? topBarPopupLoader.width : 0
                 height: root.topBarQuickPopupPanelVisible ? topBarPopupLoader.height : 0
+            }
+
+            Item {
+                id: topBarPopupOutsideInputMask
+
+                x: 0
+                y: 0
+                width: root.quickPopupHoldOpen && root.visibleQuickPopupType === "search" ? topBarPanel.panelWidth : 0
+                height: root.quickPopupHoldOpen && root.visibleQuickPopupType === "search" ? topBarPanel.panelHeight : 0
+                z: 1
+
+                MouseArea {
+                    anchors.fill: parent
+                    enabled: root.quickPopupHoldOpen && root.visibleQuickPopupType === "search"
+                    acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
+                    onClicked: root.closeQuickPopup()
+                }
             }
 
             VeloraAttachedSurface {
@@ -2056,6 +2105,11 @@ ShellRoot {
                                 width: topBarPopupCacheLoader.width
                                 height: topBarPopupCacheLoader.height
                                 visible: topBarPopupCacheLoader.visible
+                                onHoldOpenChanged: root.setQuickPopupHoldOpen(topBarPopupCacheLoader.cacheType, holdOpen)
+                                onOpenChanged: {
+                                    if (!open && topBarPopupCacheLoader.cacheType === "search")
+                                        root.setQuickPopupHoldOpen(topBarPopupCacheLoader.cacheType, false)
+                                }
                                 onCloseRequested: root.closeQuickPopup()
                                 onPopupRequested: function(type) {
                                     root.openAdaptiveBarPopup(type, root.defaultTopBarPopupCenterX(type))
@@ -3216,6 +3270,222 @@ ShellRoot {
         model: Quickshell.screens
 
         PanelWindow {
+            id: notificationToastPanel
+
+            required property var modelData
+            readonly property int screenWidth: modelData.width > 0 ? modelData.width : 1920
+            readonly property int surfaceWidth: width > 0 ? width : Math.max(320, screenWidth - root.barReserveWidth)
+            readonly property int toastWidth: Math.round(Math.min(Math.max(320, surfaceWidth - 96), Math.max(340, surfaceWidth * 0.18)))
+            readonly property int toastHeight: 48
+            readonly property int toastRadius: 17
+
+            visible: root.notificationToastMounted
+            screen: modelData
+            color: "transparent"
+            implicitWidth: screenWidth
+            implicitHeight: toastHeight
+            exclusiveZone: 0
+            exclusionMode: ExclusionMode.Ignore
+            focusable: false
+
+            WlrLayershell.layer: WlrLayer.Overlay
+            WlrLayershell.namespace: "velora-notification-frame"
+            WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+
+            anchors {
+                top: true
+                left: true
+                right: true
+            }
+
+            mask: Region {
+                Region {
+                    item: notificationToastInputMask
+                    radius: notificationToastPanel.toastRadius
+                }
+            }
+
+            Item {
+                id: notificationToastInputMask
+
+                x: notificationToastStage.x
+                y: 0
+                width: root.notificationToastMounted ? notificationToastStage.width : 0
+                height: root.notificationToastMounted ? notificationToastStage.height : 0
+            }
+
+            Item {
+                id: notificationToastStage
+
+                width: notificationToastPanel.toastWidth
+                height: notificationToastPanel.toastHeight
+                x: Math.round((notificationToastPanel.surfaceWidth - width) / 2)
+                y: root.notificationToastVisible ? 0 : -height - 14
+                opacity: root.notificationToastVisible ? 1 : 0
+                scale: root.notificationToastVisible ? 1 : 0.98
+                transformOrigin: Item.Top
+
+                Behavior on y {
+                    enabled: veloraTheme.motionEnabled
+                    NumberAnimation {
+                        duration: root.notificationToastVisible ? 300 : 230
+                        easing.type: root.notificationToastVisible ? Easing.OutCubic : Easing.InCubic
+                    }
+                }
+
+                Behavior on opacity {
+                    enabled: veloraTheme.motionEnabled
+                    NumberAnimation {
+                        duration: root.notificationToastVisible ? 170 : 140
+                        easing.type: Easing.OutCubic
+                    }
+                }
+
+                Behavior on scale {
+                    enabled: veloraTheme.motionEnabled
+                    NumberAnimation {
+                        duration: 240
+                        easing.type: Easing.OutCubic
+                    }
+                }
+
+                Rectangle {
+                    id: notificationToastBubble
+
+                    anchors.fill: parent
+                    radius: notificationToastPanel.toastRadius
+                    color: root.frameVisualsMounted
+                        ? root.desktopFrameMatteColor()
+                        : veloraTheme.alpha(veloraTheme.surfaceSidebar, veloraTheme.themeMode === "dark" ? 0.82 : 0.74)
+                    border.width: 0
+                    antialiasing: true
+                }
+
+                Rectangle {
+                    anchors {
+                        left: parent.left
+                        right: parent.right
+                        top: parent.top
+                    }
+                    height: notificationToastPanel.toastRadius
+                    color: notificationToastBubble.color
+                }
+
+                Item {
+                    id: notificationToastIcon
+
+                    width: 32
+                    height: 32
+                    x: 10
+                    y: Math.round((parent.height - height) / 2)
+
+                    Rectangle {
+                        anchors.fill: parent
+                        radius: 10
+                        color: root.notificationIconSurfaceColor(root.notificationToastIconKey)
+                        border.width: 1
+                        border.color: Qt.rgba(1, 1, 1, 0.22)
+                        antialiasing: true
+                    }
+
+                    Canvas {
+                        id: notificationToastIconCanvas
+
+                        anchors.fill: parent
+                        antialiasing: true
+
+                        function drawBell(ctx) {
+                            ctx.beginPath()
+                            ctx.moveTo(27, 15)
+                            ctx.bezierCurveTo(19, 16, 17, 24, 17, 31)
+                            ctx.lineTo(14, 37)
+                            ctx.quadraticCurveTo(27, 42, 40, 37)
+                            ctx.lineTo(37, 31)
+                            ctx.bezierCurveTo(37, 24, 35, 16, 27, 15)
+                            ctx.stroke()
+                            ctx.beginPath()
+                            ctx.arc(27, 41, 3.1, 0, Math.PI, false)
+                            ctx.stroke()
+                        }
+
+                        function drawWhatsapp(ctx) {
+                            ctx.beginPath()
+                            ctx.arc(27, 26, 15, 0.22 * Math.PI, 1.86 * Math.PI, false)
+                            ctx.stroke()
+                            ctx.beginPath()
+                            ctx.moveTo(17, 37)
+                            ctx.lineTo(14, 45)
+                            ctx.lineTo(23, 41)
+                            ctx.stroke()
+                            ctx.beginPath()
+                            ctx.moveTo(22, 20)
+                            ctx.bezierCurveTo(20, 22, 22, 28, 27, 33)
+                            ctx.bezierCurveTo(31, 37, 36, 38, 38, 35)
+                            ctx.moveTo(23, 20)
+                            ctx.lineTo(26, 25)
+                            ctx.moveTo(31, 32)
+                            ctx.lineTo(37, 35)
+                            ctx.stroke()
+                        }
+
+                        onPaint: {
+                            const ctx = getContext("2d")
+
+                            ctx.clearRect(0, 0, width, height)
+                            ctx.save()
+                            ctx.scale(width / 54, height / 54)
+                            ctx.lineWidth = 3
+                            ctx.lineCap = "round"
+                            ctx.lineJoin = "round"
+                            ctx.strokeStyle = Qt.rgba(1, 1, 1, 0.88)
+                            ctx.fillStyle = Qt.rgba(1, 1, 1, 0.88)
+
+                            if (root.notificationToastIconKey === "whatsapp")
+                                drawWhatsapp(ctx)
+                            else
+                                drawBell(ctx)
+
+                            ctx.restore()
+                        }
+
+                        Component.onCompleted: requestPaint()
+
+                        Connections {
+                            target: root
+                            function onNotificationToastIconKeyChanged() { notificationToastIconCanvas.requestPaint() }
+                            function onNotificationToastSerialChanged() { notificationToastIconCanvas.requestPaint() }
+                        }
+                    }
+                }
+
+                Text {
+                    x: notificationToastIcon.x + notificationToastIcon.width + 13
+                    y: Math.round((parent.height - height) / 2) - 1
+                    width: parent.width - x - 16
+                    text: root.notificationToastTitle
+                    color: veloraTheme.textPrimary
+                    font.family: veloraTheme.uiFont
+                    font.pixelSize: 14
+                    font.weight: Font.DemiBold
+                    elide: Text.ElideRight
+                    maximumLineCount: 1
+                    horizontalAlignment: Text.AlignLeft
+                    verticalAlignment: Text.AlignVCenter
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    acceptedButtons: Qt.LeftButton | Qt.RightButton
+                    onClicked: root.hideNotificationToast()
+                }
+            }
+        }
+    }
+
+    Variants {
+        model: Quickshell.screens
+
+        PanelWindow {
             id: panel
 
             required property var modelData
@@ -3246,6 +3516,11 @@ ShellRoot {
                 }
 
                 Region {
+                    item: inlineQuickPopupOutsideInputMask
+                    radius: 0
+                }
+
+                Region {
                     item: inlineModalOverlayInputMask
                     radius: 0
                 }
@@ -3266,8 +3541,10 @@ ShellRoot {
                 }
 
                 Region {
-                    item: inlineNotificationToastInputMask
-                    radius: inlineNotificationToastBubble.radius
+                    y: 0
+                    width: 0
+                    height: 0
+                    radius: 0
                 }
             }
 
@@ -3462,7 +3739,7 @@ ShellRoot {
                 }
 
                 function paintInlineNotificationToast(ctx) {
-                    if (!root.notificationToastMounted || inlineNotificationToastStage.width <= 0 || inlineNotificationToastStage.height <= 0 || inlineNotificationToastStage.opacity <= 0.01)
+                    if (!inlineNotificationToastStage.visible || !root.notificationToastMounted || inlineNotificationToastStage.width <= 0 || inlineNotificationToastStage.height <= 0 || inlineNotificationToastStage.opacity <= 0.01)
                         return
 
                     const tx = Math.round(inlineNotificationToastStage.x)
@@ -4333,6 +4610,8 @@ ShellRoot {
                 readonly property int topGap: Math.max(24, root.desktopFrameMargin + 12)
                 readonly property int bottomGap: Math.max(10, root.desktopFrameMargin - 4)
                 readonly property int sideGap: Math.max(8, Math.round(parent.width * 0.006))
+                readonly property int stripLeftEdge: root.mainAreaX(parent.width)
+                readonly property int stripRightEdge: root.mainAreaX(parent.width) + root.mainAreaWidth(parent.width)
                 readonly property bool cardsReady: root.topWallpaperCardsMounted && reveal > 0.14
                 readonly property int visibleCards: 9
                 readonly property int layoutCards: 6
@@ -4385,14 +4664,14 @@ ShellRoot {
                     return from + (to - from) * t
                 }
 
-                x: root.mainAreaX(parent.width) + sideGap
+                x: stripLeftEdge + sideGap
                 y: frameBottomY + topGap + Math.round((1 - reveal) * 12)
-                width: Math.max(0, root.mainAreaWidth(parent.width) - sideGap * 2)
+                width: Math.max(0, stripRightEdge - stripLeftEdge - sideGap * 2)
                 height: Math.max(0, parent.height - root.desktopFrameMargin - frameBottomY - topGap - bottomGap)
                 visible: root.topWallpaperMounted && reveal > 0.01 && width > 420 && height > 78
                 opacity: root.topWallpaperSurfaceReveal * Math.min(1, reveal * 1.25)
                 z: 60
-                clip: false
+                clip: true
                 focus: root.topWallpaperKeyboardFocus
 
                 Keys.onEscapePressed: root.toggleTopWallpaperPopup(false, false)
@@ -4429,6 +4708,19 @@ ShellRoot {
 
                     function onTopWallpaperKeyboardFocusChanged() {
                         if (root.topWallpaperKeyboardFocus && topWallpaperStrip.visible)
+                            topWallpaperStrip.forceActiveFocus()
+                    }
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    z: 0
+                    enabled: root.topWallpaperPopupOpen
+                    hoverEnabled: true
+                    acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
+                    onPressed: function(mouse) {
+                        mouse.accepted = true
+                        if (root.topWallpaperKeyboardFocus)
                             topWallpaperStrip.forceActiveFocus()
                     }
                 }
@@ -4668,26 +4960,18 @@ ShellRoot {
             }
 
             Item {
-                id: inlineNotificationToastInputMask
-
-                x: inlineNotificationToastStage.x
-                y: inlineNotificationToastStage.y
-                width: root.notificationToastMounted ? inlineNotificationToastStage.width : 0
-                height: root.notificationToastMounted ? inlineNotificationToastStage.height : 0
-            }
-
-            Item {
                 id: inlineNotificationToastStage
 
-                readonly property int safeWidth: Math.max(320, parent.width - 96)
+                readonly property int panelWidth: Math.max(parent.width, panel.modelData.width)
+                readonly property int safeWidth: Math.max(320, panelWidth - 96)
                 readonly property int bubbleRadius: Math.min(20, height / 2)
 
-                width: Math.round(Math.min(safeWidth, Math.max(330, parent.width * 0.18)))
+                width: Math.round(Math.min(safeWidth, Math.max(330, panelWidth * 0.18)))
                 height: 58
-                x: Math.round((parent.width - width) / 2)
+                x: Math.round((panelWidth - width) / 2)
                 y: root.notificationToastVisible ? 0 : -height - 18
                 z: 140
-                visible: root.notificationToastMounted
+                visible: false
                 opacity: root.notificationToastVisible ? 1 : 0
                 scale: root.notificationToastVisible ? 1 : 0.965
                 transformOrigin: Item.Top
@@ -4903,6 +5187,23 @@ ShellRoot {
                 height: root.sideQuickPopupPanelVisible ? inlineQuickPopupSurface.height : 0
             }
 
+            Item {
+                id: inlineQuickPopupOutsideInputMask
+
+                x: 0
+                y: 0
+                width: root.quickPopupHoldOpen && root.visibleQuickPopupType === "search" ? panel.width : 0
+                height: root.quickPopupHoldOpen && root.visibleQuickPopupType === "search" ? panel.height : 0
+                z: 1
+
+                MouseArea {
+                    anchors.fill: parent
+                    enabled: root.quickPopupHoldOpen && root.visibleQuickPopupType === "search"
+                    acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
+                    onClicked: root.closeQuickPopup()
+                }
+            }
+
             Rectangle {
                 id: inlineQuickPopupJoinStrip
 
@@ -5045,6 +5346,11 @@ ShellRoot {
                                 width: popupCacheLoader.width
                                 height: popupCacheLoader.height
                                 visible: popupCacheLoader.visible
+                                onHoldOpenChanged: root.setQuickPopupHoldOpen(popupCacheLoader.cacheType, holdOpen)
+                                onOpenChanged: {
+                                    if (!open && popupCacheLoader.cacheType === "search")
+                                        root.setQuickPopupHoldOpen(popupCacheLoader.cacheType, false)
+                                }
                                 onCloseRequested: root.closeQuickPopup()
                                 onPopupRequested: function(type) {
                                     root.openAdaptiveBarPopup(type, root.defaultQuickPopupCenterY(type))

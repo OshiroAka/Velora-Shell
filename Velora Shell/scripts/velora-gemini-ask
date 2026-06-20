@@ -1,0 +1,353 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/velora-shell"
+env_file="$config_dir/gemini.env"
+history_file="$config_dir/gemini-history.jsonl"
+plain=0
+history_list=0
+history_count=6
+prompt="${*:-}"
+gemini_model_configured=0
+
+case "${1:-}" in
+  --plain)
+    plain=1
+    shift
+    prompt="${*:-}"
+    ;;
+  --history-path)
+    printf '%s\n' "$history_file"
+    exit 0
+    ;;
+  --history-list)
+    history_list=1
+    shift
+    history_count="${1:-6}"
+    ;;
+  --config-path)
+    printf '%s\n' "$env_file"
+    exit 0
+    ;;
+  --init-config)
+    mkdir -p "$config_dir"
+    if [ -e "$env_file" ]; then
+      printf 'config already exists: %s\n' "$env_file"
+    else
+      cat > "$env_file" <<'EOF'
+# Optional Gemini API key for Velora.
+# Used by the Busca popup to answer inside Velora.
+# GEMINI_API_KEY=cole_sua_chave_aqui
+# Optional model override:
+# GEMINI_MODEL=gemini-3.1-flash-lite
+EOF
+      chmod 600 "$env_file"
+      printf 'created: %s\n' "$env_file"
+    fi
+    exit 0
+    ;;
+esac
+
+load_config() {
+  if [ -f "$env_file" ]; then
+    set -a
+    # shellcheck disable=SC1090
+    . "$env_file"
+    set +a
+  fi
+
+  if [ -z "${GEMINI_API_KEY:-}" ] && [ -f "$env_file" ]; then
+    local parsed
+    parsed="$(sed -n 's/^[[:space:]#]*GEMINI_API_KEY[[:space:]]*=[[:space:]]*//p' "$env_file" | tail -n 1 || true)"
+    parsed="${parsed%%[[:space:]]#*}"
+    parsed="${parsed%\"}"
+    parsed="${parsed#\"}"
+    parsed="${parsed%\'}"
+    parsed="${parsed#\'}"
+    if [ -n "$parsed" ] && [ "$parsed" != "cole_sua_chave_aqui" ]; then
+      GEMINI_API_KEY="$parsed"
+      export GEMINI_API_KEY
+    fi
+  fi
+
+  if [ -n "${GEMINI_MODEL:-}" ]; then
+    gemini_model_configured=1
+  else
+    GEMINI_MODEL="gemini-3.1-flash-lite"
+  fi
+  export GEMINI_MODEL
+}
+
+quote() {
+  printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
+
+append_history() {
+  local input_prompt="$1"
+  local answer="$2"
+
+  if [ -z "$input_prompt" ] || [ -z "$answer" ]; then
+    return 0
+  fi
+
+  mkdir -p "$config_dir"
+  python3 - "$history_file" "$input_prompt" "$answer" <<'PY'
+import datetime
+import json
+import sys
+
+path, question, answer = sys.argv[1:4]
+record = {
+    "time": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
+    "question": question,
+    "answer": answer,
+}
+with open(path, "a", encoding="utf-8") as handle:
+    handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+PY
+  chmod 600 "$history_file" 2>/dev/null || true
+}
+
+list_history() {
+  local count="$1"
+
+  if [ ! -s "$history_file" ]; then
+    return 0
+  fi
+
+  python3 - "$history_file" "$count" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+try:
+    count = max(1, min(20, int(sys.argv[2])))
+except Exception:
+    count = 6
+
+records = []
+with open(path, "r", encoding="utf-8") as handle:
+    for line in handle:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            record = json.loads(line)
+        except Exception:
+            continue
+        if record.get("question") and record.get("answer"):
+            records.append({
+                "time": str(record.get("time", "")),
+                "question": str(record.get("question", "")),
+                "answer": str(record.get("answer", "")),
+            })
+
+for record in records[-count:][::-1]:
+    print(json.dumps(record, ensure_ascii=False))
+PY
+}
+
+gemini_api_generate() {
+  local input_prompt="$1"
+  local tmpdir payload response curl_err http_status
+
+  tmpdir="$(mktemp -d)"
+  payload="$tmpdir/payload.json"
+  response="$tmpdir/response.json"
+  curl_err="$tmpdir/curl.err"
+
+  python3 - "$input_prompt" > "$payload" <<'PY'
+import json
+import sys
+
+prompt = sys.argv[1]
+body = {
+    "contents": [
+        {
+            "role": "user",
+            "parts": [
+                {"text": prompt}
+            ],
+        }
+    ]
+}
+print(json.dumps(body, ensure_ascii=False))
+PY
+
+  http_status="$(
+    curl -sS \
+      -o "$response" \
+      -w "%{http_code}" \
+      -H "Content-Type: application/json" \
+      -X POST \
+      "https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}" \
+      --data-binary "@$payload" 2>"$curl_err" || true
+  )"
+
+  if [ "$http_status" = "000" ]; then
+    printf 'Erro Gemini: falha de rede ao chamar a API.'
+    if [ -s "$curl_err" ]; then
+      printf ' %s' "$(head -n 1 "$curl_err")"
+    fi
+    printf '\n'
+    rm -rf "$tmpdir"
+    return 1
+  fi
+
+  if [ "${http_status#2}" = "$http_status" ]; then
+    python3 - "$response" <<'PY' || true
+import json
+import sys
+
+try:
+    with open(sys.argv[1], "r", encoding="utf-8") as handle:
+        data = json.load(handle)
+except Exception:
+    print("Erro Gemini: resposta HTTP nao foi JSON valido.")
+    raise SystemExit(0)
+
+error = data.get("error") or {}
+message = error.get("message") or "chamada rejeitada pela API."
+print(f"Erro Gemini: {message}")
+PY
+    rm -rf "$tmpdir"
+    return 1
+  fi
+
+  if ! python3 - "$response" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    data = json.load(handle)
+
+if "error" in data:
+    message = data["error"].get("message", "erro desconhecido")
+    print(f"Erro Gemini: {message}")
+    raise SystemExit(1)
+
+texts = []
+for candidate in data.get("candidates", []):
+    content = candidate.get("content") or {}
+    for part in content.get("parts", []):
+        text = part.get("text")
+        if text:
+            texts.append(text.strip())
+    if texts:
+        break
+
+if not texts:
+    reasons = [
+        str(candidate.get("finishReason", "")).strip()
+        for candidate in data.get("candidates", [])
+        if candidate.get("finishReason")
+    ]
+    suffix = f" ({', '.join(reasons)})" if reasons else ""
+    print(f"Gemini nao retornou texto{suffix}.")
+    raise SystemExit(1)
+
+print("\n\n".join(texts).strip())
+PY
+  then
+    rm -rf "$tmpdir"
+    return 1
+  fi
+
+  rm -rf "$tmpdir"
+}
+
+terminal_cmd() {
+  if command -v kitty >/dev/null 2>&1; then
+    printf 'kitty --title %s sh -lc %s\n' "$(quote "Velora Gemini")" "$(quote "$1")"
+  elif command -v alacritty >/dev/null 2>&1; then
+    printf 'alacritty --title %s -e sh -lc %s\n' "$(quote "Velora Gemini")" "$(quote "$1")"
+  elif command -v foot >/dev/null 2>&1; then
+    printf 'foot --title %s -e sh -lc %s\n' "$(quote "Velora Gemini")" "$(quote "$1")"
+  elif command -v konsole >/dev/null 2>&1; then
+    printf 'konsole --new-tab -p tabtitle=%s -e sh -lc %s\n' "$(quote "Velora Gemini")" "$(quote "$1")"
+  elif command -v x-terminal-emulator >/dev/null 2>&1; then
+    printf 'x-terminal-emulator -e sh -lc %s\n' "$(quote "$1")"
+  else
+    return 1
+  fi
+}
+
+run_in_terminal() {
+  local cmd="$1"
+  local term
+
+  term="$(terminal_cmd "$cmd")" || return 1
+  sh -lc "$term"
+}
+
+load_config
+
+if [ "$history_list" -eq 1 ]; then
+  list_history "$history_count"
+  exit 0
+fi
+
+if [ "$plain" -eq 1 ]; then
+  if [ -z "$prompt" ]; then
+    printf 'Digite uma pergunta para o Gemini.\n'
+    exit 2
+  fi
+
+  if [ -n "${GEMINI_API_KEY:-}" ]; then
+    if [ "$gemini_model_configured" -eq 1 ]; then
+      if output="$(gemini_api_generate "$prompt" 2>&1)"; then
+        printf '%s\n' "$output"
+        append_history "$prompt" "$output"
+        exit 0
+      fi
+      printf '%s\n' "$output"
+      exit 1
+    fi
+
+    last_output=""
+    for model in gemini-3.1-flash-lite gemini-3.5-flash gemini-2.5-flash gemini-2.0-flash; do
+      GEMINI_MODEL="$model"
+      if output="$(gemini_api_generate "$prompt" 2>&1)"; then
+        printf '%s\n' "$output"
+        append_history "$prompt" "$output"
+        exit 0
+      fi
+      last_output="$output"
+    done
+
+    printf '%s\n' "$last_output"
+    exit 1
+  fi
+
+  if command -v gemini >/dev/null 2>&1; then
+    if output="$(gemini -p "$prompt" 2>&1)"; then
+      printf '%s\n' "$output"
+      append_history "$prompt" "$output"
+      exit 0
+    fi
+    printf '%s\n' "$output"
+    exit 1
+  fi
+
+  printf 'Gemini sem API configurada. Edite %s e adicione GEMINI_API_KEY=...\n' "$env_file"
+  exit 1
+fi
+
+if [ -n "$prompt" ] && [ -n "${GEMINI_API_KEY:-}" ]; then
+  run_in_terminal "$(quote "$0") --plain $(quote "$prompt"); status=\$?; printf '\n'; if [ \$status -ne 0 ]; then printf 'Gemini saiu com status %s\n' \"\$status\"; fi; printf 'Pressione Enter para fechar...'; read -r _"
+  exit 0
+fi
+
+if ! command -v gemini >/dev/null 2>&1; then
+  if command -v notify-send >/dev/null 2>&1; then
+    notify-send -a Velora "Gemini nao configurado" "Adicione GEMINI_API_KEY em ~/.config/velora-shell/gemini.env." >/dev/null 2>&1 || true
+  fi
+  run_in_terminal "printf '%s\n\n' 'Gemini nao configurado.' 'Para responder dentro da Busca da Velora, edite ~/.config/velora-shell/gemini.env e adicione GEMINI_API_KEY=...' 'Opcional: instale o Gemini CLI para uso manual no terminal.'; printf '\nPressione Enter para fechar...'; read -r _" || true
+  exit 0
+fi
+
+if [ -n "$prompt" ]; then
+  run_in_terminal "gemini -p $(quote "$prompt"); status=\$?; printf '\n'; if [ \$status -ne 0 ]; then printf 'Gemini saiu com status %s\n' \"\$status\"; fi; printf 'Pressione Enter para fechar...'; read -r _"
+else
+  run_in_terminal "gemini"
+fi

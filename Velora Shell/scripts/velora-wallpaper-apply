@@ -96,12 +96,6 @@ static_apply_delay="$(clamp_decimal "$static_apply_delay" "0.12" "0" "0.80")"
 live_fallback_duration="$(clamp_decimal "$transition_duration" "0.25" "0.15" "0.28")"
 live_fallback_ready_delay="0.05"
 live_reveal_delay="0.45"
-theme_core_delay="1.10"
-theme_shell_reload_delay="0.65"
-theme_desktop_delay="4.25"
-theme_apps_stage_delay="2.40"
-theme_spotify_stage_delay="2.80"
-
 if [ "$kind" != "__theme-worker" ]; then
   printf '%s|%s|%s\n' "$kind" "$path" "$preview" > "$HOME/.cache/velora-shell/current_wallpaper"
 fi
@@ -476,9 +470,7 @@ apply_theme_external() {
   [ -f "$img" ] || return 0
 
   apply_theme_desktop_stage "$img"
-  sleep "$theme_apps_stage_delay" || true
   apply_theme_apps_stage "$img"
-  sleep "$theme_spotify_stage_delay" || true
   apply_theme_spotify_stage "$img"
 }
 
@@ -542,7 +534,31 @@ apply_theme_async() {
   log_theme_stage "$stamp" "queued theme img=$img" > "$theme_log_file"
 
   stop_stale_theme_workers "$stamp"
-  start_theme_worker "$stamp" "$img" || log_theme_stage "$stamp" "worker start failed" >> "$theme_log_file"
+
+  log_theme_stage "$stamp" "core immediate start" >> "$theme_log_file"
+  apply_theme_core "$img" "$stamp" || return 0
+  theme_stamp_matches "$stamp" || return 0
+  log_theme_stage "$stamp" "core immediate done" >> "$theme_log_file"
+
+  log_theme_stage "$stamp" "shell reload immediate start" >> "$theme_log_file"
+  reload_shell_pywal_stage
+  theme_stamp_matches "$stamp" || return 0
+  log_theme_stage "$stamp" "shell reload immediate done" >> "$theme_log_file"
+
+  log_theme_stage "$stamp" "desktop immediate start" >> "$theme_log_file"
+  apply_theme_desktop_stage "$img"
+  theme_stamp_matches "$stamp" || return 0
+  log_theme_stage "$stamp" "desktop immediate done" >> "$theme_log_file"
+
+  log_theme_stage "$stamp" "apps immediate start" >> "$theme_log_file"
+  apply_theme_apps_stage "$img"
+  theme_stamp_matches "$stamp" || return 0
+  log_theme_stage "$stamp" "apps immediate done" >> "$theme_log_file"
+
+  log_theme_stage "$stamp" "spotify immediate start" >> "$theme_log_file"
+  apply_theme_spotify_stage "$img"
+  theme_stamp_matches "$stamp" || return 0
+  log_theme_stage "$stamp" "spotify immediate done" >> "$theme_log_file"
 }
 
 start_theme_worker() {
@@ -572,40 +588,23 @@ theme_worker() {
   [ -n "$stamp" ] || exit 2
   [ -f "$img" ] || exit 0
 
-  sleep "$theme_core_delay" || true
   theme_stamp_matches "$stamp" || exit 0
-  log_theme_stage "$stamp" "core start"
-  apply_theme_core "$img" "$stamp" || exit 0
-  theme_stamp_matches "$stamp" || exit 0
-  log_theme_stage "$stamp" "core done"
-
-  sleep "$theme_shell_reload_delay" || true
-  theme_stamp_matches "$stamp" || exit 0
-  log_theme_stage "$stamp" "shell reload start"
-  reload_shell_pywal_stage
-  theme_stamp_matches "$stamp" || exit 0
-  log_theme_stage "$stamp" "shell reload done"
-
-  sleep "$theme_desktop_delay" || true
-  theme_stamp_matches "$stamp" || exit 0
-  log_theme_stage "$stamp" "desktop stage start"
+  log_theme_stage "$stamp" "desktop immediate start"
   apply_theme_desktop_stage "$img"
   theme_stamp_matches "$stamp" || exit 0
-  log_theme_stage "$stamp" "desktop stage done"
+  log_theme_stage "$stamp" "desktop immediate done"
 
-  sleep "$theme_apps_stage_delay" || true
   theme_stamp_matches "$stamp" || exit 0
-  log_theme_stage "$stamp" "apps stage start"
+  log_theme_stage "$stamp" "apps immediate start"
   apply_theme_apps_stage "$img"
   theme_stamp_matches "$stamp" || exit 0
-  log_theme_stage "$stamp" "apps stage done"
+  log_theme_stage "$stamp" "apps immediate done"
 
-  sleep "$theme_spotify_stage_delay" || true
   theme_stamp_matches "$stamp" || exit 0
-  log_theme_stage "$stamp" "spotify stage start"
+  log_theme_stage "$stamp" "spotify immediate start"
   apply_theme_spotify_stage "$img"
   theme_stamp_matches "$stamp" || exit 0
-  log_theme_stage "$stamp" "spotify stage done"
+  log_theme_stage "$stamp" "spotify immediate done"
 }
 
 wait_for_wallpaper_process() {

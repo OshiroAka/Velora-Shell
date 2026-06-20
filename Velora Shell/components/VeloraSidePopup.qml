@@ -17,6 +17,7 @@ Item {
     property bool open: visible
     property bool externalSurface: false
     property bool lineReveal: false
+    property bool holdOpen: false
     property real revealProgressOverride: -1
     property bool warmSwitch: false
     property bool interactiveFocus: false
@@ -143,6 +144,7 @@ Item {
     readonly property string scanScript: Quickshell.shellDir + "/scripts/velora-wallpaper-scan"
     readonly property string visibilityScript: Quickshell.shellDir + "/scripts/velora-wallpaper-visibility"
     readonly property string popupStatusScript: Quickshell.shellDir + "/scripts/velora-popup-status"
+    readonly property string geminiScript: Quickshell.shellDir + "/scripts/velora-gemini-ask"
     readonly property bool nativeBluetoothAvailable: Bluetooth.defaultAdapter !== null
     readonly property bool bluetoothIsAvailable: nativeBluetoothAvailable || bluetoothAvailable
     readonly property bool bluetoothIsPowered: nativeBluetoothAvailable ? (Bluetooth.defaultAdapter ? Bluetooth.defaultAdapter.enabled : false) : bluetoothPowered
@@ -792,7 +794,7 @@ Item {
     }
 
     function requestSearchFocus() {
-        if (popupType === "search" && interactiveFocus)
+        if (popupType === "search")
             searchFocusRequest += 1
     }
 

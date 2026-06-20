@@ -75,7 +75,7 @@ QtObject {
     property string visualizerMode: "wave"
     property real visualizerPixelSize: 7
     property bool visualizerGradientEnabled: true
-    property bool screenVisualizerEnabled: true
+    property bool screenVisualizerEnabled: false
 
     property color surfaceBase: Qt.rgba(255 / 255, 250 / 255, 254 / 255, 0.86)
     property color surfaceSidebar: Qt.rgba(255 / 255, 247 / 255, 253 / 255, 0.88)
