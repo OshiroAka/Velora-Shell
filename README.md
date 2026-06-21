@@ -4,9 +4,8 @@
 autor: @OshiroAka
 
 
-```md
 ![Velora Shell](https://github.com/OshiroAka/Velora-Shell/blob/main/assets/Review-1.png?raw=true)
-```
+
 
 ## System
 
