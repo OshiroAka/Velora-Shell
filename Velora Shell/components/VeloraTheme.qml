@@ -56,7 +56,7 @@ QtObject {
     property bool topBarEnabled: false
     property bool popupAttachedToBar: true
     property bool popupBubblesSolid: false
-    property string language: "ja"
+    property string language: "pt-BR"
     property string fontFamilyId: "noto"
     readonly property string uiFont: language === "ja" ? "Noto Sans CJK JP" : fontFamilyForId(fontFamilyId)
     readonly property string monoFont: uiFont
@@ -1152,12 +1152,14 @@ QtObject {
     }
 
     function normalizeLanguage(value) {
-        const next = String(value || "ja")
+        const next = String(value || "pt-BR")
+        if (next === "ja" || next === "jp" || next === "japanese")
+            return "ja"
         if (next === "en" || next === "english")
             return "en"
         if (next === "pt" || next === "pt-BR" || next === "pt_BR" || next === "br")
             return "pt-BR"
-        return "ja"
+        return "pt-BR"
     }
 
     function normalizeFontFamily(value) {

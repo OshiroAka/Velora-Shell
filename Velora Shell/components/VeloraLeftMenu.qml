@@ -109,7 +109,7 @@ Item {
     }
 
     function tr(key) {
-        const lang = root.theme ? root.theme.language : "ja"
+        const lang = root.theme ? root.theme.language : "pt-BR"
         const texts = {
             "ja": {
                 "search": "検索...",
@@ -199,8 +199,8 @@ Item {
                 "noResults": "Sem resultados"
             }
         }
-        const table = texts[lang] || texts["ja"]
-        return table[key] || texts["ja"][key] || key
+        const table = texts[lang] || texts["pt-BR"]
+        return table[key] || texts["pt-BR"][key] || key
     }
 
     function alarmDetailLabel(detail) {

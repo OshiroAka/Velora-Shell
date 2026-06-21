@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+config_dir="${VELORA_LOCK_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/quickshell/velora-shell}"
+lock_file="$config_dir/lock.qml"
+
+if [ ! -f "$lock_file" ]; then
+  script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+  source_dir="$(cd -- "$script_dir/.." && pwd)"
+  lock_file="$source_dir/lock.qml"
+fi
+
+exec env QS_NO_RELOAD_POPUP=1 qs --no-duplicate -d -p "$lock_file"

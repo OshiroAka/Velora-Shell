@@ -33,11 +33,11 @@ Item {
     readonly property var filterKeys: ["all", "static", "live", "engine"]
     readonly property var modeFilterIndexes: [1, 2, 3]
     readonly property var fallbackWallpapers: [
-        { kind: "static", label: "東京富士", title: "Tokyo Fuji", category: "静止画", path: wallpaperDir + "/static/aerial-view-tokyo-cityscape-with-fuji-mountain-japan.jpg", preview: wallpaperDir + "/static/aerial-view-tokyo-cityscape-with-fuji-mountain-japan.jpg" },
-        { kind: "static", label: "都市の路地", title: "city street", category: "静止画", path: wallpaperDir + "/static/claudio-guglieri-G6X3OZqIIm8-unsplash.jpg", preview: wallpaperDir + "/static/claudio-guglieri-G6X3OZqIIm8-unsplash.jpg" },
-        { kind: "static", label: "白い少女", title: "白い少女", category: "静止画", path: wallpaperDir + "/static/anime-anime-devushki-anime-anime-girls-belye-volosy-golub-zh.jpg", preview: wallpaperDir + "/static/anime-anime-devushki-anime-anime-girls-belye-volosy-golub-zh.jpg" },
-        { kind: "static", label: "店先", title: "storefront", category: "静止画", path: wallpaperDir + "/static/clay-banks-hwLAI5lRhdM-unsplash.jpg", preview: wallpaperDir + "/static/clay-banks-hwLAI5lRhdM-unsplash.jpg" },
-        { kind: "static", label: "青い寺", title: "blue pagoda", category: "静止画", path: wallpaperDir + "/static/cosmin-georgian-gd3ysFyrsTQ-unsplash.jpg", preview: wallpaperDir + "/static/cosmin-georgian-gd3ysFyrsTQ-unsplash.jpg" }
+        { kind: "static", label: "Tokyo Fuji", title: "Tokyo Fuji", category: "Imagem estática", path: wallpaperDir + "/static/aerial-view-tokyo-cityscape-with-fuji-mountain-japan.jpg", preview: wallpaperDir + "/static/aerial-view-tokyo-cityscape-with-fuji-mountain-japan.jpg" },
+        { kind: "static", label: "Rua urbana", title: "city street", category: "Imagem estática", path: wallpaperDir + "/static/claudio-guglieri-G6X3OZqIIm8-unsplash.jpg", preview: wallpaperDir + "/static/claudio-guglieri-G6X3OZqIIm8-unsplash.jpg" },
+        { kind: "static", label: "Garota branca", title: "Garota branca", category: "Imagem estática", path: wallpaperDir + "/static/anime-anime-devushki-anime-anime-girls-belye-volosy-golub-zh.jpg", preview: wallpaperDir + "/static/anime-anime-devushki-anime-anime-girls-belye-volosy-golub-zh.jpg" },
+        { kind: "static", label: "Vitrine", title: "storefront", category: "Imagem estática", path: wallpaperDir + "/static/clay-banks-hwLAI5lRhdM-unsplash.jpg", preview: wallpaperDir + "/static/clay-banks-hwLAI5lRhdM-unsplash.jpg" },
+        { kind: "static", label: "Pagode azul", title: "blue pagoda", category: "Imagem estática", path: wallpaperDir + "/static/cosmin-georgian-gd3ysFyrsTQ-unsplash.jpg", preview: wallpaperDir + "/static/cosmin-georgian-gd3ysFyrsTQ-unsplash.jpg" }
     ]
 
     property int activeFilter: 1
@@ -159,7 +159,7 @@ Item {
             return "MPV"
         if (kind === "engine")
             return "Engine"
-        return "静止画"
+        return "Imagem estática"
     }
 
     function modeLabelFromFilter(index) {

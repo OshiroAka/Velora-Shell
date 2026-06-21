@@ -18,7 +18,9 @@ Item {
     property int volume: 70
     property bool muted: false
     property int notificationCount: 0
+    property int notificationCountOverride: -1
     property string activePopupType: ""
+    readonly property int effectiveNotificationCount: notificationCountOverride >= 0 ? notificationCountOverride : notificationCount
     readonly property string homeDir: Quickshell.env("HOME") || ""
     readonly property string uiFont: theme ? theme.uiFont : "Noto Sans CJK JP"
     readonly property string monoFont: theme ? theme.monoFont : "JetBrainsMono Nerd Font"
@@ -38,6 +40,7 @@ Item {
     signal searchRequested(real centerX)
     signal themeRequested(real centerX)
     signal settingsRequested(real centerX)
+    signal layoutRequested(real centerX)
     signal quickPopupRequested(string popupType, real centerX)
     signal quickPopupHovered(string popupType, real centerX)
     signal quickPopupHoverEnded(string popupType)
@@ -54,7 +57,7 @@ Item {
     }
 
     function formatLocalizedDate(date) {
-        const lang = root.theme ? root.theme.language : "ja"
+        const lang = root.theme ? root.theme.language : "pt-BR"
         const weekdays = ["dom", "seg", "ter", "qua", "qui", "sex", "sab"]
         return date.getDate() + "/" + (date.getMonth() + 1) + " (" + weekdays[date.getDay()] + ")"
     }
@@ -311,7 +314,7 @@ Item {
                     anchors.top: parent.top
                     anchors.topMargin: 29
                     height: 28
-                    spacing: 30
+                    spacing: 24
 
                     UtilityIconButton {
                         iconName: root.muted ? "volume-muted" : "volume"
@@ -337,7 +340,7 @@ Item {
 
                     UtilityIconButton {
                         iconName: "notifications"
-                        badgeText: root.notificationCount > 0 ? String(Math.min(99, root.notificationCount)) : ""
+                        badgeText: root.effectiveNotificationCount > 0 ? String(Math.min(99, root.effectiveNotificationCount)) : ""
                         hoverPopupType: "notifications"
                         selected: root.activePopupType === "notifications"
                         onClicked: function(centerX) { root.quickPopupRequested("notifications", centerX) }
@@ -356,6 +359,11 @@ Item {
                         selected: root.activePopupType === "battery"
                         progress: root.batteryLevel()
                         onClicked: function(centerX) { root.quickPopupRequested("battery", centerX) }
+                    }
+
+                    UtilityIconButton {
+                        iconName: "display"
+                        onClicked: function(centerX) { root.layoutRequested(centerX) }
                     }
                 }
             }
@@ -466,6 +474,8 @@ Item {
 
         stdout: SplitParser {
             onRead: function(data) {
+                if (root.notificationCountOverride >= 0)
+                    return
                 const value = parseInt(String(data || "").trim())
                 root.notificationCount = isNaN(value) ? 0 : Math.max(0, value)
             }
@@ -987,6 +997,26 @@ Item {
                 ctx.stroke()
                 ctx.beginPath()
                 ctx.arc(cx, cy, w * 0.12, 0, Math.PI * 2)
+                ctx.stroke()
+            } else if (iconName === "display") {
+                ctx.strokeStyle = soft
+                ctx.lineWidth = Math.max(1.2, w * 0.065)
+                ctx.beginPath()
+                roundedRect(ctx, w * 0.16, h * 0.24, w * 0.68, h * 0.46, w * 0.07)
+                ctx.stroke()
+                ctx.beginPath()
+                ctx.moveTo(cx, h * 0.70)
+                ctx.lineTo(cx, h * 0.82)
+                ctx.moveTo(w * 0.39, h * 0.83)
+                ctx.lineTo(w * 0.61, h * 0.83)
+                ctx.moveTo(cx, h * 0.34)
+                ctx.lineTo(cx, h * 0.24)
+                ctx.moveTo(cx, h * 0.60)
+                ctx.lineTo(cx, h * 0.70)
+                ctx.moveTo(w * 0.29, cy)
+                ctx.lineTo(w * 0.16, cy)
+                ctx.moveTo(w * 0.71, cy)
+                ctx.lineTo(w * 0.84, cy)
                 ctx.stroke()
             } else if (iconName === "battery") {
                 const p = progress >= 0 ? Math.max(0, Math.min(1, progress)) : 0.70

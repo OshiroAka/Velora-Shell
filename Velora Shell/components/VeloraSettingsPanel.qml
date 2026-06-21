@@ -17,11 +17,11 @@ Item {
     readonly property bool neon: pywalStyle && theme.themeMode === "dark"
     readonly property string uiFont: theme ? theme.uiFont : "Noto Sans CJK JP"
     readonly property string monoFont: theme ? theme.monoFont : "JetBrainsMono Nerd Font"
-    readonly property color settingsLightText: Qt.rgba(0.27, 0.21, 0.39, 0.94)
-    readonly property color settingsLightTextSoft: Qt.rgba(0.39, 0.32, 0.52, 0.70)
+    readonly property color settingsLightText: theme ? theme.textPrimary : Qt.rgba(0.27, 0.21, 0.39, 0.94)
+    readonly property color settingsLightTextSoft: theme ? theme.textSecondary : Qt.rgba(0.39, 0.32, 0.52, 0.70)
     readonly property color settingsLightAccent: accentPrimary()
-    readonly property color settingsLightLine: Qt.rgba(0.42, 0.31, 0.53, 0.10)
-    readonly property color settingsLightPanel: Qt.rgba(1, 1, 1, 0.54)
+    readonly property color settingsLightLine: theme ? alpha(theme.borderSoft, theme.themeMode === "dark" ? 0.24 : 0.34) : Qt.rgba(0.42, 0.31, 0.53, 0.10)
+    readonly property color settingsLightPanel: theme ? alpha(theme.surfaceCard, theme.themeMode === "dark" ? 0.42 : 0.48) : Qt.rgba(1, 1, 1, 0.54)
     readonly property string homeDir: Quickshell.env("HOME") || ""
     readonly property string wallpaperDir: homeDir + "/Pictures/Wallpapers"
     readonly property string stateScript: Quickshell.shellDir + "/scripts/velora-theme-state"
@@ -59,11 +59,11 @@ Item {
         { id: "pywal16", title: "pywal16", subtitle: "auto", mode: "dynamic", preview: "pywal16" }
     ]
     readonly property var fallbackWallpapers: [
-        { kind: "static", label: "東京富士", title: "Tokyo Fuji", category: "風景", path: wallpaperDir + "/static/aerial-view-tokyo-cityscape-with-fuji-mountain-japan.jpg", preview: wallpaperDir + "/static/aerial-view-tokyo-cityscape-with-fuji-mountain-japan.jpg" },
-        { kind: "static", label: "朱の回廊", title: "朱の回廊", category: "風景", path: wallpaperDir + "/WallpaperSelector/1238960-best-japan-wallpaper-4k-3840x2160-for-xiaomi.jpg", preview: wallpaperDir + "/WallpaperSelector/1238960-best-japan-wallpaper-4k-3840x2160-for-xiaomi.jpg" },
-        { kind: "static", label: "静寂の夕暮れ", title: "静寂の夕暮れ", category: "風景", path: wallpaperDir + "/WallpaperSelector/1238973-japan-wallpaper-4k-3840x2160-for-mobile-hd.jpg", preview: wallpaperDir + "/WallpaperSelector/1238973-japan-wallpaper-4k-3840x2160-for-mobile-hd.jpg" },
-        { kind: "static", label: "淡い記憶", title: "淡い記憶", category: "アニメ", path: wallpaperDir + "/WallpaperSelector/columbina-anime-3840x2160-26082.jpg", preview: wallpaperDir + "/WallpaperSelector/columbina-anime-3840x2160-26082.jpg" },
-        { kind: "static", label: "花霞", title: "花霞", category: "風景", path: wallpaperDir + "/WallpaperSelector/1238954-widescreen-japan-wallpaper-4k-3840x2160-hd-1080p.jpg", preview: wallpaperDir + "/WallpaperSelector/1238954-widescreen-japan-wallpaper-4k-3840x2160-hd-1080p.jpg" }
+        { kind: "static", label: "Tokyo Fuji", title: "Tokyo Fuji", category: "Paisagem", path: wallpaperDir + "/static/aerial-view-tokyo-cityscape-with-fuji-mountain-japan.jpg", preview: wallpaperDir + "/static/aerial-view-tokyo-cityscape-with-fuji-mountain-japan.jpg" },
+        { kind: "static", label: "Corredor vermelho", title: "Corredor vermelho", category: "Paisagem", path: wallpaperDir + "/WallpaperSelector/1238960-best-japan-wallpaper-4k-3840x2160-for-xiaomi.jpg", preview: wallpaperDir + "/WallpaperSelector/1238960-best-japan-wallpaper-4k-3840x2160-for-xiaomi.jpg" },
+        { kind: "static", label: "Entardecer calmo", title: "Entardecer calmo", category: "Paisagem", path: wallpaperDir + "/WallpaperSelector/1238973-japan-wallpaper-4k-3840x2160-for-mobile-hd.jpg", preview: wallpaperDir + "/WallpaperSelector/1238973-japan-wallpaper-4k-3840x2160-for-mobile-hd.jpg" },
+        { kind: "static", label: "Memória suave", title: "Memória suave", category: "Anime", path: wallpaperDir + "/WallpaperSelector/columbina-anime-3840x2160-26082.jpg", preview: wallpaperDir + "/WallpaperSelector/columbina-anime-3840x2160-26082.jpg" },
+        { kind: "static", label: "Flores suaves", title: "Flores suaves", category: "Paisagem", path: wallpaperDir + "/WallpaperSelector/1238954-widescreen-japan-wallpaper-4k-3840x2160-hd-1080p.jpg", preview: wallpaperDir + "/WallpaperSelector/1238954-widescreen-japan-wallpaper-4k-3840x2160-hd-1080p.jpg" }
     ]
 
     property int activeNav: 0
@@ -182,7 +182,7 @@ Item {
     }
 
     function tr(key) {
-        const lang = root.theme ? root.theme.language : "ja"
+        const lang = root.theme ? root.theme.language : "pt-BR"
         const texts = {
             "ja": {
                 "nav_general": "一般",
@@ -407,9 +407,9 @@ Item {
                 "nav_appearance": "Aparência",
                 "nav_theme": "Tema",
                 "nav_wallpaper": "Papel de parede",
-                "nav_visualizer": "Visualizer",
+                "nav_visualizer": "Visualizador",
                 "nav_language": "Idioma",
-                "settingsTitle": "Settings",
+                "settingsTitle": "Configurações",
                 "settingsSubtitle": "Aparência e comportamento da Velora",
                 "general": "Geral",
                 "generalHint": "Barra, moldura e sincronização.",
@@ -458,7 +458,7 @@ Item {
                 "barOpacity": "Transp. da barra",
                 "panelOpacity": "Transp. dos painéis",
                 "popupOpacity": "Transp. dos popups",
-                "visualizer": "Visualizer",
+                "visualizer": "Visualizador",
                 "visualizerStrength": "Força",
                 "visualizerHint": "Ajusta o efeito de áudio lateral.",
                 "visualizerMode": "Modo de exibição",
@@ -512,8 +512,8 @@ Item {
                 "languageApplied": "Idioma aplicado: "
             }
         }
-        const table = texts[lang] || texts["ja"]
-        return table[key] || texts["ja"][key] || key
+        const table = texts[lang] || texts["pt-BR"]
+        return table[key] || texts["pt-BR"][key] || key
     }
 
     component FontGlowEffect: MultiEffect {
@@ -628,7 +628,7 @@ Item {
     }
 
     function currentLanguage() {
-        return root.theme ? root.theme.language : "ja"
+        return root.theme ? root.theme.language : "pt-BR"
     }
 
     function currentLanguageIndex() {
@@ -1144,7 +1144,7 @@ Item {
                     preview: preview,
                     title: title,
                     label: title,
-                    category: kind === "static" ? "静止画" : kind
+                    category: kind === "static" ? "Imagem estática" : kind
                 })
             }
         }
@@ -1913,7 +1913,7 @@ Item {
 
                 Text {
                     anchors.centerIn: parent
-                    text: "このセクションは次の段階で接続します"
+                    text: "Esta seção será conectada na próxima etapa"
                     color: root.c("textSecondary", "#8d7ca3")
                     font.family: root.uiFont
                     font.pixelSize: 13
@@ -1926,12 +1926,12 @@ Item {
     component NewSettingsView: Rectangle {
         id: settingsView
 
-        readonly property color bg: Qt.rgba(1.0, 0.965, 0.995, 0.84)
-        readonly property color panel: Qt.rgba(1, 1, 1, 0.54)
-        readonly property color panelStrong: Qt.rgba(1, 1, 1, 0.70)
-        readonly property color text: Qt.rgba(0.27, 0.21, 0.39, 0.94)
-        readonly property color textSoft: Qt.rgba(0.39, 0.32, 0.52, 0.70)
-        readonly property color line: Qt.rgba(0.42, 0.31, 0.53, 0.10)
+        readonly property color bg: root.theme ? root.theme.withAlpha(root.theme.surfacePopup, root.theme.themeMode === "dark" ? Math.max(0.56, Math.min(0.78, root.theme.surfacePopup.a)) : Math.max(0.50, Math.min(0.70, root.theme.surfacePopup.a))) : Qt.rgba(1.0, 0.965, 0.995, 0.68)
+        readonly property color panel: root.theme ? root.alpha(root.theme.surfaceCard, root.theme.themeMode === "dark" ? 0.36 : 0.42) : Qt.rgba(1, 1, 1, 0.42)
+        readonly property color panelStrong: root.theme ? root.alpha(root.theme.surfaceCard, root.theme.themeMode === "dark" ? 0.52 : 0.58) : Qt.rgba(1, 1, 1, 0.58)
+        readonly property color text: root.settingsLightText
+        readonly property color textSoft: root.settingsLightTextSoft
+        readonly property color line: root.settingsLightLine
         readonly property bool compact: width < 980
         readonly property int bodyX: compact ? 24 : 318
         readonly property int bodyTop: compact ? 126 : 112
@@ -1978,13 +1978,13 @@ Item {
             anchors.fill: parent
             source: root.currentWallpaperPreview()
             fillMode: Image.PreserveAspectCrop
-            opacity: 0.12
+            opacity: root.pywalStyle ? 0.18 : 0.12
             asynchronous: true
         }
 
         Rectangle {
             anchors.fill: parent
-            color: Qt.rgba(1, 1, 1, 0.42)
+            color: root.theme ? root.alpha(root.theme.surfacePopup, root.theme.themeMode === "dark" ? 0.20 : 0.28) : Qt.rgba(1, 1, 1, 0.30)
         }
 
         Rectangle {
@@ -1993,9 +1993,9 @@ Item {
             width: parent.width - 36
             height: parent.height - 36
             radius: 20
-            color: Qt.rgba(1, 1, 1, 0.36)
+            color: settingsView.panel
             border.width: 1
-            border.color: Qt.rgba(1, 1, 1, 0.62)
+            border.color: root.theme ? root.alpha(root.theme.borderSoft, 0.48) : Qt.rgba(1, 1, 1, 0.48)
         }
 
         Rectangle {

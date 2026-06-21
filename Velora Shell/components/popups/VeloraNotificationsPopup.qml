@@ -16,7 +16,7 @@ Item {
 
             Text {
                 Layout.fillWidth: true
-                text: "通知センター"
+                text: "Central de notificações"
                 color: root.popup ? root.popup.ink : "white"
                 font.family: root.popup ? root.popup.uiFont : "sans"
                 font.pixelSize: 17
@@ -33,7 +33,7 @@ Item {
                 Text {
                     id: clearLabel
                     anchors.centerIn: parent
-                    text: "すべてクリア"
+                    text: "Limpar tudo"
                     color: root.popup ? root.popup.winAccent2 : Qt.rgba(1, 1, 1, 0.7)
                     font.family: root.popup ? root.popup.uiFont : "sans"
                     font.pixelSize: 12
@@ -165,7 +165,7 @@ Item {
 
                     Text {
                         Layout.fillWidth: true
-                        text: "通知なし"
+                        text: "Sem notificações"
                         color: root.popup ? root.popup.ink : "white"
                         horizontalAlignment: Text.AlignHCenter
                         font.family: root.popup ? root.popup.uiFont : "sans"
@@ -175,7 +175,7 @@ Item {
 
                     Text {
                         Layout.fillWidth: true
-                        text: "新しい通知はありません"
+                        text: "Não há novas notificações"
                         color: root.popup ? root.popup.inkSoft : Qt.rgba(1, 1, 1, 0.65)
                         horizontalAlignment: Text.AlignHCenter
                         font.family: root.popup ? root.popup.uiFont : "sans"

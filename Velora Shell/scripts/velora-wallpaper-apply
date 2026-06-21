@@ -40,6 +40,7 @@ desktop_theme_script="${base_dir}/scripts/velora-desktop-theme.py"
 discord_theme_script="${base_dir}/scripts/velora-discord-theme.py"
 zen_theme_script="${base_dir}/scripts/velora-zen-theme.py"
 terminal_theme_script="${base_dir}/scripts/velora-terminal-theme.py"
+cava_theme_script="${base_dir}/scripts/velora-cava-theme.py"
 vscode_theme_script="${base_dir}/scripts/velora-vscode-theme.py"
 obsidian_theme_script="${base_dir}/scripts/velora-obsidian-theme.py"
 spotify_theme_script="${base_dir}/scripts/velora-spotify-theme.py"
@@ -495,6 +496,10 @@ apply_theme_apps_stage() {
 
   if [ -x "$terminal_theme_script" ]; then
     run_low_priority "$terminal_theme_script" --quiet >/dev/null 2>&1 || true
+  fi
+
+  if [ -x "$cava_theme_script" ]; then
+    run_low_priority "$cava_theme_script" --quiet >/dev/null 2>&1 || true
   fi
 
   if [ -x "$vscode_theme_script" ]; then

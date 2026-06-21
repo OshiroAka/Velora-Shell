@@ -397,7 +397,7 @@ Item {
     }
 
     function tr(key) {
-        const lang = root.theme ? root.theme.language : "ja"
+        const lang = root.theme ? root.theme.language : "pt-BR"
         const texts = {
             "ja": {
                 "clockTitle": "クロック / アラーム",
@@ -508,8 +508,8 @@ Item {
                 "custom": "Customizado"
             }
         }
-        const table = texts[lang] || texts["ja"]
-        return table[key] || texts["ja"][key] || key
+        const table = texts[lang] || texts["pt-BR"]
+        return table[key] || texts["pt-BR"][key] || key
     }
 
     function alarmDetailLabel(detail) {

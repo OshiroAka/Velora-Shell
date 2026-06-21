@@ -140,7 +140,7 @@ case "$command" in
     glow="auto"
     border="auto"
     layout="left|1"
-    language="ja"
+    language="pt-BR"
     font="noto"
     visualizer="0.46"
     visualizer_mode="wave"
@@ -343,16 +343,16 @@ case "$command" in
         if [[ -s "$language_file" ]]; then
           cat "$language_file"
         else
-          printf 'ja\n'
+          printf 'pt-BR\n'
         fi
         ;;
       set)
-        language="${3:-ja}"
+        language="${3:-pt-BR}"
         case "$language" in
           ja|jp|japanese) language="ja" ;;
           en|english) language="en" ;;
           pt|pt-BR|pt_BR|br|portuguese|portugues) language="pt-BR" ;;
-          *) language="ja" ;;
+          *) language="pt-BR" ;;
         esac
         mkdir -p "$state_dir"
         printf '%s\n' "$language" > "$language_file"

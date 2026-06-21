@@ -21,6 +21,7 @@ Item {
     property real revealProgressOverride: -1
     property bool warmSwitch: false
     property bool interactiveFocus: false
+    property var notificationsModelOverride: null
     property string attachSide: "left"
     property real volumePercent: 0.60
     property real micVolumePercent: 0.00
@@ -215,7 +216,7 @@ Item {
     }
 
     function tr(key) {
-        const lang = root.theme ? root.theme.language : "ja"
+        const lang = root.theme ? root.theme.language : "pt-BR"
         const texts = {
             "ja": {
                 "bluetoothOff": "Bluetooth オフ",
@@ -254,8 +255,8 @@ Item {
                 "disconnect": "Desconectar"
             }
         }
-        const table = texts[lang] || texts["ja"]
-        return table[key] || texts["ja"][key] || key
+        const table = texts[lang] || texts["pt-BR"]
+        return table[key] || texts["pt-BR"][key] || key
     }
 
     function clamp01(value) {
@@ -1710,6 +1711,8 @@ Item {
         }
 
         notificationModel.clear()
+        if (notificationsModelOverride && notificationsModelOverride.clear)
+            notificationsModelOverride.clear()
         runCommand("makoctl dismiss --all >/dev/null 2>&1 || true")
     }
 
@@ -1798,6 +1801,13 @@ Item {
         for (var i = notificationModel.count - 1; i >= 0; --i) {
             if (notificationModel.get(i).id === id)
                 notificationModel.remove(i)
+        }
+
+        if (notificationsModelOverride) {
+            for (var j = notificationsModelOverride.count - 1; j >= 0; --j) {
+                if (notificationsModelOverride.get(j).id === id)
+                    notificationsModelOverride.remove(j)
+            }
         }
     }
 
@@ -2748,7 +2758,7 @@ Item {
             sourceComponent: Component {
                 VeloraNotificationsPopup {
                     popup: root
-                    notificationsModel: notificationModel
+                    notificationsModel: root.notificationsModelOverride ? root.notificationsModelOverride : notificationModel
                 }
             }
         }
@@ -3127,6 +3137,152 @@ Item {
         }
     }
 
+    component FallingClockTile: Item {
+        id: tile
+
+        property string value: "00"
+        property string displayedValue: ""
+        property string outgoingValue: ""
+        property real dropProgress: 1
+        property color accentColor: root.winAccent
+        readonly property real tileRadius: 14
+        readonly property color fillColor: root.alpha(root.winCardHover, root.pywalStyle ? 0.42 : 0.36)
+        readonly property color topWashColor: root.alpha(accentColor, root.pywalStyle ? 0.13 : 0.08)
+        readonly property color bottomWashColor: root.alpha(root.card, root.pywalStyle ? 0.11 : 0.08)
+        readonly property color digitColor: root.pywalStyle ? root.alpha(root.ink, 0.94) : root.alpha(root.ink, 0.90)
+        readonly property color softDigitColor: root.alpha(root.inkSoft, 0.54)
+
+        implicitWidth: 108
+        implicitHeight: 112
+
+        function syncValue(animated) {
+            if (displayedValue.length <= 0) {
+                displayedValue = value
+                outgoingValue = value
+                dropProgress = 1
+                return
+            }
+
+            if (value === displayedValue)
+                return
+
+            outgoingValue = displayedValue
+            displayedValue = value
+            dropProgress = animated ? 0 : 1
+            if (animated)
+                fallAnimation.restart()
+        }
+
+        onValueChanged: syncValue(true)
+        Component.onCompleted: syncValue(false)
+
+        NumberAnimation {
+            id: fallAnimation
+
+            target: tile
+            property: "dropProgress"
+            from: 0
+            to: 1
+            duration: root.pywalStyle ? 520 : 460
+            easing.type: Easing.OutCubic
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            radius: tile.tileRadius
+            color: tile.fillColor
+            border.width: 1
+            border.color: root.alpha(tile.accentColor, root.pywalStyle ? 0.28 : 0.18)
+            antialiasing: true
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            anchors.margins: 1
+            radius: tile.tileRadius - 1
+            color: "transparent"
+            clip: true
+
+            Rectangle {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                height: parent.height * 0.50
+                color: tile.topWashColor
+            }
+
+            Rectangle {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                height: parent.height * 0.52
+                color: tile.bottomWashColor
+            }
+        }
+
+        Rectangle {
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.leftMargin: 10
+            anchors.rightMargin: 10
+            anchors.verticalCenter: parent.verticalCenter
+            height: 1
+            color: root.alpha(tile.accentColor, 0.22)
+        }
+
+        Item {
+            id: digitSlot
+
+            anchors.fill: parent
+            anchors.margins: 8
+            clip: true
+
+            Text {
+                width: digitSlot.width
+                height: digitSlot.height
+                y: Math.round((digitSlot.height - height) / 2 + tile.dropProgress * digitSlot.height * 0.72)
+                visible: tile.dropProgress < 1 && tile.outgoingValue !== tile.displayedValue
+                opacity: Math.max(0, 1 - tile.dropProgress)
+                text: tile.outgoingValue
+                color: tile.softDigitColor
+                font.family: root.monoFont
+                font.pixelSize: Math.min(58, Math.max(32, tile.height * 0.58))
+                font.weight: Font.Black
+                fontSizeMode: Text.Fit
+                minimumPixelSize: 28
+                horizontalAlignment: Text.AlignHCenter
+                verticalAlignment: Text.AlignVCenter
+            }
+
+            Text {
+                width: digitSlot.width
+                height: digitSlot.height
+                y: Math.round((digitSlot.height - height) / 2 - (1 - tile.dropProgress) * digitSlot.height * 0.72)
+                opacity: Math.min(1, 0.20 + tile.dropProgress * 0.90)
+                text: tile.displayedValue
+                color: tile.digitColor
+                font.family: root.monoFont
+                font.pixelSize: Math.min(58, Math.max(32, tile.height * 0.58))
+                font.weight: Font.Black
+                fontSizeMode: Text.Fit
+                minimumPixelSize: 28
+                horizontalAlignment: Text.AlignHCenter
+                verticalAlignment: Text.AlignVCenter
+            }
+        }
+
+        Rectangle {
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.leftMargin: 12
+            anchors.rightMargin: 12
+            anchors.topMargin: 8
+            height: 1
+            color: root.alpha(root.ink, root.pywalStyle ? 0.16 : 0.10)
+        }
+    }
+
     component TimeView: Item {
         id: timeView
 
@@ -3223,51 +3379,52 @@ Item {
 
             Item {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 92
+                Layout.preferredHeight: 146
                 opacity: root.popupIntroOpacity(70, 210)
                 transform: Translate { y: root.popupIntroTranslateY(70, 12) }
 
-                Rectangle {
-                    id: clockBubble
-
-                    anchors.centerIn: parent
-                    anchors.verticalCenterOffset: 3
-                    width: Math.min(parent.width - 12, 392)
-                    height: Math.min(parent.height - 6, 82)
-                    radius: height / 2.5
-                    color: root.theme ? root.theme.alpha(root.card, root.theme.themeMode === "dark" ? 0.07 : 0.10) : Qt.rgba(1, 1, 1, 0.09)
-                    border.width: 1
-                    border.color: root.theme ? root.theme.alpha(root.borderSoft, root.theme.themeMode === "dark" ? 0.09 : 0.13) : Qt.rgba(1, 1, 1, 0.12)
-                }
-
-                Canvas {
-                    id: outlineClock
-
+                ColumnLayout {
                     anchors.fill: parent
-                    property string displayTime: Qt.formatDateTime(timeView.now, "HH:mm:ss")
+                    anchors.leftMargin: 8
+                    anchors.rightMargin: 8
+                    spacing: 8
 
-                    onDisplayTimeChanged: requestPaint()
-                    onWidthChanged: requestPaint()
-                    onHeightChanged: requestPaint()
+                    Text {
+                        Layout.fillWidth: true
+                        text: Qt.formatDateTime(timeView.now, "dd/MM/yyyy") + " " + timeView.weekdayNames[timeView.now.getDay()].slice(0, 3)
+                        color: root.alpha(root.inkSoft, root.pywalStyle ? 0.74 : 0.64)
+                        font.family: root.uiFont
+                        font.pixelSize: 11
+                        font.weight: Font.Bold
+                        horizontalAlignment: Text.AlignHCenter
+                        elide: Text.ElideRight
+                    }
 
-                    onPaint: {
-                        const ctx = getContext("2d")
-                        const size = Math.max(42, Math.min(78, Math.round(Math.min(height * 0.86, width * 0.18))))
-                        ctx.reset()
-                        ctx.clearRect(0, 0, width, height)
-                        ctx.font = "italic 700 " + size + "px \"Adwaita Sans\""
-                        ctx.textAlign = "center"
-                        ctx.textBaseline = "middle"
-                        ctx.lineJoin = "round"
-                        ctx.lineWidth = Math.max(1.25, size * 0.026)
-                        ctx.shadowColor = root.alpha(root.winAccent2, 0.18)
-                        ctx.shadowBlur = 10
-                        ctx.strokeStyle = root.alpha(root.inkSoft, 0.64)
-                        ctx.strokeText(displayTime, width / 2, height / 2 + 3)
-                        ctx.shadowBlur = 0
-                        ctx.lineWidth = Math.max(0.75, size * 0.012)
-                        ctx.strokeStyle = root.alpha(root.ink, 0.18)
-                        ctx.strokeText(displayTime, width / 2, height / 2 + 3)
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 112
+                        spacing: 8
+
+                        FallingClockTile {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 112
+                            value: Qt.formatDateTime(timeView.now, "HH")
+                            accentColor: root.winAccent
+                        }
+
+                        FallingClockTile {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 112
+                            value: Qt.formatDateTime(timeView.now, "mm")
+                            accentColor: root.winAccent2
+                        }
+
+                        FallingClockTile {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 112
+                            value: Qt.formatDateTime(timeView.now, "ss")
+                            accentColor: root.alpha(root.winAccent, 0.86)
+                        }
                     }
                 }
             }

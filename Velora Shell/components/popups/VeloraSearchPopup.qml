@@ -20,9 +20,7 @@ Item {
     property string geminiVisibleAnswer: ""
     property var geminiHistory: []
     property int geminiRevealIndex: 0
-    property int geminiLetterFrame: 0
     property int geminiThinkingFrame: 0
-    property real geminiTextFade: 1
     property bool geminiLoading: false
     readonly property bool geminiConversationActive: geminiLoading || geminiAnswer.trim().length > 0 || geminiError.trim().length > 0
     readonly property bool geminiAnswerTyping: geminiCleanAnswer.length > 0 && geminiVisibleAnswer.length < geminiCleanAnswer.length
@@ -82,6 +80,27 @@ Item {
         }
     }
 
+    function themedInputFill(popupRef, active, strong) {
+        if (!popupRef)
+            return strong ? Qt.rgba(0.02, 0.025, 0.035, 0.74) : Qt.rgba(1, 1, 1, 0.10)
+
+        const source = popupRef.theme ? popupRef.theme.surfaceInput : popupRef.winCardHover
+        const dark = popupRef.theme && popupRef.theme.themeMode === "dark"
+        const baseOpacity = strong
+            ? (active ? 0.78 : 0.66)
+            : (active ? 0.70 : 0.58)
+        return popupRef.alpha(source, dark ? baseOpacity : Math.min(0.86, baseOpacity + 0.06))
+    }
+
+    function themedInputBorder(popupRef, active, busy) {
+        if (!popupRef)
+            return Qt.rgba(1, 1, 1, 0.14)
+
+        if (busy)
+            return popupRef.alpha(root.accent, 0.58)
+        return active ? popupRef.alpha(root.accent, 0.52) : popupRef.alpha(popupRef.winLine, 0.82)
+    }
+
     function askGemini() {
         if (!popup)
             return
@@ -113,9 +132,7 @@ Item {
         searchBox.forceSearchFocus(selectText)
     }
 
-    function focusGeminiInput(selectText) {
-        geminiBox.forceGeminiFocus(selectText)
-    }
+    function focusGeminiInput(selectText) {}
 
     function appendGeminiOutput(data) {
         const line = String(data || "").trim()
@@ -130,7 +147,6 @@ Item {
         geminiCleanAnswer = ""
         geminiVisibleAnswer = ""
         geminiRevealIndex = 0
-        geminiTextFade = 1
     }
 
     function cleanGeminiText(text) {
@@ -178,11 +194,18 @@ Item {
         }
 
         const remaining = geminiCleanAnswer.length - geminiRevealIndex
-        const chunk = remaining > 420 ? 5 : (remaining > 180 ? 3 : 2)
+        const total = geminiCleanAnswer.length
+        let chunk = 5
+        if (total > 6000 || remaining > 1800)
+            chunk = 56
+        else if (total > 3200 || remaining > 900)
+            chunk = 34
+        else if (remaining > 420)
+            chunk = 18
+        else if (remaining > 180)
+            chunk = 10
         geminiRevealIndex = Math.min(geminiCleanAnswer.length, geminiRevealIndex + chunk)
         geminiVisibleAnswer = geminiCleanAnswer.substring(0, geminiRevealIndex)
-        geminiTextFade = 0.86
-        geminiTextFadeTimer.restart()
     }
 
     function thinkingDots() {
@@ -278,16 +301,9 @@ Item {
     Timer {
         id: geminiTypingTimer
 
-        interval: 18
+        interval: 24
         repeat: true
         onTriggered: root.revealGeminiChunk()
-    }
-
-    Timer {
-        interval: 33
-        repeat: true
-        running: root.geminiAnswerTyping
-        onTriggered: root.geminiLetterFrame = (root.geminiLetterFrame + 1) % 100000
     }
 
     Timer {
@@ -295,14 +311,6 @@ Item {
         repeat: true
         running: root.geminiLoading
         onTriggered: root.geminiThinkingFrame = (root.geminiThinkingFrame + 1) % 24
-    }
-
-    Timer {
-        id: geminiTextFadeTimer
-
-        interval: 80
-        repeat: false
-        onTriggered: root.geminiTextFade = 1
     }
 
     Timer {
@@ -346,51 +354,9 @@ Item {
             popup: root.popup
         }
 
-        Text {
-            Layout.fillWidth: true
-            Layout.topMargin: 28
-            text: "No que você está pensando hoje?"
-            color: root.popup ? root.popup.alpha(root.popup.ink, 0.62) : Qt.rgba(1, 1, 1, 0.62)
-            font.family: root.fontFamily
-            font.pixelSize: 18
-            font.weight: Font.DemiBold
-            horizontalAlignment: Text.AlignHCenter
-            opacity: root.popup ? root.popup.popupIntroOpacity(95, 185) : 1
-            transform: Translate { y: root.popup ? root.popup.popupIntroTranslateY(95, 7) : 0 }
-        }
-
-        GeminiAskBox {
-            id: geminiBox
-
-            Layout.fillWidth: true
-            Layout.preferredHeight: 46
-            Layout.leftMargin: 0
-            Layout.rightMargin: 0
-            popup: root.popup
-        }
-
-        GeminiAnswerPanel {
-            Layout.fillWidth: true
-            Layout.fillHeight: visible
-            Layout.minimumHeight: visible ? 320 : 0
-            Layout.preferredHeight: visible ? Math.max(360, Math.min(620, root.height - 220)) : 0
-            visible: root.geminiConversationActive
-            popup: root.popup
-        }
-
-        GeminiHistoryPanel {
-            Layout.fillWidth: true
-            Layout.fillHeight: visible
-            Layout.minimumHeight: visible ? 260 : 0
-            Layout.preferredHeight: visible ? Math.max(320, Math.min(520, root.height - 390)) : 0
-            visible: !root.geminiConversationActive
-                && root.geminiHistory.length > 0
-            popup: root.popup
-        }
-
         SectionHeader {
             Layout.fillWidth: true
-            visible: root.popup && root.popup.searchQuery.trim().length > 0 && !root.geminiConversationActive
+            visible: root.popup && root.popup.searchQuery.trim().length > 0
             iconText: "◷"
             title: "Resultados"
             actionText: "Limpar"
@@ -406,7 +372,7 @@ Item {
 
         ColumnLayout {
             Layout.fillWidth: true
-            visible: root.popup && root.popup.searchQuery.trim().length > 0 && !root.geminiConversationActive
+            visible: root.popup && root.popup.searchQuery.trim().length > 0
             spacing: 2
 
             Repeater {
@@ -427,7 +393,7 @@ Item {
         SectionHeader {
             Layout.fillWidth: true
             Layout.topMargin: 2
-            visible: !root.geminiConversationActive && root.geminiHistory.length <= 0
+            visible: root.popup && root.popup.searchQuery.trim().length <= 0
             iconText: "☼"
             title: "Sugestões"
             entryDelay: 245
@@ -436,13 +402,13 @@ Item {
         SuggestionPanel {
             Layout.fillWidth: true
             Layout.preferredHeight: 154
-            visible: !root.geminiConversationActive && root.geminiHistory.length <= 0
+            visible: root.popup && root.popup.searchQuery.trim().length <= 0
             popup: root.popup
             entryDelay: 410
         }
 
         Item {
-            Layout.fillHeight: !root.geminiConversationActive && root.geminiHistory.length <= 0
+            Layout.fillHeight: true
         }
     }
 
@@ -451,18 +417,11 @@ Item {
 
         function onPopupTypeChanged() {
             root.queueSearchFocus()
-            if (root.popup && root.popup.popupType === "search")
-                root.loadGeminiHistory()
-            root.syncGeminiHoldOpen()
         }
 
         function onOpenChanged() {
-            if (root.popup && root.popup.open && root.popup.popupType === "search")
-                root.loadGeminiHistory()
             if (root.popup && !root.popup.open)
                 root.popup.holdOpen = false
-            else
-                root.syncGeminiHoldOpen()
         }
 
         function onInteractiveFocusChanged() {
@@ -476,7 +435,6 @@ Item {
 
     Component.onCompleted: {
         root.queueSearchFocus()
-        root.loadGeminiHistory()
     }
 
     component SectionHeader: Item {
@@ -551,9 +509,9 @@ Item {
         }
 
         radius: 10
-        color: popup ? popup.alpha(popup.winCardHover, input.activeFocus ? 0.42 : 0.30) : Qt.rgba(1, 1, 1, 0.10)
+        color: root.themedInputFill(box.popup, input.activeFocus, false)
         border.width: 1
-        border.color: popup ? (input.activeFocus ? popup.alpha(root.accent, 0.58) : popup.alpha(root.accent, 0.26)) : Qt.rgba(1, 1, 1, 0.16)
+        border.color: root.themedInputBorder(box.popup, input.activeFocus, false)
         opacity: root.popup ? root.popup.popupIntroOpacity(65, 190) : 1
         scale: root.popup ? root.popup.popupIntroScale(65, 0.97, 1) : 1
         transform: Translate { y: root.popup ? root.popup.popupIntroTranslateY(65, 8) : 0 }
@@ -619,11 +577,6 @@ Item {
                         }
                         if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
                             box.popup.launchSelectedSearchEntry()
-                            event.accepted = true
-                            return
-                        }
-                        if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
-                            root.focusGeminiInput(true)
                             event.accepted = true
                             return
                         }
@@ -694,9 +647,9 @@ Item {
         }
 
         radius: 22
-        color: Qt.rgba(0.02, 0.025, 0.035, 0.74)
+        color: root.themedInputFill(popup, input.activeFocus || root.geminiLoading, true)
         border.width: 1
-        border.color: popup ? popup.alpha(root.accent, root.geminiLoading ? 0.58 : (input.activeFocus ? 0.42 : 0.18)) : Qt.rgba(1, 1, 1, 0.12)
+        border.color: root.themedInputBorder(popup, input.activeFocus, root.geminiLoading)
         opacity: root.popup ? root.popup.popupIntroOpacity(118, 190) : 1
         scale: root.popup ? root.popup.popupIntroScale(118, 0.98, 1) : 1
         transform: Translate { y: root.popup ? root.popup.popupIntroTranslateY(118, 8) : 0 }
@@ -1022,6 +975,8 @@ Item {
             }
 
             Flickable {
+                id: answerFlick
+
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 contentWidth: width
@@ -1030,7 +985,15 @@ Item {
                 boundsBehavior: Flickable.StopAtBounds
                 onContentHeightChanged: {
                     if (root.geminiLoading || root.geminiAnswerTyping)
-                        contentY = Math.max(0, contentHeight - height)
+                        answerScrollTimer.restart()
+                }
+
+                Timer {
+                    id: answerScrollTimer
+
+                    interval: 42
+                    repeat: false
+                    onTriggered: answerFlick.contentY = Math.max(0, answerFlick.contentHeight - answerFlick.height)
                 }
 
                 Column {
@@ -1104,148 +1067,35 @@ Item {
                         fontWeight: "500"
                         lineHeight: 1.18
                         animated: root.geminiAnswerTyping
-                        fade: root.geminiAnswer.length > 0 ? root.geminiTextFade : 1
-                        letterFrame: root.geminiLetterFrame
-                        opacity: root.geminiAnswer.length > 0 ? root.geminiTextFade : 1
-
-                        Behavior on opacity { NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
+                        fade: 1
                     }
                 }
             }
         }
     }
 
-    component GeminiMagicText: Canvas {
+    component GeminiMagicText: Text {
         id: magicText
 
-        property string text: ""
         property color textColor: Qt.rgba(1, 1, 1, 0.82)
         property color glowColor: root.accent
         property string fontFamilyName: root.fontFamily
         property string fontWeight: "500"
         property int fontPixelSize: 12
-        property real lineHeight: 1.18
-        property real measuredHeight: fontPixelSize * lineHeight
         property bool animated: false
         property real fade: 1
         property int letterFrame: 0
 
-        height: Math.max(1, measuredHeight)
-        antialiasing: true
-
-        onTextChanged: requestPaint()
-        onWidthChanged: requestPaint()
-        onTextColorChanged: requestPaint()
-        onGlowColorChanged: requestPaint()
-        onFontFamilyNameChanged: requestPaint()
-        onFontPixelSizeChanged: requestPaint()
-        onLineHeightChanged: requestPaint()
-        onAnimatedChanged: requestPaint()
-        onFadeChanged: requestPaint()
-        onLetterFrameChanged: if (animated) requestPaint()
-        Component.onCompleted: requestPaint()
-
-        function cssFont() {
-            return fontWeight + " " + fontPixelSize + "px \"" + String(fontFamilyName).replace(/"/g, "") + "\""
-        }
-
-        function textWidth(ctx, value) {
-            return ctx.measureText(String(value || "")).width
-        }
-
-        function layoutLines(ctx, value, maxWidth) {
-            const paragraphs = String(value || "").split("\n")
-            const lines = []
-
-            for (let p = 0; p < paragraphs.length; ++p) {
-                const paragraph = paragraphs[p]
-                if (paragraph.length <= 0) {
-                    lines.push("")
-                    continue
-                }
-
-                const tokens = paragraph.match(/\S+\s*/g) || [paragraph]
-                let line = ""
-
-                for (let i = 0; i < tokens.length; ++i) {
-                    const token = tokens[i]
-                    const candidate = line + token
-                    if (line.length > 0 && textWidth(ctx, candidate) > maxWidth) {
-                        lines.push(line.replace(/\s+$/g, ""))
-                        line = token.replace(/^\s+/g, "")
-                    } else {
-                        line = candidate
-                    }
-                }
-
-                lines.push(line.replace(/\s+$/g, ""))
-            }
-
-            return lines.length > 0 ? lines : [""]
-        }
-
-        function drawableCount(lines) {
-            let count = 0
-            for (let i = 0; i < lines.length; ++i)
-                count += lines[i].length
-            return count
-        }
-
-        function drawLetter(ctx, letter, x, y, width, index, total) {
-            if (letter === " ")
-                return
-
-            const tailDistance = Math.max(0, total - index)
-            const effect = animated ? Math.max(0, 1 - tailDistance / 32) : 0
-            const wave = (letterFrame * 0.22) + index * 1.91
-            const scatterX = Math.sin(index * 2.31) * 12 * effect
-            const scatterY = (Math.cos(index * 1.73) * 9 - 8 + Math.sin(wave) * 2) * effect
-            const scale = 1 + effect * 0.14
-
-            ctx.save()
-            ctx.globalAlpha = fade * (1 - effect * 0.45)
-            ctx.shadowColor = glowColor
-            ctx.shadowBlur = 9 * effect
-            ctx.translate(x + width / 2 + scatterX, y + scatterY)
-            ctx.scale(scale, scale)
-            ctx.fillText(letter, -width / 2, 0)
-            ctx.restore()
-        }
-
-        onPaint: {
-            const ctx = getContext("2d")
-            const maxWidth = Math.max(1, width)
-            const linePx = Math.max(1, fontPixelSize * lineHeight)
-
-            ctx.reset()
-            ctx.clearRect(0, 0, width, height)
-            ctx.font = cssFont()
-            ctx.textBaseline = "top"
-            ctx.fillStyle = textColor
-
-            const lines = layoutLines(ctx, text, maxWidth)
-            const nextHeight = Math.max(linePx, lines.length * linePx)
-            if (Math.abs(measuredHeight - nextHeight) > 0.5) {
-                measuredHeight = nextHeight
-                requestPaint()
-                return
-            }
-
-            const total = drawableCount(lines)
-            let drawn = 0
-            for (let lineIndex = 0; lineIndex < lines.length; ++lineIndex) {
-                const line = lines[lineIndex]
-                let x = 0
-                const y = lineIndex * linePx
-                for (let i = 0; i < line.length; ++i) {
-                    const letter = line.charAt(i)
-                    const advance = textWidth(ctx, letter)
-                    drawn += 1
-                    drawLetter(ctx, letter, x, y, advance, drawn, total)
-                    x += advance
-                }
-            }
-        }
+        height: Math.max(1, implicitHeight)
+        color: textColor
+        opacity: fade
+        font.family: fontFamilyName
+        font.pixelSize: fontPixelSize
+        font.weight: fontWeight === "700" ? Font.Bold : Font.Medium
+        lineHeightMode: Text.ProportionalHeight
+        renderType: Text.NativeRendering
+        textFormat: Text.PlainText
+        wrapMode: Text.WrapAtWordBoundaryOrAnywhere
     }
 
     component RecentFileRow: Item {

@@ -1,6 +1,7 @@
 import QtQuick
 import Qt5Compat.GraphicalEffects
 import Quickshell
+import Quickshell.Hyprland
 import Quickshell.Io
 import Quickshell.Services.Notifications
 import Quickshell.Wayland
@@ -29,6 +30,7 @@ ShellRoot {
                 return
 
             notification.tracked = true
+            root.upsertNotificationHistory(notification)
             root.showNotificationToast(notification)
         }
     }
@@ -40,6 +42,7 @@ ShellRoot {
     property string notificationToastApp: ""
     property string notificationToastIconKey: "bell"
     property int notificationToastSerial: 0
+    readonly property int notificationHistoryCount: notificationHistoryModel.count
     property bool wallpaperSelectorOpen: false
     property bool settingsPanelOpen: false
     property bool idlePreloadEnabled: false
@@ -48,6 +51,12 @@ ShellRoot {
     property bool quickPopupHoldOpen: false
     property bool sidebarPopupHovering: false
     property bool quickPopupHovering: false
+    property bool geminiTopOpen: false
+    property bool geminiTopWindowOpen: false
+    property bool geminiTopKeyboardFocus: false
+    property bool geminiTopTriggerHovering: false
+    property bool geminiTopPanelHovering: false
+    property int geminiTopFocusRequest: 0
     property bool wallpaperSelectorHovering: false
     property bool settingsPanelHovering: false
     property bool wallpaperSelectorWindowOpen: false
@@ -89,6 +98,8 @@ ShellRoot {
     property int focusIndex: 0
     readonly property bool topBarLayout: veloraTheme.topBarEnabled
     readonly property bool sideBarLayoutEnabled: !topBarLayout
+    readonly property bool activeWorkspaceFullscreen: Hyprland.focusedWorkspace ? Hyprland.focusedWorkspace.hasFullscreen : false
+    readonly property bool shellSuppressedByFullscreen: activeWorkspaceFullscreen
     readonly property bool barOnRight: veloraTheme.barPosition === "right"
     readonly property bool leftMenuOnLeft: barOnRight
     readonly property string leftMenuAttachSide: leftMenuOnLeft ? "left" : "right"
@@ -175,6 +186,8 @@ ShellRoot {
     ]
     property real quickPopupSurfaceReveal: 0
     readonly property int quickPopupLineCloseDuration: veloraTheme.motionEnabled ? Math.max(700, Math.round(veloraTheme.motionPanelOut * 1.90)) : 1
+    readonly property int notificationToastOpenDuration: veloraTheme.motionEnabled ? Math.max(420, veloraTheme.motionPanelIn) : 1
+    readonly property int notificationToastCloseDuration: veloraTheme.motionEnabled ? Math.max(640, Math.round(quickPopupLineCloseDuration * 0.82)) : 1
     readonly property bool sideQuickPopupAttachedToBar: sideQuickPopupPanelVisible && quickPopupTypeAttachedToBar(visibleQuickPopupType)
     readonly property int sideQuickPopupBridgeWidth: sideQuickPopupAttachedToBar && sideVisualizerMounted && barOnRight ? Math.max(popupFrameGap, sideQuickPopupBarClearance) : 0
     readonly property bool quickPopupJoinedToBar: sideQuickPopupAttachedToBar && (popupFrameGap <= 0 || sideQuickPopupBridgeWidth > 0)
@@ -192,6 +205,10 @@ ShellRoot {
         appLaunchProcess.running = true
     }
 
+    function notificationCleanText(value) {
+        return String(value || "").replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim()
+    }
+
     function notificationField(notification, keys, fallback) {
         if (!notification)
             return fallback || ""
@@ -199,15 +216,15 @@ ShellRoot {
         for (let i = 0; i < keys.length; ++i) {
             const value = notification[keys[i]]
             if (value !== undefined && value !== null && String(value).trim().length > 0)
-                return String(value).replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim()
+                return notificationCleanText(value)
         }
 
         return fallback || ""
     }
 
-    function notificationIconKey(appName, title) {
-        const value = String((appName || "") + " " + (title || "")).toLowerCase()
-        if (value.indexOf("whatsapp") >= 0)
+    function notificationIconKey(appName, title, body, iconName) {
+        const value = String((appName || "") + " " + (title || "") + " " + (body || "") + " " + (iconName || "")).toLowerCase()
+        if (value.indexOf("whatsapp") >= 0 || value.indexOf("whats app") >= 0 || value.indexOf("web.whatsapp") >= 0 || value.indexOf("com.whatsapp") >= 0)
             return "whatsapp"
         if (value.indexOf("discord") >= 0 || value.indexOf("vesktop") >= 0)
             return "discord"
@@ -220,6 +237,74 @@ ShellRoot {
         if (value.indexOf("velora") >= 0)
             return "velora"
         return "bell"
+    }
+
+    function notificationTimeText(notification) {
+        const value = notificationField(notification, ["timeText", "time", "timestamp"], "")
+        if (value.length > 0) {
+            const parsed = new Date(value)
+            if (!isNaN(parsed.getTime()))
+                return Qt.formatDateTime(parsed, "HH:mm")
+            return value
+        }
+
+        return Qt.formatTime(new Date(), "HH:mm")
+    }
+
+    function normalizeNotification(notification) {
+        const summary = notificationField(notification, ["summary", "title"], "")
+        const body = notificationField(notification, ["body"], "")
+        const appName = notificationField(notification, ["appName", "app", "app_name", "application", "desktopEntry", "desktop_entry", "app-name"], "Sistema")
+        const iconName = notificationField(notification, ["appIcon", "app_icon", "icon", "image", "imagePath", "desktopEntry", "desktop_entry"], "")
+        const title = summary.length > 0 ? summary : (body.length > 0 ? body : "Notificação")
+        let id = notificationField(notification, ["id", "ID", "notificationId", "notification_id"], "")
+        if (id.length <= 0)
+            id = appName + "|" + title + "|" + body
+
+        return {
+            id: String(id),
+            app: appName,
+            summary: title,
+            body: summary.length > 0 ? body : "",
+            timeText: notificationTimeText(notification),
+            iconKey: notificationIconKey(appName, title, body, iconName)
+        }
+    }
+
+    function upsertNotificationHistory(notification) {
+        const item = normalizeNotification(notification)
+        if (item.summary.length <= 0 && item.body.length <= 0)
+            return
+
+        for (let i = 0; i < notificationHistoryModel.count; ++i) {
+            const current = notificationHistoryModel.get(i)
+            if ((item.id.length > 0 && current.id === item.id)
+                    || (current.app === item.app && current.summary === item.summary && current.body === item.body)) {
+                notificationHistoryModel.set(i, item)
+                if (i > 0)
+                    notificationHistoryModel.move(i, 0, 1)
+                return
+            }
+        }
+
+        notificationHistoryModel.insert(0, item)
+        while (notificationHistoryModel.count > 24)
+            notificationHistoryModel.remove(notificationHistoryModel.count - 1)
+    }
+
+    function removeNotificationHistoryById(notificationId) {
+        const id = String(notificationId || "")
+        if (id.length <= 0)
+            return
+
+        for (let i = notificationHistoryModel.count - 1; i >= 0; --i) {
+            if (notificationHistoryModel.get(i).id === id)
+                notificationHistoryModel.remove(i)
+        }
+    }
+
+    function clearNotificationHistory() {
+        notificationHistoryModel.clear()
     }
 
     function notificationIconSurfaceColor(iconKey) {
@@ -239,15 +324,15 @@ ShellRoot {
     }
 
     function showNotificationToast(notification) {
-        const summary = notificationField(notification, ["summary", "title"], "")
-        const body = notificationField(notification, ["body"], "")
-        const appName = notificationField(notification, ["appName", "app", "app_name", "application", "desktopEntry", "desktop_entry", "app-name"], "Velora")
-        const title = summary.length > 0 ? summary : (body.length > 0 ? body : "通知")
+        if (shellSuppressedByFullscreen)
+            return
 
-        notificationToastTitle = title
-        notificationToastBody = summary.length > 0 ? body : ""
-        notificationToastApp = appName
-        notificationToastIconKey = notificationIconKey(appName, title)
+        const item = normalizeNotification(notification)
+
+        notificationToastTitle = item.summary
+        notificationToastBody = item.body
+        notificationToastApp = item.app
+        notificationToastIconKey = item.iconKey
         notificationToastSerial += 1
         notificationToastUnmountTimer.stop()
         notificationToastMounted = true
@@ -261,6 +346,23 @@ ShellRoot {
         notificationToastVisible = false
         notificationToastUnmountTimer.toastSerial = notificationToastSerial
         notificationToastUnmountTimer.restart()
+    }
+
+    onShellSuppressedByFullscreenChanged: {
+        if (!shellSuppressedByFullscreen)
+            return
+
+        closeQuickPopup()
+        closeGeminiTop()
+        hideNotificationToast()
+        wallpaperSelectorOpen = false
+        wallpaperSelectorWindowOpen = false
+        settingsPanelOpen = false
+        settingsPanelWindowOpen = false
+        rightDashboardOpen = false
+        leftMenuOpen = false
+        leftMediaWindowOpen = false
+        toggleTopWallpaperPopup(false, false)
     }
 
     Timer {
@@ -278,9 +380,13 @@ ShellRoot {
 
         property int toastSerial: -1
 
-        interval: veloraTheme.motionEnabled ? 360 : 1
+        interval: Math.max(veloraTheme.motionUnmountDelay, root.notificationToastCloseDuration + 160)
         repeat: false
         onTriggered: if (toastSerial === root.notificationToastSerial && !root.notificationToastVisible) root.notificationToastMounted = false
+    }
+
+    ListModel {
+        id: notificationHistoryModel
     }
 
     function clockAlertCommand(title, message) {
@@ -576,6 +682,7 @@ ShellRoot {
         "bluetooth",
         "battery",
         "settings",
+        "layout",
         "avatar"
     ]
     readonly property string focusTarget: focusItems[Math.max(0, Math.min(focusIndex, focusItems.length - 1))]
@@ -729,6 +836,93 @@ ShellRoot {
             topWallpaperDeferredScanTimer.stop()
             root.topWallpaperCardsMounted = false
         }
+    }
+
+    function openGeminiTop(withKeyboardFocus) {
+        exitFocus()
+        closeQuickPopup()
+        wallpaperSelectorOpen = false
+        wallpaperSelectorWindowOpen = false
+        settingsPanelOpen = false
+        settingsPanelWindowOpen = false
+        closeRightDashboard()
+        closeLegacyLeftMenu()
+        toggleTopWallpaperPopup(false, false)
+        geminiTopUnmountTimer.stop()
+        geminiTopKeyboardFocus = withKeyboardFocus === true
+        geminiTopWindowOpen = true
+        geminiTopOpen = true
+        if (geminiTopKeyboardFocus)
+            geminiTopFocusRequest += 1
+    }
+
+    function openGeminiTopFromMouse() {
+        geminiTopHoverCloseTimer.stop()
+        if (!geminiTopOpen)
+            openGeminiTop(false)
+    }
+
+    function closeGeminiTop() {
+        geminiTopOpen = false
+        geminiTopKeyboardFocus = false
+        geminiTopTriggerHovering = false
+        geminiTopPanelHovering = false
+        geminiTopHoverCloseTimer.stop()
+        geminiTopUnmountTimer.restart()
+    }
+
+    function toggleGeminiTop() {
+        if (geminiTopOpen)
+            closeGeminiTop()
+        else
+            openGeminiTop(true)
+    }
+
+    function switchToSideBarLayout(position) {
+        veloraTheme.setTopBarEnabled(false)
+        veloraTheme.applyLayout(position, true)
+    }
+
+    function cycleBarLayout() {
+        closeQuickPopup()
+        closeGeminiTop()
+        closeRightDashboard()
+        settingsPanelOpen = false
+        settingsPanelWindowOpen = false
+
+        if (veloraTheme.topBarEnabled) {
+            switchToSideBarLayout("right")
+            return
+        }
+
+        if (barOnRight) {
+            switchToSideBarLayout("left")
+            return
+        }
+
+        veloraTheme.setTopBarEnabled(true)
+    }
+
+    function engageGeminiTop() {
+        if (!geminiTopOpen)
+            return
+        geminiTopKeyboardFocus = true
+        geminiTopHoverCloseTimer.stop()
+    }
+
+    function setGeminiTopPanelHovering(inside) {
+        geminiTopPanelHovering = inside
+        if (inside)
+            geminiTopHoverCloseTimer.stop()
+        else
+            scheduleGeminiTopHoverClose()
+    }
+
+    function scheduleGeminiTopHoverClose() {
+        if (geminiTopKeyboardFocus)
+            return
+        if (!geminiTopTriggerHovering && !geminiTopPanelHovering)
+            geminiTopHoverCloseTimer.restart()
     }
 
     function sidebarBarMaterialColor() {
@@ -1000,6 +1194,8 @@ ShellRoot {
 
     function openQuickPopup(type, centerY) {
         exitFocus()
+        if (geminiTopOpen)
+            closeGeminiTop()
         if (type !== "search")
             quickPopupHoldOpen = false
         setQuickPopupCenter(type, centerY)
@@ -1452,9 +1648,9 @@ ShellRoot {
         if (type === "profile")
             return 625
         if (type === "time")
-            return 930
+            return 990
         if (type === "search")
-            return 920
+            return 380
         if (type === "files")
             return 720
         if (type === "browser")
@@ -1615,6 +1811,22 @@ ShellRoot {
     }
 
     Timer {
+        id: geminiTopUnmountTimer
+
+        interval: Math.max(veloraTheme.motionUnmountDelay, root.quickPopupLineCloseDuration + 180)
+        repeat: false
+        onTriggered: if (!root.geminiTopOpen) root.geminiTopWindowOpen = false
+    }
+
+    Timer {
+        id: geminiTopHoverCloseTimer
+
+        interval: 320
+        repeat: false
+        onTriggered: if (!root.geminiTopKeyboardFocus && !root.geminiTopTriggerHovering && !root.geminiTopPanelHovering) root.closeGeminiTop()
+    }
+
+    Timer {
         id: searchPopupFocusTimer
 
         interval: 80
@@ -1738,6 +1950,10 @@ ShellRoot {
             root.openAdaptiveBarPopup("search", root.defaultQuickPopupCenterY("search"))
         }
 
+        function gemini(): void {
+            root.toggleGeminiTop()
+        }
+
         function profile(): void {
             root.openAdaptiveBarPopup("profile", root.defaultQuickPopupCenterY("profile"))
         }
@@ -1780,6 +1996,14 @@ ShellRoot {
 
         function notifications(): void {
             root.openAdaptiveBarPopup("notifications", root.defaultQuickPopupCenterY("notifications"))
+        }
+
+        function toastTest(): void {
+            root.showNotificationToast({
+                "summary": "Hello, tudo bem, so um layout!",
+                "body": "",
+                "appName": "WhatsApp"
+            })
         }
 
         function bluetooth(): void {
@@ -1868,10 +2092,14 @@ ShellRoot {
         function toggleTopBar(): void {
             veloraTheme.toggleTopBarEnabled()
         }
+
+        function layoutCycle(): void {
+            root.cycleBarLayout()
+        }
     }
 
     Variants {
-        model: veloraTheme.topBarEnabled ? Quickshell.screens : []
+        model: veloraTheme.topBarEnabled && !root.shellSuppressedByFullscreen ? Quickshell.screens : []
 
         PanelWindow {
             id: topBarPanel
@@ -1929,6 +2157,7 @@ ShellRoot {
 
                 theme: veloraTheme
                 activePopupType: root.activeQuickPopupType
+                notificationCountOverride: root.notificationHistoryCount
                 width: topBarPanel.stageWidth
                 height: topBarPanel.barHeight
                 x: Math.round((topBarPanel.panelWidth - width) / 2)
@@ -1943,6 +2172,10 @@ ShellRoot {
                 onSettingsRequested: function(centerX) {
                     root.closeTopBarPopup()
                     root.toggleSettingsPanel(root.defaultQuickPopupCenterY("settings"))
+                }
+                onLayoutRequested: function(centerX) {
+                    root.closeTopBarPopup()
+                    root.cycleBarLayout()
                 }
                 onQuickPopupRequested: function(type, centerX) {
                     root.openAdaptiveBarPopup(type, topBar.x + centerX)
@@ -2099,6 +2332,7 @@ ShellRoot {
                                 revealProgressOverride: root.quickPopupSurfaceReveal
                                 attachSide: "left"
                                 popupType: topBarPopupCacheLoader.cacheType
+                                notificationsModelOverride: notificationHistoryModel
                                 open: topBarPopupCacheLoader.showing
                                 interactiveFocus: root.quickPopupType === topBarPopupCacheLoader.cacheType
                                     && (topBarPopupCacheLoader.cacheType === "search" || topBarPopupCacheLoader.cacheType === "agenda" || topBarPopupCacheLoader.cacheType === "weatherPanel")
@@ -2157,6 +2391,176 @@ ShellRoot {
                     NumberAnimation {
                         duration: topBarPopupLoader.geometryDuration
                         easing.type: veloraTheme.motionEaseEnter
+                    }
+                }
+            }
+        }
+    }
+
+    Variants {
+        model: []
+
+        PanelWindow {
+            id: geminiTopWindow
+
+            required property var modelData
+            readonly property int panelWidth: modelData.width > 0 ? modelData.width : 1920
+            readonly property int panelHeight: modelData.height > 0 ? modelData.height : 1200
+            readonly property int areaX: root.mainAreaX(panelWidth)
+            readonly property int areaWidth: root.mainAreaWidth(panelWidth)
+            readonly property bool expanded: geminiTopPanel.item && geminiTopPanel.item.conversationActive
+            readonly property int targetWidth: Math.round(Math.min(820, Math.max(760, panelWidth * 0.417)))
+            readonly property int compactHeight: Math.round(Math.min(196, Math.max(172, panelHeight * 0.155)))
+            readonly property int expandedHeight: Math.round(Math.min(620, Math.max(480, panelHeight * 0.56)))
+            readonly property int targetHeight: expanded ? expandedHeight : compactHeight
+            readonly property int targetX: Math.round((panelWidth - targetWidth) / 2)
+            readonly property int targetY: root.geminiTopOpen ? 0 : -targetHeight - 18
+
+            screen: modelData
+            color: "transparent"
+            implicitWidth: panelWidth
+            implicitHeight: panelHeight
+            exclusiveZone: 0
+            exclusionMode: ExclusionMode.Ignore
+            focusable: true
+            visible: true
+
+            WlrLayershell.layer: WlrLayer.Top
+            WlrLayershell.namespace: "velora-shell-gemini-top"
+            WlrLayershell.keyboardFocus: root.geminiTopKeyboardFocus ? WlrKeyboardFocus.Exclusive : (root.geminiTopOpen ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None)
+
+            anchors {
+                top: true
+                left: true
+                right: true
+                bottom: true
+            }
+
+            mask: Region {
+                Region {
+                    item: geminiTopTriggerMask
+                    radius: 0
+                }
+
+                Region {
+                    item: geminiTopInputMask
+                    radius: 24
+                }
+
+            }
+
+            Item {
+                id: geminiTopTriggerMask
+
+                x: 0
+                y: 0
+                width: geminiTopWindow.panelWidth
+                height: root.geminiTopOpen ? 0 : 12
+                z: 1
+
+                MouseArea {
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    acceptedButtons: Qt.LeftButton
+                    onEntered: {
+                        root.geminiTopTriggerHovering = true
+                        root.openGeminiTopFromMouse()
+                    }
+                    onExited: {
+                        root.geminiTopTriggerHovering = false
+                        root.scheduleGeminiTopHoverClose()
+                    }
+                }
+            }
+
+            Item {
+                id: geminiTopOutsideMask
+
+                x: 0
+                y: 0
+                width: 0
+                height: 0
+                z: 1
+
+                MouseArea {
+                    anchors.fill: parent
+                    enabled: false
+                    acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
+                    onClicked: root.closeGeminiTop()
+                }
+            }
+
+            Item {
+                id: geminiTopInputMask
+
+                x: geminiTopFrame.x
+                y: geminiTopFrame.y
+                width: root.geminiTopWindowOpen ? geminiTopFrame.width : 0
+                height: root.geminiTopWindowOpen ? geminiTopFrame.height : 0
+                z: 2
+            }
+
+            Loader {
+                id: geminiTopPanel
+
+                x: geminiTopFrame.x
+                y: geminiTopFrame.y
+                width: geminiTopFrame.width
+                height: geminiTopFrame.height
+                active: root.geminiTopWindowOpen
+                visible: active
+                z: 4
+
+                sourceComponent: Component {
+                    VeloraGeminiTopPanel {
+                        theme: veloraTheme
+                        open: root.geminiTopOpen
+                        autoFocus: root.geminiTopKeyboardFocus
+                        panelGlass: root.desktopFrameMatteColor()
+                        panelLine: root.desktopFrameBorderColor()
+                        focusRequest: root.geminiTopFocusRequest
+                        geminiScript: Quickshell.shellDir + "/scripts/velora-gemini-ask"
+                        onActivated: root.engageGeminiTop()
+                        onCloseRequested: root.closeGeminiTop()
+                        onPointerInsideChanged: function(inside) {
+                            root.setGeminiTopPanelHovering(inside)
+                        }
+                    }
+                }
+            }
+
+            Item {
+                id: geminiTopFrame
+
+                width: geminiTopWindow.targetWidth
+                height: geminiTopWindow.targetHeight
+                x: geminiTopWindow.targetX
+                y: geminiTopWindow.targetY
+                opacity: 1
+
+                Behavior on y {
+                    enabled: veloraTheme.motionEnabled
+                    NumberAnimation {
+                        duration: root.geminiTopOpen ? veloraTheme.motionPanelIn : root.quickPopupLineCloseDuration
+                        easing.type: root.geminiTopOpen ? Easing.BezierSpline : Easing.InOutCubic
+                        easing.bezierCurve: root.geminiTopOpen ? veloraTheme.motionCurveEmphasizedAccel : veloraTheme.motionCurveStandard
+                    }
+                }
+
+                Behavior on height {
+                    enabled: veloraTheme.motionEnabled
+                    NumberAnimation {
+                        duration: veloraTheme.motionPanelGeometry
+                        easing.type: veloraTheme.motionEaseEnter
+                    }
+                }
+
+                Behavior on opacity {
+                    enabled: veloraTheme.motionEnabled
+                    NumberAnimation {
+                        duration: root.geminiTopOpen ? Math.max(180, veloraTheme.motionPanelIn * 0.62) : Math.max(320, root.quickPopupLineCloseDuration * 0.52)
+                        easing.type: root.geminiTopOpen ? Easing.BezierSpline : Easing.InOutCubic
+                        easing.bezierCurve: root.geminiTopOpen ? veloraTheme.motionCurveEmphasizedAccel : veloraTheme.motionCurveStandard
                     }
                 }
             }
@@ -3026,7 +3430,7 @@ ShellRoot {
     }
 
     Variants {
-        model: root.frameVisualsMounted ? Quickshell.screens : []
+        model: root.frameVisualsMounted && !root.shellSuppressedByFullscreen ? Quickshell.screens : []
 
         PanelWindow {
             id: framePanel
@@ -3267,7 +3671,7 @@ ShellRoot {
     }
 
     Variants {
-        model: Quickshell.screens
+        model: []
 
         PanelWindow {
             id: notificationToastPanel
@@ -3483,17 +3887,28 @@ ShellRoot {
     }
 
     Variants {
-        model: Quickshell.screens
+        model: root.shellSuppressedByFullscreen ? [] : Quickshell.screens
 
         PanelWindow {
             id: panel
 
             required property var modelData
-            readonly property bool wantsDrawerKeyboard: root.focusMode || root.quickPopupType === "search" || root.quickPopupType === "agenda" || root.quickPopupType === "weatherPanel" || root.settingsPanelOpen || root.wallpaperSelectorOpen || root.topWallpaperKeyboardFocus
+            readonly property int panelWidth: modelData.width > 0 ? modelData.width : 1920
+            readonly property int panelHeight: modelData.height > 0 ? modelData.height : 1200
+            readonly property bool geminiTopExpanded: inlineGeminiTopPanel.item && inlineGeminiTopPanel.item.conversationActive
+            readonly property int geminiTopOpenY: Math.max(root.desktopFrameMargin + 18, 30)
+            readonly property int geminiTopTargetWidth: Math.round(Math.min(780, Math.max(700, panelWidth * 0.385)))
+            readonly property int geminiTopCompactHeight: Math.round(Math.min(176, Math.max(150, panelHeight * 0.138)))
+            readonly property int geminiTopExpandedHeight: Math.round(Math.min(560, Math.max(420, panelHeight * 0.50)))
+            readonly property int geminiTopTargetHeight: geminiTopExpanded ? geminiTopExpandedHeight : geminiTopCompactHeight
+            readonly property int geminiTopTargetX: Math.round((panelWidth - geminiTopTargetWidth) / 2)
+            readonly property int geminiTopTargetY: root.geminiTopOpen ? geminiTopOpenY : -geminiTopTargetHeight - 18
+            readonly property int geminiTopCornerRadius: 24
+            readonly property bool wantsDrawerKeyboard: root.focusMode || root.quickPopupType === "search" || root.quickPopupType === "agenda" || root.quickPopupType === "weatherPanel" || root.settingsPanelOpen || root.wallpaperSelectorOpen || root.topWallpaperKeyboardFocus || root.geminiTopKeyboardFocus
 
             screen: modelData
             color: "transparent"
-            implicitWidth: modelData.width > 0 ? modelData.width : root.barPanelWidth + (root.sideQuickPopupPanelVisible ? root.quickPopupWidthForScreen(root.visibleQuickPopupType, 1920) + 24 : 0)
+            implicitWidth: panelWidth
             exclusiveZone: root.barReserveWidth
             exclusionMode: ExclusionMode.Normal
             focusable: wantsDrawerKeyboard
@@ -3508,6 +3923,21 @@ ShellRoot {
                 Region {
                     item: barRoot.panelMaskItem
                     radius: barRoot.cornerRadius
+                }
+
+                Region {
+                    item: inlineGeminiTopTriggerMask
+                    radius: 0
+                }
+
+                Region {
+                    item: inlineGeminiTopInputMask
+                    radius: panel.geminiTopCornerRadius
+                }
+
+                Region {
+                    item: inlineNotificationToastInputMask
+                    radius: inlineNotificationToastStage.bubbleRadius
                 }
 
                 Region {
@@ -3746,22 +4176,81 @@ ShellRoot {
                     const ty = Math.round(inlineNotificationToastStage.y)
                     const tw = Math.round(inlineNotificationToastStage.width)
                     const th = Math.round(inlineNotificationToastStage.height)
-                    const radius = Math.min(inlineNotificationToastStage.bubbleRadius, Math.max(0, tw / 2), Math.max(0, th / 2))
+                    const attachY = Math.max(ty, root.desktopFrameY(height))
+                    const bottomY = ty + th
+                    const bodyHeight = Math.max(0, bottomY - attachY)
+                    const radius = Math.min(inlineNotificationToastStage.bubbleRadius, Math.max(0, tw / 2), Math.max(0, bodyHeight / 2))
+
+                    if (bodyHeight <= 0)
+                        return
 
                     ctx.save()
-                    ctx.clearRect(tx - 1, ty - 1, tw + 2, th + 2)
                     ctx.globalAlpha = root.frameVisualsReveal * inlineNotificationToastStage.opacity
                     ctx.fillStyle = root.desktopFrameMatteColor()
                     ctx.beginPath()
-                    ctx.moveTo(tx, ty)
-                    ctx.lineTo(tx + tw, ty)
-                    ctx.lineTo(tx + tw, ty + th - radius)
-                    ctx.arcTo(tx + tw, ty + th, tx + tw - radius, ty + th, radius)
-                    ctx.lineTo(tx + radius, ty + th)
-                    ctx.arcTo(tx, ty + th, tx, ty + th - radius, radius)
-                    ctx.lineTo(tx, ty)
+                    ctx.moveTo(tx, attachY)
+                    ctx.lineTo(tx + tw, attachY)
+                    ctx.lineTo(tx + tw, bottomY - radius)
+                    ctx.arcTo(tx + tw, bottomY, tx + tw - radius, bottomY, radius)
+                    ctx.lineTo(tx + radius, bottomY)
+                    ctx.arcTo(tx, bottomY, tx, bottomY - radius, radius)
+                    ctx.lineTo(tx, attachY)
                     ctx.closePath()
                     ctx.fill()
+
+                    ctx.strokeStyle = root.desktopFrameBorderColor()
+                    ctx.lineWidth = 1
+                    ctx.lineCap = "round"
+                    ctx.lineJoin = "round"
+                    ctx.beginPath()
+                    ctx.moveTo(tx + tw - 0.5, attachY + 0.5)
+                    ctx.lineTo(tx + tw - 0.5, bottomY - radius)
+                    ctx.arcTo(tx + tw - 0.5, bottomY - 0.5, tx + tw - radius, bottomY - 0.5, radius)
+                    ctx.lineTo(tx + radius, bottomY - 0.5)
+                    ctx.arcTo(tx + 0.5, bottomY - 0.5, tx + 0.5, bottomY - radius, radius)
+                    ctx.lineTo(tx + 0.5, attachY + 0.5)
+                    ctx.stroke()
+                    ctx.restore()
+                }
+
+                function paintGeminiTopSurface(ctx) {
+                    if (!root.geminiTopWindowOpen && inlineGeminiTopFrame.opacity <= 0.001)
+                        return
+                    if (inlineGeminiTopFrame.width <= 0 || inlineGeminiTopFrame.height <= 0 || inlineGeminiTopFrame.opacity <= 0.001)
+                        return
+
+                    const gx = Math.round(inlineGeminiTopFrame.x)
+                    const gy = Math.round(inlineGeminiTopFrame.y)
+                    const gw = Math.round(inlineGeminiTopFrame.width)
+                    const gh = Math.round(inlineGeminiTopFrame.height)
+                    const radius = Math.min(panel.geminiTopCornerRadius, Math.max(0, gw / 2), Math.max(0, gh / 2))
+
+                    ctx.save()
+                    ctx.globalAlpha = root.frameVisualsReveal * inlineGeminiTopFrame.opacity
+                    ctx.fillStyle = root.desktopFrameMatteColor()
+                    ctx.beginPath()
+                    ctx.moveTo(gx, gy)
+                    ctx.lineTo(gx + gw, gy)
+                    ctx.lineTo(gx + gw, gy + gh - radius)
+                    ctx.arcTo(gx + gw, gy + gh, gx + gw - radius, gy + gh, radius)
+                    ctx.lineTo(gx + radius, gy + gh)
+                    ctx.arcTo(gx, gy + gh, gx, gy + gh - radius, radius)
+                    ctx.lineTo(gx, gy)
+                    ctx.closePath()
+                    ctx.fill()
+
+                    ctx.strokeStyle = root.desktopFrameBorderColor()
+                    ctx.lineWidth = 1
+                    ctx.lineCap = "round"
+                    ctx.lineJoin = "round"
+                    ctx.beginPath()
+                    ctx.moveTo(gx + gw - 0.5, gy + 0.5)
+                    ctx.lineTo(gx + gw - 0.5, gy + gh - radius)
+                    ctx.arcTo(gx + gw - 0.5, gy + gh - 0.5, gx + gw - radius, gy + gh - 0.5, radius)
+                    ctx.lineTo(gx + radius, gy + gh - 0.5)
+                    ctx.arcTo(gx + 0.5, gy + gh - 0.5, gx + 0.5, gy + gh - radius, radius)
+                    ctx.lineTo(gx + 0.5, gy + 0.5)
+                    ctx.stroke()
                     ctx.restore()
                 }
 
@@ -3803,6 +4292,7 @@ ShellRoot {
                     }
 
                     paintFrameOutline(ctx, fx, fy, fw, fh, radius)
+                    paintGeminiTopSurface(ctx)
                     ctx.restore()
 
                     paintSidebarGutterFill(ctx)
@@ -3843,8 +4333,110 @@ ShellRoot {
                 function onDesktopFrameRadiusChanged() { if (root.frameVisualsMounted) unifiedFrameCanvas.requestPaint() }
                 function onFrameVisualsMountedChanged() { unifiedFrameCanvas.requestPaint() }
                 function onFrameVisualsRevealChanged() { if (root.frameVisualsMounted) unifiedFrameCanvas.requestPaint() }
+                function onGeminiTopOpenChanged() { if (root.frameVisualsMounted) unifiedFrameCanvas.requestPaint() }
+                function onGeminiTopWindowOpenChanged() { if (root.frameVisualsMounted) unifiedFrameCanvas.requestPaint() }
                 function onQuickPopupJoinedToBarChanged() { if (root.frameVisualsMounted) unifiedFrameCanvas.requestPaint() }
                 function onTopWallpaperFrameRevealChanged() { if (root.frameVisualsMounted) unifiedFrameCanvas.requestPaint() }
+            }
+
+            Item {
+                id: inlineGeminiTopTriggerMask
+
+                x: Math.round(root.mainAreaX(panel.panelWidth))
+                y: 0
+                width: Math.round(root.mainAreaWidth(panel.panelWidth))
+                height: root.geminiTopWindowOpen ? Math.max(12, root.desktopFrameMargin + 4) : Math.max(12, root.desktopFrameMargin + 2)
+                z: 35
+
+                MouseArea {
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    acceptedButtons: Qt.LeftButton
+                    onEntered: {
+                        root.geminiTopTriggerHovering = true
+                        root.openGeminiTopFromMouse()
+                    }
+                    onExited: {
+                        root.geminiTopTriggerHovering = false
+                        root.scheduleGeminiTopHoverClose()
+                    }
+                }
+            }
+
+            Item {
+                id: inlineGeminiTopFrame
+
+                readonly property bool mounted: root.geminiTopWindowOpen
+
+                width: panel.geminiTopTargetWidth
+                height: panel.geminiTopTargetHeight
+                x: panel.geminiTopTargetX
+                y: panel.geminiTopTargetY
+                opacity: 1
+                visible: mounted
+                z: 26
+
+                onXChanged: if (root.frameVisualsMounted) unifiedFrameCanvas.requestPaint()
+                onYChanged: if (root.frameVisualsMounted) unifiedFrameCanvas.requestPaint()
+                onWidthChanged: if (root.frameVisualsMounted) unifiedFrameCanvas.requestPaint()
+                onHeightChanged: if (root.frameVisualsMounted) unifiedFrameCanvas.requestPaint()
+                Behavior on y {
+                    enabled: veloraTheme.motionEnabled
+                    NumberAnimation {
+                        duration: root.geminiTopOpen ? veloraTheme.motionPanelIn : root.quickPopupLineCloseDuration
+                        easing.type: root.geminiTopOpen ? Easing.BezierSpline : Easing.InOutCubic
+                        easing.bezierCurve: root.geminiTopOpen ? veloraTheme.motionCurveEmphasizedAccel : veloraTheme.motionCurveStandard
+                    }
+                }
+
+                Behavior on height {
+                    enabled: veloraTheme.motionEnabled
+                    NumberAnimation {
+                        duration: veloraTheme.motionPanelGeometry
+                        easing.type: veloraTheme.motionEaseEnter
+                    }
+                }
+            }
+
+            Item {
+                id: inlineGeminiTopInputMask
+
+                x: inlineGeminiTopFrame.x
+                y: inlineGeminiTopFrame.y
+                width: root.geminiTopWindowOpen ? inlineGeminiTopFrame.width : 0
+                height: root.geminiTopWindowOpen ? inlineGeminiTopFrame.height : 0
+                z: 27
+            }
+
+            Loader {
+                id: inlineGeminiTopPanel
+
+                x: inlineGeminiTopFrame.x
+                y: inlineGeminiTopFrame.y
+                width: inlineGeminiTopFrame.width
+                height: inlineGeminiTopFrame.height
+                active: root.geminiTopWindowOpen
+                visible: active
+                opacity: inlineGeminiTopFrame.opacity
+                z: 32
+
+                sourceComponent: Component {
+                    VeloraGeminiTopPanel {
+                        theme: veloraTheme
+                        open: root.geminiTopOpen
+                        autoFocus: root.geminiTopKeyboardFocus
+                        embeddedInFrame: true
+                        panelGlass: "transparent"
+                        panelLine: "transparent"
+                        focusRequest: root.geminiTopFocusRequest
+                        geminiScript: Quickshell.shellDir + "/scripts/velora-gemini-ask"
+                        onActivated: root.engageGeminiTop()
+                        onCloseRequested: root.closeGeminiTop()
+                        onPointerInsideChanged: function(inside) {
+                            root.setGeminiTopPanelHovering(inside)
+                        }
+                    }
+                }
             }
 
             Item {
@@ -4616,7 +5208,7 @@ ShellRoot {
                 readonly property int visibleCards: 9
                 readonly property int layoutCards: 6
                 readonly property int centerSlot: Math.floor(visibleCards / 2)
-                readonly property int arrowGutter: Math.max(54, Math.round(width * 0.034))
+                readonly property int arrowGutter: Math.max(18, Math.round(width * 0.012))
                 readonly property real contentWidth: Math.max(1, width - arrowGutter * 2)
                 readonly property real cardGap: -Math.max(14, Math.round(contentWidth * 0.012))
 
@@ -4890,7 +5482,7 @@ ShellRoot {
                     x: Math.max(0, Math.round(topWallpaperStrip.arrowGutter / 2 - width / 2))
                     y: Math.round((topWallpaperStrip.height - height) / 2)
                     z: 90
-                    visible: topWallpaperStrip.cardsReady
+                    visible: false
                     opacity: topWallpaperArrowLeftMouse.containsMouse ? 0.95 : 0.68
 
                     Rectangle {
@@ -4928,7 +5520,7 @@ ShellRoot {
                     x: Math.min(topWallpaperStrip.width - width, Math.round(topWallpaperStrip.width - topWallpaperStrip.arrowGutter / 2 - width / 2))
                     y: topWallpaperLeftArrow.y
                     z: 90
-                    visible: topWallpaperStrip.cardsReady
+                    visible: false
                     opacity: topWallpaperArrowRightMouse.containsMouse ? 0.95 : 0.68
 
                     Rectangle {
@@ -4960,20 +5552,34 @@ ShellRoot {
             }
 
             Item {
+                id: inlineNotificationToastInputMask
+
+                x: inlineNotificationToastStage.x
+                y: inlineNotificationToastStage.y
+                width: root.notificationToastMounted ? inlineNotificationToastStage.width : 0
+                height: root.notificationToastMounted ? inlineNotificationToastStage.height : 0
+                z: 139
+            }
+
+            Item {
                 id: inlineNotificationToastStage
 
+                readonly property bool mounted: root.notificationToastMounted || opacity > 0.001
                 readonly property int panelWidth: Math.max(parent.width, panel.modelData.width)
                 readonly property int safeWidth: Math.max(320, panelWidth - 96)
-                readonly property int bubbleRadius: Math.min(20, height / 2)
+                readonly property int bubbleRadius: Math.min(17, height / 2)
+                readonly property int openY: root.geminiTopWindowOpen
+                    ? Math.max(root.desktopFrameMargin, Math.round(inlineGeminiTopFrame.y + inlineGeminiTopFrame.height + 14))
+                    : root.desktopFrameMargin
 
                 width: Math.round(Math.min(safeWidth, Math.max(330, panelWidth * 0.18)))
-                height: 58
+                height: 48
                 x: Math.round((panelWidth - width) / 2)
-                y: root.notificationToastVisible ? 0 : -height - 18
+                y: root.notificationToastVisible ? openY : -height - 18
                 z: 140
-                visible: false
+                visible: mounted
                 opacity: root.notificationToastVisible ? 1 : 0
-                scale: root.notificationToastVisible ? 1 : 0.965
+                scale: 1
                 transformOrigin: Item.Top
 
                 onYChanged: if (root.frameVisualsMounted) unifiedFrameCanvas.requestPaint()
@@ -4984,16 +5590,18 @@ ShellRoot {
                 Behavior on y {
                     enabled: veloraTheme.motionEnabled
                     NumberAnimation {
-                        duration: root.notificationToastVisible ? 360 : 280
-                        easing.type: root.notificationToastVisible ? Easing.OutCubic : Easing.InCubic
+                        duration: root.notificationToastVisible ? root.notificationToastOpenDuration : root.notificationToastCloseDuration
+                        easing.type: root.notificationToastVisible ? Easing.BezierSpline : Easing.InOutCubic
+                        easing.bezierCurve: root.notificationToastVisible ? veloraTheme.motionCurveEmphasizedAccel : veloraTheme.motionCurveStandard
                     }
                 }
 
                 Behavior on opacity {
                     enabled: veloraTheme.motionEnabled
                     NumberAnimation {
-                        duration: root.notificationToastVisible ? 220 : 180
-                        easing.type: Easing.OutCubic
+                        duration: root.notificationToastVisible ? Math.max(180, Math.round(root.notificationToastOpenDuration * 0.48)) : Math.max(320, Math.round(root.notificationToastCloseDuration * 0.52))
+                        easing.type: root.notificationToastVisible ? Easing.BezierSpline : Easing.InOutCubic
+                        easing.bezierCurve: root.notificationToastVisible ? veloraTheme.motionCurveEmphasizedAccel : veloraTheme.motionCurveStandard
                     }
                 }
 
@@ -5010,17 +5618,17 @@ ShellRoot {
                 Item {
                     id: inlineNotificationToastIcon
 
-                    width: 40
-                    height: 40
-                    x: 13
+                    width: 32
+                    height: 32
+                    x: 10
                     y: Math.round((parent.height - height) / 2)
 
                     Rectangle {
                         anchors.fill: parent
-                        radius: 12
+                        radius: 10
                         color: root.notificationIconSurfaceColor(root.notificationToastIconKey)
                         border.width: 1
-                        border.color: Qt.rgba(1, 1, 1, 0.24)
+                        border.color: Qt.rgba(1, 1, 1, 0.22)
                         antialiasing: true
                     }
 
@@ -5031,7 +5639,8 @@ ShellRoot {
                             top: parent.top
                         }
                         height: parent.height * 0.42
-                        radius: 12
+                        radius: 10
+                        visible: false
                         color: Qt.rgba(1, 1, 1, 0.14)
                     }
 
@@ -5103,13 +5712,13 @@ ShellRoot {
                 }
 
                 Text {
-                    x: inlineNotificationToastIcon.x + inlineNotificationToastIcon.width + 16
+                    x: inlineNotificationToastIcon.x + inlineNotificationToastIcon.width + 13
                     y: Math.round((parent.height - height) / 2) - 1
-                    width: parent.width - x - 24
+                    width: parent.width - x - 16
                     text: root.notificationToastTitle
                     color: veloraTheme.textPrimary
                     font.family: veloraTheme.uiFont
-                    font.pixelSize: 17
+                    font.pixelSize: 14
                     font.weight: Font.DemiBold
                     elide: Text.ElideRight
                     maximumLineCount: 1
@@ -5138,6 +5747,7 @@ ShellRoot {
                 visualizerActive: root.audioVisualizerMounted
                 shellDrawsPanelSurface: root.sideBarLayoutEnabled && root.frameVisualsMounted
                 activePopupType: root.wallpaperSelectorOpen ? "theme" : root.quickPopupType
+                notificationCountOverride: root.notificationHistoryCount
                 onMoveFocusRequested: function(dir) {
                     root.moveFocus(dir)
                 }
@@ -5151,6 +5761,9 @@ ShellRoot {
                 onSettingsRequested: function(centerY) {
                     const localCenter = Number(centerY)
                     root.toggleSettingsPanel(localCenter > 0 ? barRoot.y + localCenter : root.defaultQuickPopupCenterY("settings"))
+                }
+                onLayoutRequested: function(centerY) {
+                    root.cycleBarLayout()
                 }
                 onQuickPopupRequested: function(type, centerY) {
                     root.openAdaptiveBarPopup(type, barRoot.y + centerY)
@@ -5234,11 +5847,11 @@ ShellRoot {
                     x: inlineQuickPopupLoader.x - (root.barOnRight ? 0 : root.sideQuickPopupBridgeWidth)
                     y: inlineQuickPopupLoader.y
                 width: inlineQuickPopupLoader.width + root.sideQuickPopupBridgeWidth
-                height: inlineQuickPopupLoader.height
-                radius: inlineQuickPopupLoader.cornerRadius
-                revealProgress: root.quickPopupSurfaceReveal
-                visible: root.sideQuickPopupPanelVisible && inlineQuickPopupLoader.contentReady
-            }
+	                height: inlineQuickPopupLoader.height
+	                radius: inlineQuickPopupLoader.cornerRadius
+	                revealProgress: root.quickPopupSurfaceReveal
+	                visible: root.sideQuickPopupPanelVisible && root.quickPopupSurfaceReveal > 0.015 && inlineQuickPopupLoader.contentReady
+	            }
 
             Item {
                 id: inlineQuickPopupLoader
@@ -5265,7 +5878,7 @@ ShellRoot {
 	                height: targetHeight
 	                x: targetX
 	                y: targetY
-	                visible: root.sideQuickPopupPanelVisible
+		                visible: root.sideQuickPopupPanelVisible && root.quickPopupSurfaceReveal > 0.015
 	                clip: true
 
                 onActiveChanged: if (!active) root.quickPopupHovering = false
@@ -5340,6 +5953,7 @@ ShellRoot {
 	                                revealProgressOverride: root.quickPopupSurfaceReveal
 	                                attachSide: root.popupAttachSide
 	                                popupType: popupCacheLoader.cacheType
+                                notificationsModelOverride: notificationHistoryModel
 	                                open: popupCacheLoader.showing
 	                                interactiveFocus: root.quickPopupType === popupCacheLoader.cacheType
 	                                    && (popupCacheLoader.cacheType === "search" || popupCacheLoader.cacheType === "agenda" || popupCacheLoader.cacheType === "weatherPanel")
@@ -5696,7 +6310,7 @@ ShellRoot {
     }
 
     Variants {
-        model: Quickshell.screens
+        model: root.shellSuppressedByFullscreen ? [] : Quickshell.screens
 
         PanelWindow {
             id: dashboardPanel

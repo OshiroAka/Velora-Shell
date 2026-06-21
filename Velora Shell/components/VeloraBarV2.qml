@@ -41,7 +41,8 @@ Item {
     readonly property int motionNormal: theme ? theme.motionNormal : 200
     readonly property int motionHover: theme ? theme.motionHover : 120
     readonly property int motionEaseHover: theme ? theme.motionEaseHover : Easing.OutCubic
-    readonly property int notificationCount: Math.max(trackedNotificationValues().length, makoNotificationCount)
+    property int notificationCountOverride: -1
+    readonly property int notificationCount: notificationCountOverride >= 0 ? notificationCountOverride : Math.max(trackedNotificationValues().length, makoNotificationCount)
     readonly property real uiScale: softStyle ? Math.min(1.08, Math.max(1.0, height / 1080)) : Math.min(1.12, Math.max(1.0, height / 1032))
     readonly property int stretchGap: Math.round(Math.min(softStyle ? 10 : 14, Math.max(0, (height - (softStyle ? 1080 : 1032)) / 7)))
     property int makoNotificationCount: 0
@@ -97,6 +98,7 @@ Item {
     readonly property real trailOpacity: 0.22
     signal themeRequested(real centerY)
     signal settingsRequested(real centerY)
+    signal layoutRequested(real centerY)
     signal quickPopupRequested(string popupType, real centerY)
     signal quickPopupHovered(string popupType, real centerY)
     signal quickPopupHoverEnded(string popupType)
@@ -323,6 +325,7 @@ Item {
         if (focusTarget === "bluetooth") return slotBluetooth
         if (focusTarget === "battery") return slotBattery
         if (focusTarget === "settings") return slotSettings
+        if (focusTarget === "layout") return slotLayout
         if (focusTarget === "avatar") return slotAvatar
         return slotClock
     }
@@ -494,6 +497,12 @@ Item {
             return
         }
 
+        if (focusTarget === "layout") {
+            root.layoutRequested(root.itemCenterY(slotLayout))
+            root.exitFocusRequested()
+            return
+        }
+
         if (focusTarget === "avatar") {
             root.quickPopupRequested("profile", root.itemCenterY(slotAvatar))
             return
@@ -506,7 +515,7 @@ Item {
     }
 
     function tr(key) {
-        const lang = root.theme ? root.theme.language : "ja"
+        const lang = root.theme ? root.theme.language : "pt-BR"
         const texts = {
             "ja": {
                 "tools": "ツール",
@@ -533,12 +542,12 @@ Item {
                 "utilities": "Utilitários"
             }
         }
-        const table = texts[lang] || texts["ja"]
-        return table[key] || texts["ja"][key] || key
+        const table = texts[lang] || texts["pt-BR"]
+        return table[key] || texts["pt-BR"][key] || key
     }
 
     function formatLocalizedDate(date) {
-        const lang = root.theme ? root.theme.language : "ja"
+        const lang = root.theme ? root.theme.language : "pt-BR"
         if (lang === "en") {
             const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
             return (date.getMonth() + 1) + "/" + date.getDate() + " (" + weekdays[date.getDay()] + ")"
@@ -1060,6 +1069,14 @@ Item {
                 selected: false
                 onTriggered: root.settingsRequested(root.itemCenterY(slotSettings))
             }
+
+            UtilityButton {
+                id: slotLayout
+
+                iconName: "display"
+                selected: false
+                onTriggered: root.layoutRequested(root.itemCenterY(slotLayout))
+            }
         }
 
         Item {
@@ -1296,9 +1313,12 @@ Item {
         property int number: 1
         property bool active: Hyprland.focusedWorkspace && Hyprland.focusedWorkspace.id === number
         property bool hovered: false
+        property real activeProgress: active ? 1 : 0
+        property real switchPulse: 0
 
         Layout.alignment: Qt.AlignHCenter
         radius: 6
+        scale: 1 + activeProgress * 0.035 + switchPulse * 0.025
         color: active ? root.alpha(root.pink, 0.48) : (hovered ? root.alpha(root.card, 0.70) : root.alpha(root.card, 0.34))
         border.width: 1
         border.color: active ? root.alpha(root.pink, 0.38) : root.alpha(root.lilac, 0.18)
@@ -1313,6 +1333,36 @@ Item {
         }
 
         Behavior on color { ColorAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
+        Behavior on activeProgress {
+            NumberAnimation {
+                duration: root.motionNormal
+                easing.type: Easing.OutCubic
+            }
+        }
+        Behavior on scale {
+            NumberAnimation {
+                duration: root.motionHover
+                easing.type: Easing.OutCubic
+            }
+        }
+
+        onActiveChanged: if (active) workspaceSwitchPulse.restart()
+
+        SequentialAnimation {
+            id: workspaceSwitchPulse
+            running: false
+            NumberAnimation { target: button; property: "switchPulse"; from: 0; to: 1; duration: 90; easing.type: Easing.OutCubic }
+            NumberAnimation { target: button; property: "switchPulse"; from: 1; to: 0; duration: 210; easing.type: Easing.OutCubic }
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            anchors.margins: 1
+            radius: Math.max(0, parent.radius - 1)
+            color: root.alpha(root.pink, 0.14 * button.activeProgress + 0.08 * button.switchPulse)
+            opacity: button.activeProgress > 0.01 || button.switchPulse > 0.01 ? 1 : 0
+            antialiasing: true
+        }
 
         Text {
             anchors.centerIn: parent
@@ -2013,6 +2063,31 @@ Item {
                 ctx.beginPath()
                 ctx.arc(cx, cy, s * 0.13, 0, Math.PI * 2, false)
                 ctx.stroke()
+            } else if (iconName === "display") {
+                ctx.save()
+                ctx.strokeStyle = colorString(lineColor, 0.86)
+                ctx.lineWidth = Math.max(1.35, s * 0.060)
+                roundedRect(ctx, s * 0.18, s * 0.22, s * 0.64, s * 0.45, s * 0.07)
+                ctx.stroke()
+                ctx.beginPath()
+                ctx.moveTo(cx, s * 0.67)
+                ctx.lineTo(cx, s * 0.79)
+                ctx.moveTo(s * 0.40, s * 0.80)
+                ctx.lineTo(s * 0.60, s * 0.80)
+                ctx.stroke()
+                ctx.lineWidth = Math.max(1.1, s * 0.048)
+                ctx.globalAlpha = 0.80
+                ctx.beginPath()
+                ctx.moveTo(cx, s * 0.31)
+                ctx.lineTo(cx, s * 0.22)
+                ctx.moveTo(cx, s * 0.58)
+                ctx.lineTo(cx, s * 0.67)
+                ctx.moveTo(s * 0.30, s * 0.445)
+                ctx.lineTo(s * 0.18, s * 0.445)
+                ctx.moveTo(s * 0.70, s * 0.445)
+                ctx.lineTo(s * 0.82, s * 0.445)
+                ctx.stroke()
+                ctx.restore()
             } else if (iconName === "battery") {
                 const level = Math.max(0, Math.min(1, value))
                 const bodyX = s * 0.19
