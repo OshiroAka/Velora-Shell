@@ -4,7 +4,7 @@
 autor: @OshiroAka
 
 
-![Velora Shell video](raw.githubusercontent.com/OshiroAka/Velora-Shell/blob/main/assets/Review-1.png?raw=true)
+![Velora Shell video](/OshiroAka/Velora-Shell/blob/main/assets/Review-1.png)
 
 ## System
 
