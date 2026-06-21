@@ -263,7 +263,7 @@ Item {
     function lockThemeName(v) {
         if (v === 1) return "Personagem"
         if (v === 2) return "Limpo"
-        return "Caelestia"
+        return "Velora"
     }
 
     function lockLineName(v) {
