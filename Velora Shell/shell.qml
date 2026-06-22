@@ -4220,10 +4220,12 @@ ShellRoot {
                         return
 
                     const gx = Math.round(inlineGeminiTopFrame.x)
-                    const gy = Math.round(inlineGeminiTopFrame.y)
                     const gw = Math.round(inlineGeminiTopFrame.width)
-                    const gh = Math.round(inlineGeminiTopFrame.height)
+                    const gy = Math.round(inlineGeminiTopFrame.surfaceY)
+                    const gh = Math.round(inlineGeminiTopFrame.surfaceHeight)
                     const radius = Math.min(panel.geminiTopCornerRadius, Math.max(0, gw / 2), Math.max(0, gh / 2))
+                    if (gh <= 0)
+                        return
 
                     ctx.save()
                     ctx.globalAlpha = root.frameVisualsReveal * inlineGeminiTopFrame.opacity
@@ -4345,7 +4347,7 @@ ShellRoot {
                 x: Math.round(root.mainAreaX(panel.panelWidth))
                 y: 0
                 width: Math.round(root.mainAreaWidth(panel.panelWidth))
-                height: root.geminiTopWindowOpen ? Math.max(12, root.desktopFrameMargin + 4) : Math.max(12, root.desktopFrameMargin + 2)
+                height: root.geminiTopWindowOpen ? Math.max(12, panel.geminiTopOpenY + 2) : Math.max(12, root.desktopFrameMargin + 2)
                 z: 35
 
                 MouseArea {
@@ -4367,6 +4369,10 @@ ShellRoot {
                 id: inlineGeminiTopFrame
 
                 readonly property bool mounted: root.geminiTopWindowOpen
+                readonly property int surfaceY: root.geminiTopWindowOpen && y >= root.desktopFrameMargin
+                    ? root.desktopFrameMargin
+                    : Math.round(y)
+                readonly property int surfaceHeight: Math.max(0, Math.round(y + height - surfaceY))
 
                 width: panel.geminiTopTargetWidth
                 height: panel.geminiTopTargetHeight
@@ -4380,6 +4386,8 @@ ShellRoot {
                 onYChanged: if (root.frameVisualsMounted) unifiedFrameCanvas.requestPaint()
                 onWidthChanged: if (root.frameVisualsMounted) unifiedFrameCanvas.requestPaint()
                 onHeightChanged: if (root.frameVisualsMounted) unifiedFrameCanvas.requestPaint()
+                onSurfaceYChanged: if (root.frameVisualsMounted) unifiedFrameCanvas.requestPaint()
+                onSurfaceHeightChanged: if (root.frameVisualsMounted) unifiedFrameCanvas.requestPaint()
                 Behavior on y {
                     enabled: veloraTheme.motionEnabled
                     NumberAnimation {
@@ -4402,9 +4410,9 @@ ShellRoot {
                 id: inlineGeminiTopInputMask
 
                 x: inlineGeminiTopFrame.x
-                y: inlineGeminiTopFrame.y
+                y: inlineGeminiTopFrame.surfaceY
                 width: root.geminiTopWindowOpen ? inlineGeminiTopFrame.width : 0
-                height: root.geminiTopWindowOpen ? inlineGeminiTopFrame.height : 0
+                height: root.geminiTopWindowOpen ? inlineGeminiTopFrame.surfaceHeight : 0
                 z: 27
             }
 

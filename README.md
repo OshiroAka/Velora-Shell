@@ -1,6 +1,6 @@
 # ᐯᕮᒪOᖇᗩ Sᕼᕮᒪᒪ 
 
-## Velora Shell is a minimalist and practical Linux desktop shell built with Quickshell. 
+## Velora Shell is a minimalist and practical Linux desktop shell built with Quickshell. Warning, this is recent and may contain bugs.
 **Autor:** [@OshiroAka](https://github.com/OshiroAka)
 
 
