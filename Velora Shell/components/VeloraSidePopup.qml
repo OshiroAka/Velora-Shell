@@ -7,6 +7,8 @@ import Quickshell.Io
 import Quickshell.Services.Notifications
 import Quickshell.Services.UPower
 import "popups"
+import "services"
+import "services/VeloraTranslations.js" as VeloraTranslations
 
 Item {
     id: root
@@ -42,8 +44,6 @@ Item {
     property string batteryTimeText: ""
     property string powerProfile: "unknown"
     property bool acOnline: false
-    property string pendingCommand: ""
-    property string activeCommand: ""
     property string searchQuery: ""
     property string searchMode: "apps"
     property int searchSelectedIndex: 0
@@ -217,46 +217,7 @@ Item {
 
     function tr(key) {
         const lang = root.theme ? root.theme.language : "pt-BR"
-        const texts = {
-            "ja": {
-                "bluetoothOff": "Bluetooth オフ",
-                "btReady": "接続できます",
-                "btDisabled": "無線が無効です",
-                "btMissing": "bluetoothctl 未検出",
-                "btInstall": "BlueZ tools をインストール",
-                "btDevices": "デバイス",
-                "btNoDevices": "デバイスなし",
-                "btUnavailable": "Bluetooth は利用できません",
-                "connect": "接",
-                "disconnect": "切"
-            },
-            "en": {
-                "bluetoothOff": "Bluetooth off",
-                "btReady": "Ready to connect",
-                "btDisabled": "Radio disabled",
-                "btMissing": "bluetoothctl not found",
-                "btInstall": "Install BlueZ tools",
-                "btDevices": "devices",
-                "btNoDevices": "No devices",
-                "btUnavailable": "Bluetooth unavailable",
-                "connect": "Connect",
-                "disconnect": "Disconnect"
-            },
-            "pt-BR": {
-                "bluetoothOff": "Bluetooth desligado",
-                "btReady": "Pronto para conectar",
-                "btDisabled": "Radio desativado",
-                "btMissing": "bluetoothctl nao encontrado",
-                "btInstall": "Instale as ferramentas BlueZ",
-                "btDevices": "dispositivos",
-                "btNoDevices": "Sem dispositivos",
-                "btUnavailable": "Bluetooth indisponivel",
-                "connect": "Conectar",
-                "disconnect": "Desconectar"
-            }
-        }
-        const table = texts[lang] || texts["pt-BR"]
-        return table[key] || texts["pt-BR"][key] || key
+        return VeloraTranslations.translate(key, lang)
     }
 
     function clamp01(value) {
@@ -528,6 +489,29 @@ Item {
             batteryQuery.running = true
     }
 
+    function refreshAfterCommand() {
+        if (!backgroundPollingActive)
+            return
+
+        if (!volumeQuery.running)
+            volumeQuery.running = true
+        if (!brightnessQuery.running)
+            brightnessQuery.running = true
+        wifiRefresh.restart()
+        bluetoothRefresh.restart()
+        if ((popupType === "files" || popupType === "profile") && !filesQuery.running)
+            filesQuery.running = true
+        if ((popupType === "battery" || popupType === "notifications") && !batteryQuery.running)
+            batteryQuery.running = true
+    }
+
+    VeloraPopupCommandService {
+        id: commandService
+
+        homeDir: root.homeDir
+        onCommandFinished: root.refreshAfterCommand()
+    }
+
     HoverHandler {
         onHoveredChanged: root.pointerInsideChanged(hovered)
     }
@@ -607,90 +591,51 @@ Item {
     }
 
     function shellQuote(text) {
-        return "'" + String(text || "").replace(/'/g, "'\\''") + "'"
+        return commandService.shellQuote(text)
     }
 
     function runCommand(command) {
-        if (!command || command.length <= 0)
-            return
-
-        root.pendingCommand = command
-        commandDebounce.restart()
+        commandService.runCommand(command)
     }
 
     function runDetached(command) {
-        if (!command || command.length <= 0)
-            return
-
-        runCommand(command + " >/dev/null 2>&1 &")
+        commandService.runDetached(command)
     }
 
     function openPath(path) {
-        const target = textOf(path)
-        if (target.length <= 0)
-            return
-
-        runDetached("xdg-open " + shellQuote(target))
+        commandService.openPath(path)
     }
 
     function openUrl(url) {
-        const target = textOf(url)
-        if (target.length <= 0)
-            return
-
-        runDetached("(command -v zen-browser >/dev/null 2>&1 && zen-browser " + shellQuote(target) + " || xdg-open " + shellQuote(target) + ")")
+        commandService.openUrl(url)
     }
 
     function openSettings(module) {
-        const suffix = textOf(module)
-        var command = "if command -v systemsettings >/dev/null 2>&1; then systemsettings"
-        if (suffix.length > 0)
-            command += " " + suffix
-        command += "; elif command -v gnome-control-center >/dev/null 2>&1; then gnome-control-center"
-        command += "; elif command -v nwg-look >/dev/null 2>&1; then nwg-look"
-        command += "; fi"
-        runDetached(command)
+        commandService.openSettings(module)
     }
 
     function openFileSearch() {
-        runDetached("if command -v fsearch >/dev/null 2>&1; then fsearch; elif command -v dolphin >/dev/null 2>&1; then dolphin --new-window " + shellQuote(homeDir) + "; else xdg-open " + shellQuote(homeDir) + "; fi")
+        commandService.openFileSearch()
     }
 
     function openTrash() {
-        runDetached("xdg-open trash:/// || xdg-open " + shellQuote(homeDir + "/.local/share/Trash/files"))
+        commandService.openTrash()
     }
 
     function browserSearch() {
-        const query = searchQuery.trim().length > 0 ? searchQuery.trim() : "Velora Shell"
-        openUrl("https://www.google.com/search?q=" + encodeURIComponent(query))
+        commandService.browserSearch(searchQuery)
     }
 
     function browserCommand(action) {
-        if (action === "new-window") {
-            runDetached("if command -v zen-browser >/dev/null 2>&1; then zen-browser --new-window about:newtab; else xdg-open about:blank; fi")
-            return
-        }
-        if (action === "private") {
-            runDetached("if command -v zen-browser >/dev/null 2>&1; then zen-browser --private-window; elif command -v firefox >/dev/null 2>&1; then firefox --private-window; else xdg-open about:blank; fi")
-            return
-        }
-        if (action === "downloads") {
-            runDetached("if command -v zen-browser >/dev/null 2>&1; then zen-browser about:downloads; else xdg-open " + shellQuote(homeDir + "/Downloads") + "; fi")
-            return
-        }
-        if (action === "bookmarks") {
-            runDetached("if command -v zen-browser >/dev/null 2>&1; then zen-browser about:preferences#search; else xdg-open about:blank; fi")
-            return
-        }
-        openUrl("about:newtab")
+        commandService.browserCommand(action)
     }
 
     function openCalendarApp() {
-        runDetached("if command -v kalendar >/dev/null 2>&1; then kalendar; elif command -v gnome-calendar >/dev/null 2>&1; then gnome-calendar; else xdg-open https://calendar.google.com; fi")
+        commandService.openCalendarApp()
     }
 
     function openClockApp() {
-        runDetached("if command -v kclock >/dev/null 2>&1; then kclock; elif command -v gnome-clocks >/dev/null 2>&1; then gnome-clocks; fi")
+        commandService.openClockApp()
     }
 
     function textOf(value) {
@@ -1936,44 +1881,6 @@ Item {
         }
     }
 
-    Timer {
-        id: commandDebounce
-        interval: 80
-        repeat: false
-        onTriggered: {
-            if (commandRunner.running || root.pendingCommand.length <= 0)
-                return
-
-            root.activeCommand = root.pendingCommand
-            commandRunner.command = ["bash", "-lc", root.activeCommand]
-            commandRunner.running = true
-        }
-    }
-
-    Process {
-        id: commandRunner
-
-        running: false
-        command: ["bash", "-lc", ""]
-        onExited: {
-            running = false
-            if (root.pendingCommand !== root.activeCommand)
-                commandDebounce.restart()
-            if (root.backgroundPollingActive) {
-                if (!volumeQuery.running)
-                    volumeQuery.running = true
-                if (!brightnessQuery.running)
-                    brightnessQuery.running = true
-                wifiRefresh.restart()
-                bluetoothRefresh.restart()
-                if ((root.popupType === "files" || root.popupType === "profile") && !filesQuery.running)
-                    filesQuery.running = true
-                if ((root.popupType === "battery" || root.popupType === "notifications") && !batteryQuery.running)
-                    batteryQuery.running = true
-            }
-        }
-    }
-
     Process {
         id: volumeQuery
 
@@ -2691,28 +2598,33 @@ Item {
         }
 
         PopupViewLoader {
+            popup: root
             viewType: "profile"
             viewMargins: 18
             sourceComponent: Component { ProfileView {} }
         }
 
         PopupViewLoader {
+            popup: root
             viewType: "time"
             viewMargins: 18
             sourceComponent: Component { TimeView {} }
         }
 
         PopupViewLoader {
+            popup: root
             viewType: "agenda"
             sourceComponent: Component { AgendaView {} }
         }
 
         PopupViewLoader {
+            popup: root
             viewType: "weatherPanel"
             sourceComponent: Component { WeatherView {} }
         }
 
         PopupViewLoader {
+            popup: root
             viewType: "search"
             viewMargins: 18
             sourceComponent: Component {
@@ -2723,36 +2635,42 @@ Item {
         }
 
         PopupViewLoader {
+            popup: root
             viewType: "files"
             viewMargins: 18
             sourceComponent: Component { FilesView {} }
         }
 
         PopupViewLoader {
+            popup: root
             viewType: "browser"
             viewMargins: 22
             sourceComponent: Component { BrowserView {} }
         }
 
         PopupViewLoader {
+            popup: root
             viewType: "volume"
             viewMargins: 22
             sourceComponent: Component { VolumeView {} }
         }
 
         PopupViewLoader {
+            popup: root
             viewType: "wifi"
             viewMargins: 16
             sourceComponent: Component { WifiView {} }
         }
 
         PopupViewLoader {
+            popup: root
             viewType: "brightness"
             viewMargins: 22
             sourceComponent: Component { BrightnessView {} }
         }
 
         PopupViewLoader {
+            popup: root
             viewType: "notifications"
             viewMargins: 16
             sourceComponent: Component {
@@ -2764,6 +2682,7 @@ Item {
         }
 
         PopupViewLoader {
+            popup: root
             viewType: "battery"
             viewMargins: 18
             sourceComponent: Component {
@@ -2774,27 +2693,18 @@ Item {
         }
 
         PopupViewLoader {
+            popup: root
             viewType: "bluetooth"
             viewMargins: 16
             sourceComponent: Component { BluetoothView {} }
         }
 
         PopupViewLoader {
+            popup: root
             viewType: "wallpaperVisibility"
             viewMargins: 15
             sourceComponent: Component { WallpaperVisibilityView {} }
         }
-    }
-
-    component PopupViewLoader: Loader {
-        property string viewType: ""
-        property int viewMargins: 0
-
-        anchors.fill: parent
-        anchors.margins: viewMargins
-        active: root.popupType === viewType
-        visible: active
-        asynchronous: false
     }
 
     component WinCard: Rectangle {
