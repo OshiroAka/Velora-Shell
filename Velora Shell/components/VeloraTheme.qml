@@ -315,7 +315,11 @@ QtObject {
     }
 
     function popupBubbleSurface() {
-        return popupBubblesSolid ? withAlpha(paletteSurfaceCard, popupBubbleSolidAlpha()) : surfaceCard
+        const base = popupBubblesSolid ? withAlpha(paletteSurfaceCard, popupBubbleSolidAlpha()) : surfaceCard
+        const tintAmount = themeId === "pywal16"
+            ? (themeMode === "dark" ? 0.16 : 0.10)
+            : (themeMode === "dark" ? 0.08 : 0.05)
+        return mix(base, accentPrimary, tintAmount, base.a)
     }
 
     function withOpacity(colorValue, opacity, role) {

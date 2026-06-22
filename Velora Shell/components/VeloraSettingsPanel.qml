@@ -1025,17 +1025,6 @@ Item {
                         }
                     }
 
-                    LayoutPreviewButton {
-                        width: 104
-                        side: "top"
-                        label: root.tr("layoutTop")
-                        active: root.theme ? root.theme.topBarEnabled : false
-                        onClicked: {
-                            if (root.theme)
-                                root.theme.setTopBarEnabled(true)
-                        }
-                    }
-
                 }
 
                 Row {
@@ -1884,18 +1873,6 @@ Item {
                                             root.theme.setTopBarEnabled(false)
                                             root.theme.setBarPosition("right")
                                         }
-                                    }
-                                }
-
-                                LayoutPreviewButton {
-                                    Layout.fillWidth: true
-                                    Layout.preferredHeight: 66
-                                    side: "top"
-                                    label: root.tr("layoutTop")
-                                    active: root.theme ? root.theme.topBarEnabled : false
-                                    onClicked: {
-                                        if (root.theme)
-                                            root.theme.setTopBarEnabled(true)
                                     }
                                 }
                             }

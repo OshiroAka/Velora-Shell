@@ -31,6 +31,7 @@ ShellRoot {
 
             notification.tracked = true
             root.upsertNotificationHistory(notification)
+            root.playNotificationSound()
             root.showNotificationToast(notification)
         }
     }
@@ -42,6 +43,7 @@ ShellRoot {
     property string notificationToastApp: ""
     property string notificationToastIconKey: "bell"
     property int notificationToastSerial: 0
+    readonly property string notificationSoundPath: "/home/shira/freesound_community-message-notification-103496.mp3"
     readonly property int notificationHistoryCount: notificationHistoryModel.count
     property bool wallpaperSelectorOpen: false
     property bool settingsPanelOpen: false
@@ -96,6 +98,8 @@ ShellRoot {
     property string rightDashboardSection: "weather"
     property bool focusMode: false
     property int focusIndex: 0
+    property real layoutSwitchOpacity: 1
+    property string pendingLayoutPosition: ""
     readonly property bool topBarLayout: veloraTheme.topBarEnabled
     readonly property bool sideBarLayoutEnabled: !topBarLayout
     readonly property bool activeWorkspaceFullscreen: Hyprland.focusedWorkspace ? Hyprland.focusedWorkspace.hasFullscreen : false
@@ -341,6 +345,23 @@ ShellRoot {
         notificationToastHideTimer.restart()
     }
 
+    function playNotificationSound() {
+        if (notificationSoundProcess.running)
+            notificationSoundProcess.running = false
+
+        notificationSoundProcess.command = [
+            "bash",
+            "-lc",
+            "sound=" + shellQuote(notificationSoundPath) + "; " +
+            "if [ -f \"$sound\" ]; then " +
+            "if command -v pw-play >/dev/null 2>&1; then pw-play \"$sound\" >/dev/null 2>&1; " +
+            "elif command -v paplay >/dev/null 2>&1; then paplay \"$sound\" >/dev/null 2>&1; " +
+            "elif command -v mpv >/dev/null 2>&1; then mpv --no-video --really-quiet \"$sound\" >/dev/null 2>&1; " +
+            "fi; fi"
+        ]
+        notificationSoundProcess.running = true
+    }
+
     function hideNotificationToast() {
         notificationToastHideTimer.stop()
         notificationToastVisible = false
@@ -387,6 +408,34 @@ ShellRoot {
 
     ListModel {
         id: notificationHistoryModel
+    }
+
+    SequentialAnimation {
+        id: layoutSwitchAnimation
+
+        NumberAnimation {
+            target: root
+            property: "layoutSwitchOpacity"
+            to: 0.18
+            duration: veloraTheme.motionEnabled ? 95 : 1
+            easing.type: Easing.OutCubic
+        }
+
+        ScriptAction {
+            script: root.applyPendingLayoutSwitch()
+        }
+
+        PauseAnimation {
+            duration: veloraTheme.motionEnabled ? 18 : 1
+        }
+
+        NumberAnimation {
+            target: root
+            property: "layoutSwitchOpacity"
+            to: 1
+            duration: veloraTheme.motionEnabled ? 210 : 1
+            easing.type: Easing.OutCubic
+        }
     }
 
     function clockAlertCommand(title, message) {
@@ -546,6 +595,14 @@ ShellRoot {
 
     Process {
         id: leftClockNotifyProcess
+
+        running: false
+        command: ["bash", "-lc", "true"]
+        onExited: running = false
+    }
+
+    Process {
+        id: notificationSoundProcess
 
         running: false
         command: ["bash", "-lc", "true"]
@@ -883,6 +940,21 @@ ShellRoot {
         veloraTheme.applyLayout(position, true)
     }
 
+    function applyPendingLayoutSwitch() {
+        if (pendingLayoutPosition.length <= 0)
+            return
+
+        switchToSideBarLayout(pendingLayoutPosition)
+        pendingLayoutPosition = ""
+    }
+
+    function switchToSideBarLayoutWithFade(position) {
+        pendingLayoutPosition = String(position || "left") === "right" ? "right" : "left"
+        layoutSwitchAnimation.stop()
+        layoutSwitchOpacity = 1
+        layoutSwitchAnimation.restart()
+    }
+
     function cycleBarLayout() {
         closeQuickPopup()
         closeGeminiTop()
@@ -890,17 +962,7 @@ ShellRoot {
         settingsPanelOpen = false
         settingsPanelWindowOpen = false
 
-        if (veloraTheme.topBarEnabled) {
-            switchToSideBarLayout("right")
-            return
-        }
-
-        if (barOnRight) {
-            switchToSideBarLayout("left")
-            return
-        }
-
-        veloraTheme.setTopBarEnabled(true)
+        switchToSideBarLayoutWithFade((veloraTheme.topBarEnabled || !barOnRight) ? "right" : "left")
     }
 
     function engageGeminiTop() {
@@ -3895,12 +3957,16 @@ ShellRoot {
             required property var modelData
             readonly property int panelWidth: modelData.width > 0 ? modelData.width : 1920
             readonly property int panelHeight: modelData.height > 0 ? modelData.height : 1200
-            readonly property bool geminiTopExpanded: inlineGeminiTopPanel.item && inlineGeminiTopPanel.item.conversationActive
+            readonly property bool geminiTopConversationExpanded: inlineGeminiTopPanel.item && inlineGeminiTopPanel.item.conversationActive
+            readonly property bool geminiTopNotificationAttached: root.geminiTopWindowOpen && root.notificationToastMounted
             readonly property int geminiTopOpenY: Math.max(root.desktopFrameMargin + 18, 30)
             readonly property int geminiTopTargetWidth: Math.round(Math.min(780, Math.max(700, panelWidth * 0.385)))
             readonly property int geminiTopCompactHeight: Math.round(Math.min(176, Math.max(150, panelHeight * 0.138)))
+            readonly property int geminiTopNotificationHeight: Math.round(Math.min(292, Math.max(246, geminiTopCompactHeight + 92)))
             readonly property int geminiTopExpandedHeight: Math.round(Math.min(560, Math.max(420, panelHeight * 0.50)))
-            readonly property int geminiTopTargetHeight: geminiTopExpanded ? geminiTopExpandedHeight : geminiTopCompactHeight
+            readonly property int geminiTopTargetHeight: geminiTopConversationExpanded
+                ? geminiTopExpandedHeight
+                : (geminiTopNotificationAttached ? geminiTopNotificationHeight : geminiTopCompactHeight)
             readonly property int geminiTopTargetX: Math.round((panelWidth - geminiTopTargetWidth) / 2)
             readonly property int geminiTopTargetY: root.geminiTopOpen ? geminiTopOpenY : -geminiTopTargetHeight - 18
             readonly property int geminiTopCornerRadius: 24
@@ -3991,7 +4057,7 @@ ShellRoot {
                 anchors.fill: parent
                 antialiasing: true
                 visible: root.frameVisualsMounted
-                opacity: 1
+                opacity: root.layoutSwitchOpacity
                 z: 0
 
                 function roundedRectPath(ctx, x, y, w, h, radius) {
@@ -4823,7 +4889,7 @@ ShellRoot {
                     ? (standalone ? Math.max(0, parent.height - root.sidebarVerticalMargin * 2) : Math.max(0, root.desktopFrameHeight(parent.height) + 2))
                     : 0
                 visible: root.sideBarLayoutEnabled && root.sideVisualizerMounted
-                opacity: root.sideVisualizerReveal
+                opacity: root.sideVisualizerReveal * root.layoutSwitchOpacity
                 clip: true
                 z: standalone ? 11 : 1
 
@@ -5573,17 +5639,18 @@ ShellRoot {
                 id: inlineNotificationToastStage
 
                 readonly property bool mounted: root.notificationToastMounted || opacity > 0.001
+                readonly property bool attachedToGemini: root.geminiTopWindowOpen && inlineGeminiTopFrame.mounted
                 readonly property int panelWidth: Math.max(parent.width, panel.modelData.width)
                 readonly property int safeWidth: Math.max(320, panelWidth - 96)
-                readonly property int bubbleRadius: Math.min(17, height / 2)
-                readonly property int openY: root.geminiTopWindowOpen
-                    ? Math.max(root.desktopFrameMargin, Math.round(inlineGeminiTopFrame.y + inlineGeminiTopFrame.height + 14))
+                readonly property int bubbleRadius: attachedToGemini ? panel.geminiTopCornerRadius : Math.min(17, height / 2)
+                readonly property int openY: attachedToGemini
+                    ? Math.round(inlineGeminiTopFrame.y + inlineGeminiTopFrame.height - height)
                     : root.desktopFrameMargin
 
-                width: Math.round(Math.min(safeWidth, Math.max(330, panelWidth * 0.18)))
-                height: 48
-                x: Math.round((panelWidth - width) / 2)
-                y: root.notificationToastVisible ? openY : -height - 18
+                width: attachedToGemini ? inlineGeminiTopFrame.width : Math.round(Math.min(safeWidth, Math.max(330, panelWidth * 0.18)))
+                height: attachedToGemini ? 76 : 48
+                x: attachedToGemini ? inlineGeminiTopFrame.x : Math.round((panelWidth - width) / 2)
+                y: root.notificationToastVisible || attachedToGemini ? openY : -height - 18
                 z: 140
                 visible: mounted
                 opacity: root.notificationToastVisible ? 1 : 0
@@ -5596,7 +5663,7 @@ ShellRoot {
                 onHeightChanged: if (root.frameVisualsMounted) unifiedFrameCanvas.requestPaint()
 
                 Behavior on y {
-                    enabled: veloraTheme.motionEnabled
+                    enabled: veloraTheme.motionEnabled && !inlineNotificationToastStage.attachedToGemini
                     NumberAnimation {
                         duration: root.notificationToastVisible ? root.notificationToastOpenDuration : root.notificationToastCloseDuration
                         easing.type: root.notificationToastVisible ? Easing.BezierSpline : Easing.InOutCubic
@@ -5623,12 +5690,24 @@ ShellRoot {
                     antialiasing: true
                 }
 
+                Rectangle {
+                    anchors {
+                        left: parent.left
+                        right: parent.right
+                        top: parent.top
+                    }
+                    height: 1
+                    visible: inlineNotificationToastStage.attachedToGemini
+                    color: root.desktopFrameBorderColor()
+                    opacity: 0.52
+                }
+
                 Item {
                     id: inlineNotificationToastIcon
 
                     width: 32
                     height: 32
-                    x: 10
+                    x: inlineNotificationToastStage.attachedToGemini ? 24 : 10
                     y: Math.round((parent.height - height) / 2)
 
                     Rectangle {
@@ -5722,7 +5801,7 @@ ShellRoot {
                 Text {
                     x: inlineNotificationToastIcon.x + inlineNotificationToastIcon.width + 13
                     y: Math.round((parent.height - height) / 2) - 1
-                    width: parent.width - x - 16
+                    width: parent.width - x - (inlineNotificationToastStage.attachedToGemini ? 28 : 16)
                     text: root.notificationToastTitle
                     color: veloraTheme.textPrimary
                     font.family: veloraTheme.uiFont
@@ -5747,6 +5826,7 @@ ShellRoot {
                 theme: veloraTheme
                 z: 10
                 visible: root.sideBarLayoutEnabled
+                opacity: root.layoutSwitchOpacity
                 width: root.sideBarLayoutEnabled ? root.sidebarVisualWidth : 0
                 x: root.barX(parent.width)
                 focusMode: root.focusMode
