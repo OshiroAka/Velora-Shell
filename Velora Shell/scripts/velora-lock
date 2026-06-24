@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [ "${VELORA_LOCK_ENABLED:-0}" != "1" ]; then
+  exit 0
+fi
+
 config_dir="${VELORA_LOCK_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/quickshell/velora-shell}"
 lock_file="$config_dir/lock.qml"
 

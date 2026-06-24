@@ -86,10 +86,14 @@ ShellRoot {
     property bool leftMenuHovering: false
     property bool leftMenuPinned: false
     property bool leftMenuTriggerHovering: false
+    property bool leftMenuHandleHovering: false
+    property bool leftMenuHandleRevealHold: false
     property bool leftMenuPanelHovering: false
     property bool leftMediaWindowOpen: false
     property bool leftMediaWindowHovering: false
     property bool leftMediaWindowEntranceHold: false
+    property real leftMenuFrameReveal: leftMenuOpen ? 1 : 0
+    property real leftMenuHandleSurfaceReveal: (!leftMenuOpen && (leftMenuTriggerHovering || leftMenuHandleHovering || leftMenuHandleRevealHold)) ? 1 : 0
     property real leftMediaWindowCenterY: 300
     property string leftDetailWindowType: "media"
     property real leftDetailSwitchProgress: 1
@@ -105,7 +109,7 @@ ShellRoot {
     readonly property bool activeWorkspaceFullscreen: Hyprland.focusedWorkspace ? Hyprland.focusedWorkspace.hasFullscreen : false
     readonly property bool shellSuppressedByFullscreen: activeWorkspaceFullscreen
     readonly property bool barOnRight: veloraTheme.barPosition === "right"
-    readonly property bool leftMenuOnLeft: barOnRight
+    readonly property bool leftMenuOnLeft: true
     readonly property string leftMenuAttachSide: leftMenuOnLeft ? "left" : "right"
     readonly property bool rightSoftLayout: true
     readonly property int sidebarVisualWidth: 112
@@ -150,8 +154,11 @@ ShellRoot {
         { kind: "static", path: topWallpaperDir + "/static/cosmin-georgian-gd3ysFyrsTQ-unsplash.jpg", preview: topWallpaperDir + "/static/cosmin-georgian-gd3ysFyrsTQ-unsplash.jpg", title: "blue pagoda" }
     ]
     property var topWallpaperEntries: topWallpaperFallbackEntries
-    readonly property int leftMenuWidth: 348
+    readonly property int leftMenuWidth: 820
+    readonly property int leftMenuPreferredHeight: 600
     readonly property int leftMenuTriggerWidth: 18
+    readonly property int leftMenuHandleWidth: 52
+    readonly property int leftMenuHandleHeight: 158
     readonly property int leftMenuFrameInset: frameVisualsEnabled ? desktopFrameMargin + 1 : desktopFrameMargin
     readonly property int leftMediaWindowWidth: 640
     readonly property int leftMediaWindowHeight: 690
@@ -1524,21 +1531,38 @@ ShellRoot {
         leftMenuInteractiveFocus = false
         leftMenuOpen = false
         leftMenuTriggerHovering = false
+        leftMenuHandleHovering = false
+        leftMenuHandleRevealHold = false
         leftMenuPanelHovering = false
         leftMediaWindowOpen = false
         leftMediaWindowHovering = false
         leftMediaWindowEntranceHold = false
         leftDetailSwitchProgress = 1
         leftMenuCloseTimer.stop()
+        leftMenuHandleRevealTimer.stop()
         leftMediaWindowEntranceHoldTimer.stop()
     }
 
     function openLeftMenu() {
-        closeLegacyLeftMenu()
+        if (shellSuppressedByFullscreen)
+            return
+        leftMenuCloseTimer.stop()
+        leftMenuOpen = true
+        leftMenuPreloadEnabled = true
     }
 
     function updateLeftMenuHovering() {
-        leftMenuHovering = leftMenuPinned || leftMenuTriggerHovering || leftMenuPanelHovering || leftMediaWindowHovering || leftMediaWindowEntranceHold
+        leftMenuHovering = leftMenuPinned || leftMenuTriggerHovering || leftMenuHandleHovering || leftMenuPanelHovering || leftMediaWindowHovering || leftMediaWindowEntranceHold
+    }
+
+    function holdLeftMenuHandleReveal() {
+        leftMenuHandleRevealHold = true
+        leftMenuHandleRevealTimer.restart()
+    }
+
+    function releaseLeftMenuHandleRevealSoon() {
+        if (!leftMenuTriggerHovering && !leftMenuHandleHovering)
+            leftMenuHandleRevealTimer.restart()
     }
 
     function scheduleLeftMenuClose() {
@@ -1582,6 +1606,16 @@ ShellRoot {
         if (type === "wallpaper")
             return 380
         return leftMediaWindowWidth
+    }
+
+    function leftMenuHeightForScreen(screenHeight) {
+        const available = Math.max(390, screenHeight - leftMenuFrameInset * 2 - 250)
+        return Math.round(Math.max(390, Math.min(leftMenuPreferredHeight, available)))
+    }
+
+    function leftMenuYForScreen(screenHeight, menuHeight) {
+        const centered = Math.round((screenHeight - menuHeight) / 2 + 18)
+        return Math.round(Math.max(leftMenuFrameInset, Math.min(screenHeight - leftMenuFrameInset - menuHeight, centered)))
     }
 
     function leftDetailWindowHeight(type, screenHeight) {
@@ -1718,11 +1752,11 @@ ShellRoot {
         if (type === "browser")
             return 795
         if (type === "volume")
-            return 492
+            return 565
         if (type === "wifi")
             return 690
         if (type === "brightness")
-            return 735
+            return 570
         if (type === "notifications")
             return 935
         if (type === "battery")
@@ -1787,6 +1821,17 @@ ShellRoot {
     }
 
     Timer {
+        id: leftMenuHandleRevealTimer
+
+        interval: Math.max(460, veloraTheme.motionHover + 260)
+        repeat: false
+        onTriggered: {
+            if (!root.leftMenuTriggerHovering && !root.leftMenuHandleHovering)
+                root.leftMenuHandleRevealHold = false
+        }
+    }
+
+    Timer {
         id: leftMediaWindowEntranceHoldTimer
 
         interval: Math.max(520, veloraTheme.motionPanelIn + 180)
@@ -1794,6 +1839,23 @@ ShellRoot {
         onTriggered: {
             root.leftMediaWindowEntranceHold = false
             root.scheduleLeftMenuClose()
+        }
+    }
+
+    Behavior on leftMenuFrameReveal {
+        enabled: veloraTheme.motionEnabled
+        NumberAnimation {
+            duration: root.leftMenuOpen ? veloraTheme.motionPanelIn : root.quickPopupLineCloseDuration
+            easing.type: Easing.BezierSpline
+            easing.bezierCurve: root.leftMenuOpen ? veloraTheme.motionCurveEmphasizedAccel : veloraTheme.motionCurveStandard
+        }
+    }
+
+    Behavior on leftMenuHandleSurfaceReveal {
+        enabled: veloraTheme.motionEnabled
+        NumberAnimation {
+            duration: veloraTheme.motionHover
+            easing.type: Easing.OutCubic
         }
     }
 
@@ -2090,6 +2152,19 @@ ShellRoot {
 
         function media(): void {
             root.openRightDashboard("media")
+        }
+
+        function leftMenu(): void {
+            root.leftMenuPinned = true
+            root.leftMediaWindowOpen = false
+            root.leftMediaWindowEntranceHold = false
+            root.leftDetailSwitchProgress = 1
+            root.updateLeftMenuHovering()
+            root.openLeftMenu()
+        }
+
+        function closeLeftMenu(): void {
+            root.closeLegacyLeftMenu()
         }
 
         function leftMedia(): void {
@@ -3193,7 +3268,7 @@ ShellRoot {
             id: leftMenuPanel
 
             required property var modelData
-            property real reveal: root.leftMenuOpen ? 1 : 0
+            property real reveal: root.leftMenuFrameReveal
             property real mediaReveal: root.leftMenuOpen && root.leftMediaWindowOpen ? 1 : 0
             readonly property int slideDistance: root.leftMenuWidth + root.leftMenuFrameInset + root.leftMenuTriggerWidth + 8
             readonly property bool mediaWindowVisible: root.leftMediaWindowOpen || mediaReveal > 0.01
@@ -3209,12 +3284,12 @@ ShellRoot {
 
             screen: modelData
             color: "transparent"
-            implicitWidth: Math.max(root.leftMenuTriggerWidth, root.leftMenuFrameInset + root.leftMenuWidth + 1, mediaWindowVisible ? root.leftMenuFrameInset + root.leftMenuWidth + root.leftMediaWindowGap + detailWindowWidth + root.leftMenuFrameInset : 0)
+            implicitWidth: Math.max(root.leftMenuHandleWidth, root.leftMenuFrameInset + root.leftMenuWidth + 1, mediaWindowVisible ? root.leftMenuFrameInset + root.leftMenuWidth + root.leftMediaWindowGap + detailWindowWidth + root.leftMenuFrameInset : 0)
             exclusiveZone: 0
             exclusionMode: ExclusionMode.Ignore
             focusable: root.leftMenuOpen
 
-            WlrLayershell.layer: WlrLayer.Top
+            WlrLayershell.layer: WlrLayer.Overlay
             WlrLayershell.namespace: "velora-shell-left-menu"
             WlrLayershell.keyboardFocus: root.leftMenuOpen ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
 
@@ -3232,6 +3307,11 @@ ShellRoot {
                 }
 
                 Region {
+                    item: leftMenuHandle
+                    radius: Math.min(root.desktopFrameRadius, 16)
+                }
+
+                Region {
                     item: leftMenuInputMask
                     radius: leftMenuLoader.item ? leftMenuLoader.item.cornerRadius : 13
                 }
@@ -3239,15 +3319,6 @@ ShellRoot {
                 Region {
                     item: leftMediaWindowInputMask
                     radius: leftMediaWindowLoader.cornerRadius
-                }
-            }
-
-            Behavior on reveal {
-                enabled: veloraTheme.motionEnabled
-                NumberAnimation {
-                    duration: root.leftMenuOpen ? veloraTheme.motionLayersIn : veloraTheme.motionLayersOut
-                    easing.type: Easing.BezierSpline
-                    easing.bezierCurve: root.leftMenuOpen ? veloraTheme.motionCurveEmphasizedDecel : veloraTheme.motionCurveEmphasizedAccel
                 }
             }
 
@@ -3264,9 +3335,9 @@ ShellRoot {
                 id: leftMenuTrigger
 
                 x: leftMenuPanel.menuOnLeft ? 0 : parent.width - width
-                y: 0
-                width: root.leftMenuTriggerWidth
-                height: parent.height
+                y: root.leftMenuYForScreen(parent.height, root.leftMenuHeightForScreen(parent.height))
+                width: root.leftMenuHandleWidth
+                height: root.leftMenuHeightForScreen(parent.height)
 
                 MouseArea {
                     anchors.fill: parent
@@ -3274,17 +3345,157 @@ ShellRoot {
                     acceptedButtons: Qt.NoButton
                     onEntered: {
                         root.leftMenuTriggerHovering = true
+                        root.holdLeftMenuHandleReveal()
                         root.updateLeftMenuHovering()
-                        root.openLeftMenu()
                     }
                     onPositionChanged: {
                         root.leftMenuTriggerHovering = true
+                        root.holdLeftMenuHandleReveal()
                         root.updateLeftMenuHovering()
-                        root.openLeftMenu()
                     }
                     onExited: {
                         root.leftMenuTriggerHovering = false
-                        root.scheduleLeftMenuClose()
+                        root.releaseLeftMenuHandleRevealSoon()
+                        root.updateLeftMenuHovering()
+                    }
+                }
+            }
+
+            Item {
+                id: leftMenuHandle
+
+                readonly property real reveal: root.leftMenuHandleSurfaceReveal
+
+                x: leftMenuPanel.menuOnLeft
+                    ? Math.round(-10 - (1 - reveal) * (root.leftMenuHandleWidth - 10))
+                    : parent.width - root.leftMenuHandleWidth + 10 + Math.round((1 - reveal) * (root.leftMenuHandleWidth - 10))
+                y: root.leftMenuYForScreen(parent.height, root.leftMenuHeightForScreen(parent.height)) + Math.round((root.leftMenuHeightForScreen(parent.height) - root.leftMenuHandleHeight) / 2)
+                width: root.leftMenuHandleWidth
+                height: root.leftMenuHandleHeight
+                opacity: reveal
+                visible: reveal > 0.01
+                z: 30
+
+                Canvas {
+                    id: leftMenuHandleSurfaceCanvas
+
+                    anchors.fill: parent
+                    antialiasing: true
+                    z: -1
+
+                    function path(ctx) {
+                        const r = Math.min(root.desktopFrameRadius, 16, width / 2, height / 2)
+                        const x2 = width
+                        const y2 = height
+
+                        ctx.beginPath()
+                        if (leftMenuPanel.menuOnLeft) {
+                            ctx.moveTo(0, 0)
+                            ctx.lineTo(x2 - r, 0)
+                            ctx.arcTo(x2, 0, x2, r, r)
+                            ctx.lineTo(x2, y2 - r)
+                            ctx.arcTo(x2, y2, x2 - r, y2, r)
+                            ctx.lineTo(0, y2)
+                            ctx.lineTo(0, 0)
+                        } else {
+                            ctx.moveTo(r, 0)
+                            ctx.arcTo(0, 0, 0, r, r)
+                            ctx.lineTo(0, y2 - r)
+                            ctx.arcTo(0, y2, r, y2, r)
+                            ctx.lineTo(x2, y2)
+                            ctx.lineTo(x2, 0)
+                            ctx.lineTo(r, 0)
+                        }
+                        ctx.closePath()
+                    }
+
+                    function openStrokePath(ctx) {
+                        const r = Math.min(root.desktopFrameRadius, 16, width / 2, height / 2)
+                        const x2 = width
+                        const y2 = height
+
+                        ctx.beginPath()
+                        if (leftMenuPanel.menuOnLeft) {
+                            ctx.moveTo(0, 0.5)
+                            ctx.lineTo(x2 - r, 0.5)
+                            ctx.arcTo(x2 - 0.5, 0.5, x2 - 0.5, r, r)
+                            ctx.lineTo(x2 - 0.5, y2 - r)
+                            ctx.arcTo(x2 - 0.5, y2 - 0.5, x2 - r, y2 - 0.5, r)
+                            ctx.lineTo(0, y2 - 0.5)
+                        } else {
+                            ctx.moveTo(x2, 0.5)
+                            ctx.lineTo(r, 0.5)
+                            ctx.arcTo(0.5, 0.5, 0.5, r, r)
+                            ctx.lineTo(0.5, y2 - r)
+                            ctx.arcTo(0.5, y2 - 0.5, r, y2 - 0.5, r)
+                            ctx.lineTo(x2, y2 - 0.5)
+                        }
+                    }
+
+                    onPaint: {
+                        const ctx = getContext("2d")
+                        ctx.clearRect(0, 0, width, height)
+                        if (width <= 1 || height <= 1)
+                            return
+
+                        ctx.fillStyle = root.desktopFrameMatteColor()
+                        path(ctx)
+                        ctx.fill()
+
+                        ctx.strokeStyle = root.desktopFrameBorderColor()
+                        ctx.lineWidth = 1
+                        ctx.lineCap = "round"
+                        ctx.lineJoin = "round"
+                        openStrokePath(ctx)
+                        ctx.stroke()
+                    }
+
+                    Component.onCompleted: requestPaint()
+                    onWidthChanged: requestPaint()
+                    onHeightChanged: requestPaint()
+
+                    Connections {
+                        target: veloraTheme
+                        function onSurfaceSidebarChanged() { leftMenuHandleSurfaceCanvas.requestPaint() }
+                        function onSidebarOpacityChanged() { leftMenuHandleSurfaceCanvas.requestPaint() }
+                        function onThemeModeChanged() { leftMenuHandleSurfaceCanvas.requestPaint() }
+                        function onThemeIdChanged() { leftMenuHandleSurfaceCanvas.requestPaint() }
+                        function onBorderSoftChanged() { leftMenuHandleSurfaceCanvas.requestPaint() }
+                    }
+                }
+
+                Text {
+                    width: 22
+                    height: 34
+                    x: leftMenuPanel.menuOnLeft ? parent.width - width - 5 : 5
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: leftMenuPanel.menuOnLeft ? "›" : "‹"
+                    color: veloraTheme.alpha(veloraTheme.textPrimary, veloraTheme.themeMode === "dark" ? 0.76 : 0.70)
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                    font.family: veloraTheme.uiFont
+                    font.pixelSize: 27
+                    font.weight: Font.DemiBold
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onEntered: {
+                        root.leftMenuHandleHovering = true
+                        root.holdLeftMenuHandleReveal()
+                        root.updateLeftMenuHovering()
+                    }
+                    onExited: {
+                        root.leftMenuHandleHovering = false
+                        root.releaseLeftMenuHandleRevealSoon()
+                        root.updateLeftMenuHovering()
+                    }
+                    onClicked: {
+                        root.leftMenuPinned = true
+                        root.leftMenuInteractiveFocus = false
+                        root.openLeftMenu()
                     }
                 }
             }
@@ -3307,9 +3518,108 @@ ShellRoot {
                 height: leftMediaWindowLoader.active ? leftMediaWindowLoader.height : 0
             }
 
+            Canvas {
+                id: leftMenuSurfaceCanvas
+
+                x: leftMenuLoader.x
+                y: leftMenuLoader.y
+                width: leftMenuLoader.width
+                height: leftMenuLoader.height
+                opacity: Math.min(1, leftMenuPanel.reveal * 1.35)
+                visible: (root.leftMenuOpen || leftMenuPanel.reveal > 0.01) && leftMenuLoader.contentReady
+                antialiasing: true
+                z: 0
+
+                function surfacePath(ctx) {
+                    const r = Math.min(leftMenuLoader.item ? leftMenuLoader.item.cornerRadius : 22, width / 2, height / 2)
+                    const x2 = width
+                    const y2 = height
+
+                    ctx.beginPath()
+                    if (leftMenuPanel.menuOnLeft) {
+                        ctx.moveTo(0, 0)
+                        ctx.lineTo(x2 - r, 0)
+                        ctx.arcTo(x2, 0, x2, r, r)
+                        ctx.lineTo(x2, y2 - r)
+                        ctx.arcTo(x2, y2, x2 - r, y2, r)
+                        ctx.lineTo(0, y2)
+                        ctx.lineTo(0, 0)
+                    } else {
+                        ctx.moveTo(r, 0)
+                        ctx.arcTo(0, 0, 0, r, r)
+                        ctx.lineTo(0, y2 - r)
+                        ctx.arcTo(0, y2, r, y2, r)
+                        ctx.lineTo(x2, y2)
+                        ctx.lineTo(x2, 0)
+                        ctx.lineTo(r, 0)
+                    }
+                    ctx.closePath()
+                }
+
+                function openStrokePath(ctx) {
+                    const r = Math.min(leftMenuLoader.item ? leftMenuLoader.item.cornerRadius : 22, width / 2, height / 2)
+                    const x2 = width
+                    const y2 = height
+
+                    ctx.beginPath()
+                    if (leftMenuPanel.menuOnLeft) {
+                        ctx.moveTo(0, 0.5)
+                        ctx.lineTo(x2 - r, 0.5)
+                        ctx.arcTo(x2 - 0.5, 0.5, x2 - 0.5, r, r)
+                        ctx.lineTo(x2 - 0.5, y2 - r)
+                        ctx.arcTo(x2 - 0.5, y2 - 0.5, x2 - r, y2 - 0.5, r)
+                        ctx.lineTo(0, y2 - 0.5)
+                    } else {
+                        ctx.moveTo(x2, 0.5)
+                        ctx.lineTo(r, 0.5)
+                        ctx.arcTo(0.5, 0.5, 0.5, r, r)
+                        ctx.lineTo(0.5, y2 - r)
+                        ctx.arcTo(0.5, y2 - 0.5, r, y2 - 0.5, r)
+                        ctx.lineTo(x2, y2 - 0.5)
+                    }
+                }
+
+                onPaint: {
+                    const ctx = getContext("2d")
+                    ctx.clearRect(0, 0, width, height)
+                    if (width <= 1 || height <= 1)
+                        return
+
+                    ctx.fillStyle = root.desktopFrameMatteColor()
+                    surfacePath(ctx)
+                    ctx.fill()
+
+                    ctx.strokeStyle = root.desktopFrameBorderColor()
+                    ctx.lineWidth = 1
+                    ctx.lineCap = "round"
+                    ctx.lineJoin = "round"
+                    openStrokePath(ctx)
+                    ctx.stroke()
+                }
+
+                Component.onCompleted: requestPaint()
+                onWidthChanged: requestPaint()
+                onHeightChanged: requestPaint()
+                onVisibleChanged: if (visible) requestPaint()
+
+                Connections {
+                    target: veloraTheme
+                    function onSurfaceSidebarChanged() { leftMenuSurfaceCanvas.requestPaint() }
+                    function onSidebarOpacityChanged() { leftMenuSurfaceCanvas.requestPaint() }
+                    function onThemeModeChanged() { leftMenuSurfaceCanvas.requestPaint() }
+                    function onThemeIdChanged() { leftMenuSurfaceCanvas.requestPaint() }
+                    function onBorderSoftChanged() { leftMenuSurfaceCanvas.requestPaint() }
+                }
+            }
+
             VeloraAttachedSurface {
                 theme: veloraTheme
-                sidebarMaterial: true
+                useCustomGlass: root.frameVisualsMounted
+                customGlass: root.desktopFrameMatteColor()
+                lineReveal: true
+                transitionContrast: 0
+                slideOffsetOverride: 76
+                flattenAttachedEdge: true
                 attachSide: leftMenuPanel.menuOnLeft ? "left" : "right"
                 x: leftMenuLoader.x
                 y: leftMenuLoader.y
@@ -3317,29 +3627,31 @@ ShellRoot {
                 height: leftMenuLoader.height
                 radius: leftMenuLoader.item ? leftMenuLoader.item.cornerRadius : 13
                 revealProgress: leftMenuPanel.reveal
-                visible: root.leftMenuOpen || leftMenuPanel.reveal > 0.01
+                visible: false
             }
 
             Loader {
                 id: leftMenuLoader
 
                 active: root.leftMenuPreloadEnabled || root.leftMenuOpen || leftMenuPanel.reveal > 0.01
-                asynchronous: true
+                asynchronous: false
+                readonly property bool contentReady: item !== null
                 width: root.leftMenuWidth
-                height: Math.max(0, parent.height - root.leftMenuFrameInset * 2)
+                height: root.leftMenuHeightForScreen(parent.height)
                 x: leftMenuPanel.menuX
-                y: root.leftMenuFrameInset
+                y: root.leftMenuYForScreen(parent.height, height)
                 visible: root.leftMenuOpen || leftMenuPanel.reveal > 0.01
-                opacity: leftMenuPanel.reveal
+                opacity: 1
+                z: 1
 
                 sourceComponent: Component {
-                    VeloraLeftMenu {
+                    VeloraLeftOverview {
                         theme: veloraTheme
                         clockState: leftClockState
                         externalSurface: true
                         attachSide: leftMenuPanel.menuOnLeft ? "left" : "right"
                         popupType: "search"
-                        open: root.leftMenuOpen
+                        open: root.leftMenuOpen || leftMenuPanel.reveal > 0.01
                         preload: root.leftMenuPreloadEnabled
                         interactiveFocus: root.leftMenuInteractiveFocus
                         width: leftMenuLoader.width
@@ -3970,7 +4282,7 @@ ShellRoot {
             readonly property int geminiTopTargetX: Math.round((panelWidth - geminiTopTargetWidth) / 2)
             readonly property int geminiTopTargetY: root.geminiTopOpen ? geminiTopOpenY : -geminiTopTargetHeight - 18
             readonly property int geminiTopCornerRadius: 24
-            readonly property bool wantsDrawerKeyboard: root.focusMode || root.quickPopupType === "search" || root.quickPopupType === "agenda" || root.quickPopupType === "weatherPanel" || root.settingsPanelOpen || root.wallpaperSelectorOpen || root.topWallpaperKeyboardFocus || root.geminiTopKeyboardFocus
+            readonly property bool wantsDrawerKeyboard: root.focusMode || root.quickPopupType === "search" || root.quickPopupType === "agenda" || root.quickPopupType === "weatherPanel" || root.settingsPanelOpen || root.wallpaperSelectorOpen || root.topWallpaperKeyboardFocus || root.geminiTopKeyboardFocus || root.leftMenuInteractiveFocus
 
             screen: modelData
             color: "transparent"
@@ -3999,6 +4311,21 @@ ShellRoot {
                 Region {
                     item: inlineGeminiTopInputMask
                     radius: panel.geminiTopCornerRadius
+                }
+
+                Region {
+                    item: inlineLeftMenuTriggerMask
+                    radius: 0
+                }
+
+                Region {
+                    item: inlineLeftMenuHandleInputMask
+                    radius: Math.min(root.desktopFrameRadius, 16)
+                }
+
+                Region {
+                    item: inlineLeftMenuInputMask
+                    radius: inlineLeftMenuLoader.item ? inlineLeftMenuLoader.item.cornerRadius : 22
                 }
 
                 Region {
@@ -4322,6 +4649,103 @@ ShellRoot {
                     ctx.restore()
                 }
 
+                function attachedSidePath(ctx, x, y, w, h, radius, side) {
+                    const r = Math.min(radius, Math.max(0, w / 2), Math.max(0, h / 2))
+                    const x2 = x + w
+                    const y2 = y + h
+
+                    ctx.beginPath()
+                    if (side === "right") {
+                        ctx.moveTo(x + r, y)
+                        ctx.lineTo(x2, y)
+                        ctx.lineTo(x2, y2)
+                        ctx.lineTo(x + r, y2)
+                        ctx.arcTo(x, y2, x, y2 - r, r)
+                        ctx.lineTo(x, y + r)
+                        ctx.arcTo(x, y, x + r, y, r)
+                    } else {
+                        ctx.moveTo(x, y)
+                        ctx.lineTo(x2 - r, y)
+                        ctx.arcTo(x2, y, x2, y + r, r)
+                        ctx.lineTo(x2, y2 - r)
+                        ctx.arcTo(x2, y2, x2 - r, y2, r)
+                        ctx.lineTo(x, y2)
+                        ctx.lineTo(x, y)
+                    }
+                    ctx.closePath()
+                }
+
+                function strokeAttachedSide(ctx, x, y, w, h, radius, side) {
+                    const r = Math.min(radius, Math.max(0, w / 2), Math.max(0, h / 2))
+                    const x2 = x + w
+                    const y2 = y + h
+
+                    ctx.beginPath()
+                    if (side === "right") {
+                        ctx.moveTo(x + r, y + 0.5)
+                        ctx.arcTo(x + 0.5, y + 0.5, x + 0.5, y + r, r)
+                        ctx.lineTo(x + 0.5, y2 - r)
+                        ctx.arcTo(x + 0.5, y2 - 0.5, x + r, y2 - 0.5, r)
+                        ctx.lineTo(x2, y2 - 0.5)
+                    } else {
+                        ctx.moveTo(x, y + 0.5)
+                        ctx.lineTo(x2 - r, y + 0.5)
+                        ctx.arcTo(x2 - 0.5, y + 0.5, x2 - 0.5, y + r, r)
+                        ctx.lineTo(x2 - 0.5, y2 - r)
+                        ctx.arcTo(x2 - 0.5, y2 - 0.5, x2 - r, y2 - 0.5, r)
+                        ctx.lineTo(x, y2 - 0.5)
+                    }
+                    ctx.stroke()
+                }
+
+                function paintFrameAttachedSurface(ctx, x, y, w, h, radius, side, alpha) {
+                    if (w <= 1 || h <= 1 || alpha <= 0.001)
+                        return
+
+                    ctx.save()
+                    ctx.globalAlpha = root.frameVisualsReveal * alpha
+                    ctx.fillStyle = root.desktopFrameMatteColor()
+                    attachedSidePath(ctx, x, y, w, h, radius, side)
+                    ctx.fill()
+
+                    ctx.strokeStyle = root.desktopFrameBorderColor()
+                    ctx.lineWidth = 1
+                    ctx.lineCap = "round"
+                    ctx.lineJoin = "round"
+                    strokeAttachedSide(ctx, x, y, w, h, radius, side)
+                    ctx.restore()
+                }
+
+                function paintLeftMenuFrameSurfaces(ctx) {
+                    if (!root.sideBarLayoutEnabled || root.shellSuppressedByFullscreen)
+                        return
+
+                    const menuReveal = Math.max(0, Math.min(1, root.leftMenuFrameReveal))
+                    const handleReveal = Math.max(0, Math.min(1, root.leftMenuHandleSurfaceReveal))
+                    const menuHeight = root.leftMenuHeightForScreen(height)
+                    const menuY = root.leftMenuYForScreen(height, menuHeight)
+                    const slideDistance = root.leftMenuWidth + root.leftMenuFrameInset + root.leftMenuTriggerWidth + 8
+                    const menuOpenX = root.leftMenuOnLeft ? root.leftMenuFrameInset : width - root.leftMenuFrameInset - root.leftMenuWidth
+                    const menuX = menuOpenX + (root.leftMenuOnLeft ? -Math.round((1 - menuReveal) * slideDistance) : Math.round((1 - menuReveal) * slideDistance))
+                    const menuRadius = 22
+
+                    paintFrameAttachedSurface(ctx, menuX, menuY, root.leftMenuWidth, menuHeight, menuRadius, root.leftMenuOnLeft ? "left" : "right", menuReveal)
+
+                    if (handleReveal <= 0.001)
+                        return
+
+                    const handleX = root.leftMenuOnLeft
+                        ? Math.round(-10 - (1 - handleReveal) * (root.leftMenuHandleWidth - 10))
+                        : width - root.leftMenuHandleWidth + 10 + Math.round((1 - handleReveal) * (root.leftMenuHandleWidth - 10))
+                    const handleY = menuY + Math.round((menuHeight - root.leftMenuHandleHeight) / 2)
+                    const frameEdge = root.leftMenuOnLeft ? root.leftMenuFrameInset : width - root.leftMenuFrameInset
+                    const drawX = root.leftMenuOnLeft ? Math.max(frameEdge, handleX) : handleX
+                    const drawRight = root.leftMenuOnLeft ? handleX + root.leftMenuHandleWidth : Math.min(frameEdge, handleX + root.leftMenuHandleWidth)
+                    const drawW = Math.max(0, drawRight - drawX)
+
+                    paintFrameAttachedSurface(ctx, drawX, handleY, drawW, root.leftMenuHandleHeight, Math.min(root.desktopFrameRadius, 16), root.leftMenuOnLeft ? "left" : "right", handleReveal)
+                }
+
                 onPaint: {
                     const ctx = getContext("2d")
                     const fx = root.mainAreaX(width)
@@ -4361,6 +4785,7 @@ ShellRoot {
 
                     paintFrameOutline(ctx, fx, fy, fw, fh, radius)
                     paintGeminiTopSurface(ctx)
+                    paintLeftMenuFrameSurfaces(ctx)
                     ctx.restore()
 
                     paintSidebarGutterFill(ctx)
@@ -4403,6 +4828,8 @@ ShellRoot {
                 function onFrameVisualsRevealChanged() { if (root.frameVisualsMounted) unifiedFrameCanvas.requestPaint() }
                 function onGeminiTopOpenChanged() { if (root.frameVisualsMounted) unifiedFrameCanvas.requestPaint() }
                 function onGeminiTopWindowOpenChanged() { if (root.frameVisualsMounted) unifiedFrameCanvas.requestPaint() }
+                function onLeftMenuFrameRevealChanged() { if (root.frameVisualsMounted) unifiedFrameCanvas.requestPaint() }
+                function onLeftMenuHandleSurfaceRevealChanged() { if (root.frameVisualsMounted) unifiedFrameCanvas.requestPaint() }
                 function onQuickPopupJoinedToBarChanged() { if (root.frameVisualsMounted) unifiedFrameCanvas.requestPaint() }
                 function onTopWallpaperFrameRevealChanged() { if (root.frameVisualsMounted) unifiedFrameCanvas.requestPaint() }
             }
@@ -4508,6 +4935,177 @@ ShellRoot {
                         onCloseRequested: root.closeGeminiTop()
                         onPointerInsideChanged: function(inside) {
                             root.setGeminiTopPanelHovering(inside)
+                        }
+                    }
+                }
+            }
+
+            Item {
+                id: inlineLeftMenuTriggerMask
+
+                x: root.leftMenuOnLeft ? 0 : parent.width - width
+                y: root.leftMenuYForScreen(parent.height, root.leftMenuHeightForScreen(parent.height))
+                width: root.leftMenuHandleWidth
+                height: root.leftMenuHeightForScreen(parent.height)
+                z: 34
+
+                MouseArea {
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    acceptedButtons: Qt.NoButton
+                    onEntered: {
+                        root.leftMenuTriggerHovering = true
+                        root.holdLeftMenuHandleReveal()
+                        root.updateLeftMenuHovering()
+                    }
+                    onPositionChanged: {
+                        root.leftMenuTriggerHovering = true
+                        root.holdLeftMenuHandleReveal()
+                        root.updateLeftMenuHovering()
+                    }
+                    onExited: {
+                        root.leftMenuTriggerHovering = false
+                        root.releaseLeftMenuHandleRevealSoon()
+                        root.updateLeftMenuHovering()
+                    }
+                }
+            }
+
+            Item {
+                id: inlineLeftMenuHandleInputMask
+
+                readonly property real reveal: root.leftMenuHandleSurfaceReveal
+
+                x: root.leftMenuOnLeft
+                    ? Math.round(-10 - (1 - reveal) * (root.leftMenuHandleWidth - 10))
+                    : parent.width - root.leftMenuHandleWidth + 10 + Math.round((1 - reveal) * (root.leftMenuHandleWidth - 10))
+                y: root.leftMenuYForScreen(parent.height, root.leftMenuHeightForScreen(parent.height)) + Math.round((root.leftMenuHeightForScreen(parent.height) - root.leftMenuHandleHeight) / 2)
+                width: root.leftMenuHandleWidth
+                height: root.leftMenuHandleHeight
+                opacity: reveal
+                visible: reveal > 0.01
+                z: 34
+
+                Text {
+                    width: 22
+                    height: 34
+                    x: root.leftMenuOnLeft ? parent.width - width - 5 : 5
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: root.leftMenuOnLeft ? "›" : "‹"
+                    color: veloraTheme.alpha(veloraTheme.textPrimary, veloraTheme.themeMode === "dark" ? 0.76 : 0.70)
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                    font.family: veloraTheme.uiFont
+                    font.pixelSize: 27
+                    font.weight: Font.DemiBold
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onEntered: {
+                        root.leftMenuHandleHovering = true
+                        root.holdLeftMenuHandleReveal()
+                        root.updateLeftMenuHovering()
+                    }
+                    onExited: {
+                        root.leftMenuHandleHovering = false
+                        root.releaseLeftMenuHandleRevealSoon()
+                        root.updateLeftMenuHovering()
+                    }
+                    onClicked: {
+                        root.leftMenuPinned = true
+                        root.leftMenuInteractiveFocus = false
+                        root.openLeftMenu()
+                    }
+                }
+            }
+
+            Item {
+                id: inlineLeftMenuInputMask
+
+                x: inlineLeftMenuLoader.x
+                y: inlineLeftMenuLoader.y
+                width: (root.leftMenuOpen || root.leftMenuFrameReveal > 0.01) ? inlineLeftMenuLoader.width : 0
+                height: (root.leftMenuOpen || root.leftMenuFrameReveal > 0.01) ? inlineLeftMenuLoader.height : 0
+                z: 28
+            }
+
+            Loader {
+                id: inlineLeftMenuLoader
+
+                readonly property bool contentReady: item !== null
+                readonly property int slideDistance: root.leftMenuWidth + root.leftMenuFrameInset + root.leftMenuTriggerWidth + 8
+                readonly property int menuOpenX: root.leftMenuOnLeft ? root.leftMenuFrameInset : parent.width - root.leftMenuFrameInset - root.leftMenuWidth
+                readonly property int menuSlideOffset: Math.round((1 - root.leftMenuFrameReveal) * slideDistance)
+
+                active: root.leftMenuPreloadEnabled || root.leftMenuOpen || root.leftMenuFrameReveal > 0.01
+                asynchronous: false
+                width: root.leftMenuWidth
+                height: root.leftMenuHeightForScreen(parent.height)
+                x: menuOpenX + (root.leftMenuOnLeft ? -menuSlideOffset : menuSlideOffset)
+                y: root.leftMenuYForScreen(parent.height, height)
+                visible: root.leftMenuOpen || root.leftMenuFrameReveal > 0.01
+                opacity: 1
+                z: 33
+
+                sourceComponent: Component {
+                    VeloraLeftOverview {
+                        theme: veloraTheme
+                        clockState: leftClockState
+                        externalSurface: true
+                        attachSide: root.leftMenuOnLeft ? "left" : "right"
+                        popupType: "search"
+                        open: root.leftMenuOpen || root.leftMenuFrameReveal > 0.01
+                        preload: root.leftMenuPreloadEnabled
+                        interactiveFocus: root.leftMenuInteractiveFocus
+                        width: inlineLeftMenuLoader.width
+                        height: inlineLeftMenuLoader.height
+                        visible: inlineLeftMenuLoader.visible
+
+                        onMediaWindowRequested: function(centerY) {
+                            root.openLeftMediaWindow(inlineLeftMenuLoader.y + centerY)
+                        }
+
+                        onDetailWindowRequested: function(detailType, centerY) {
+                            root.openLeftDetailWindow(detailType, inlineLeftMenuLoader.y + centerY)
+                        }
+
+                        onSettingsRequested: function(centerY) {
+                            root.leftMenuPinned = false
+                            root.leftMenuInteractiveFocus = false
+                            root.leftMediaWindowOpen = false
+                            root.leftMediaWindowEntranceHold = false
+                            root.leftDetailSwitchProgress = 1
+                            root.openLeftMenu()
+                            root.toggleSettingsPanel(inlineLeftMenuLoader.y + centerY)
+                        }
+
+                        onCloseRequested: {
+                            root.leftMenuPinned = false
+                            root.leftMenuInteractiveFocus = false
+                            root.leftMediaWindowOpen = false
+                            root.leftMediaWindowEntranceHold = false
+                            root.leftDetailSwitchProgress = 1
+                            root.leftMenuOpen = false
+                            root.leftMenuTriggerHovering = false
+                            root.leftMenuHandleHovering = false
+                            root.leftMenuHandleRevealHold = false
+                            root.leftMenuPanelHovering = false
+                            root.leftMediaWindowHovering = false
+                        }
+
+                        HoverHandler {
+                            margin: 18
+                            onHoveredChanged: {
+                                root.leftMenuPanelHovering = hovered
+                                root.updateLeftMenuHovering()
+                                if (hovered)
+                                    root.openLeftMenu()
+                                else
+                                    root.scheduleLeftMenuClose()
+                            }
                         }
                     }
                 }

@@ -943,7 +943,8 @@ layerrule = blur on, match:namespace ^velora-topbar$
 layerrule = ignore_alpha 0.28, match:namespace ^velora-topbar$
 bind = SUPER, K, exec, qs ipc -p "$INSTALL_DIR" call velora topWallpaper
 bind = SUPER, W, exec, qs ipc -p "$INSTALL_DIR" call velora search
-bind = SUPER, L, exec, "$INSTALL_DIR/scripts/velora-lock"
+# Velora lockscreen disabled by default; re-enable manually when the lock flow is stable.
+# bind = SUPER, L, exec, "$INSTALL_DIR/scripts/velora-lock"
 bind = , Print, exec, "$INSTALL_DIR/scripts/velora-screenshot-select" full
 bind = SHIFT, Print, exec, "$INSTALL_DIR/scripts/velora-screenshot-select" select
 bind = , XF86SelectiveScreenshot, exec, "$INSTALL_DIR/scripts/velora-screenshot-select" select

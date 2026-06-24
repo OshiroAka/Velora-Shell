@@ -30,8 +30,11 @@ Item {
     property real brightnessPercent: 0.86
     property bool muted: false
     property bool micMuted: false
+    property string audioPreset: "Custom"
+    property real audioPresetHoldUntil: 0
     property bool wifiEnabled: true
-    property bool nightLightEnabled: true
+    property bool nightLightEnabled: false
+    property bool vibranceEnabled: false
     property bool bluetoothPowered: false
     property bool bluetoothAvailable: false
     property string audioOutputName: "Default output"
@@ -93,6 +96,7 @@ Item {
     property var weatherRainMap: ({ label: "Sem mapa real", detail: "Radar de chuva indisponivel." })
     readonly property string eventsScript: Quickshell.shellDir + "/scripts/velora-events-state"
     readonly property string weatherScript: Quickshell.shellDir + "/scripts/velora-weather-state"
+    readonly property string audioControlScript: Quickshell.shellDir + "/scripts/velora-audio-control"
     readonly property int cornerRadius: 18
     readonly property int arrowCenterY: {
         if (popupType === "volume")
@@ -1302,6 +1306,30 @@ Item {
         runCommand("wpctl set-mute @DEFAULT_AUDIO_SOURCE@ toggle")
     }
 
+    function setAudioPreset(name) {
+        root.audioPreset = name
+        root.audioPresetHoldUntil = Date.now() + 6500
+        runCommand(shellQuote(root.audioControlScript) + " preset " + shellQuote(name) + " >/dev/null 2>&1 || true")
+    }
+
+    function audioDeviceDisplayName(name, fallbackText) {
+        var label = String(name || "").trim()
+        if (label.length <= 0)
+            return fallbackText
+        label = label.replace(/^Raptor Lake-P\/U\/H cAVS\s+/, "")
+        if (label === "Speaker")
+            return "Alto-falante"
+        if (label === "Digital Microphone")
+            return "Microfone digital"
+        if (label === "Stereo Microphone")
+            return "Microfone estéreo"
+        if (label === "Default output")
+            return "Saída padrão"
+        if (label === "Default input")
+            return "Entrada padrão"
+        return label
+    }
+
     function setBrightness(value) {
         root.brightnessPercent = Math.max(0.05, Math.min(1, value))
         runCommand("brightnessctl set " + Math.round(root.brightnessPercent * 100) + "% >/dev/null 2>&1")
@@ -1310,6 +1338,11 @@ Item {
     function toggleNightLight() {
         root.nightLightEnabled = !root.nightLightEnabled
         runCommand(root.nightLightEnabled ? "hyprctl hyprsunset temperature 4500 >/dev/null 2>&1 || true" : "hyprctl hyprsunset identity >/dev/null 2>&1 || true")
+    }
+
+    function toggleVibrance() {
+        root.vibranceEnabled = !root.vibranceEnabled
+        runCommand(root.vibranceEnabled ? "command -v hyprshade >/dev/null 2>&1 && hyprshade on vibrance >/dev/null 2>&1 || true" : "command -v hyprshade >/dev/null 2>&1 && hyprshade off >/dev/null 2>&1 || true")
     }
 
     function toggleWifi() {
@@ -1905,6 +1938,8 @@ Item {
                         root.micVolumePercent = Math.max(0, Math.min(1, sourceValue))
                     root.micMuted = parts[2] === "1"
                     root.audioInputName = parts.length > 3 && parts[3].length > 0 ? parts[3] : "Default input"
+                } else if (parts[0] === "AUDIO_PRESET" && Date.now() >= root.audioPresetHoldUntil) {
+                    root.audioPreset = parts.length > 1 && parts[1].length > 0 ? parts[1] : "Custom"
                 }
             }
         }
@@ -7822,7 +7857,7 @@ Item {
     component VolumeView: Item {
         ColumnLayout {
             anchors.fill: parent
-            spacing: 16
+            spacing: 13
 
             RowLayout {
                 Layout.fillWidth: true
@@ -7837,14 +7872,14 @@ Item {
 
                 TitleText {
                     Layout.fillWidth: true
-                    text: "サウンド"
+                    text: "Som"
                     entryDelay: 45
                 }
             }
 
             Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: root.winLine }
 
-            WinSubLabel { Layout.fillWidth: true; text: "マスター音量"; color: root.ink; font.pixelSize: 12; font.weight: Font.Bold }
+            WinSubLabel { Layout.fillWidth: true; text: "Volume principal"; color: root.ink; font.pixelSize: 12; font.weight: Font.Bold }
 
             RowLayout {
                 Layout.fillWidth: true
@@ -7877,17 +7912,17 @@ Item {
 
             Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: root.winLine }
 
-            WinSubLabel { Layout.fillWidth: true; text: "出力デバイス"; color: root.ink; font.pixelSize: 12; font.weight: Font.Bold }
+            WinSubLabel { Layout.fillWidth: true; text: "Dispositivo de saída"; color: root.ink; font.pixelSize: 12; font.weight: Font.Bold }
 
             SelectRow {
                 Layout.fillWidth: true
-                text: root.audioOutputName
+                text: root.audioDeviceDisplayName(root.audioOutputName, "Saída padrão")
                 onClicked: root.openAudioSettings()
             }
 
             Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: root.winLine }
 
-            WinSubLabel { Layout.fillWidth: true; text: "マイク音量"; color: root.ink; font.pixelSize: 12; font.weight: Font.Bold }
+            WinSubLabel { Layout.fillWidth: true; text: "Volume do microfone"; color: root.ink; font.pixelSize: 12; font.weight: Font.Bold }
 
             RowLayout {
                 Layout.fillWidth: true
@@ -7910,7 +7945,7 @@ Item {
                 spacing: 12
 
                 PopupIcon { Layout.preferredWidth: 20; Layout.preferredHeight: 20; iconName: "settings"; lineColor: root.inkSoft }
-                WinLabel { Layout.fillWidth: true; text: root.audioInputName.length > 0 ? root.audioInputName : "マイクをミュート"; font.pixelSize: 12 }
+                WinLabel { Layout.fillWidth: true; text: root.audioDeviceDisplayName(root.audioInputName, "Microfone silenciado"); font.pixelSize: 12 }
                 SoftToggle {
                     checked: root.micMuted
                     entryDelay: 180
@@ -7923,7 +7958,7 @@ Item {
                 spacing: 12
 
                 PopupIcon { Layout.preferredWidth: 20; Layout.preferredHeight: 20; iconName: root.muted ? "volume-muted" : "volume"; lineColor: root.inkSoft }
-                WinLabel { Layout.fillWidth: true; text: "出力をミュート"; font.pixelSize: 12 }
+                WinLabel { Layout.fillWidth: true; text: "Silenciar saída"; font.pixelSize: 12 }
                 SoftToggle {
                     checked: root.muted
                     entryDelay: 195
@@ -7933,7 +7968,52 @@ Item {
 
             Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: root.winLine }
 
-            WinSubLabel { Layout.fillWidth: true; text: "オーディオ ビジュアライザー"; color: root.ink; font.pixelSize: 12; font.weight: Font.Bold }
+            WinSubLabel { Layout.fillWidth: true; text: "Tipo de som"; color: root.ink; font.pixelSize: 12; font.weight: Font.Bold }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 7
+
+                SoundPresetButton {
+                    Layout.fillWidth: true
+                    label: "Padrão"
+                    presetName: "Flat"
+                    active: root.audioPreset === "Flat"
+                    entryDelay: 210
+                    onClicked: root.setAudioPreset("Flat")
+                }
+
+                SoundPresetButton {
+                    Layout.fillWidth: true
+                    label: "Música"
+                    presetName: "Music"
+                    active: root.audioPreset === "Music"
+                    entryDelay: 222
+                    onClicked: root.setAudioPreset("Music")
+                }
+
+                SoundPresetButton {
+                    Layout.fillWidth: true
+                    label: "Bass"
+                    presetName: "Bass"
+                    active: root.audioPreset === "Bass"
+                    entryDelay: 234
+                    onClicked: root.setAudioPreset("Bass")
+                }
+
+                SoundPresetButton {
+                    Layout.fillWidth: true
+                    label: "Bass+"
+                    presetName: "Bass+"
+                    active: root.audioPreset === "Bass+"
+                    entryDelay: 246
+                    onClicked: root.setAudioPreset("Bass+")
+                }
+            }
+
+            Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: root.winLine }
+
+            WinSubLabel { Layout.fillWidth: true; text: "Visualizador de áudio"; color: root.ink; font.pixelSize: 12; font.weight: Font.Bold }
 
             AudioBars {
                 Layout.fillWidth: true
@@ -8050,7 +8130,7 @@ Item {
     component BrightnessView: Item {
         ColumnLayout {
             anchors.fill: parent
-            spacing: 18
+            spacing: 16
 
             RowLayout {
                 Layout.fillWidth: true
@@ -8068,14 +8148,14 @@ Item {
 
                 TitleText {
                     Layout.fillWidth: true
-                    text: "ディスプレイ"
+                    text: "Display"
                     entryDelay: 50
                 }
             }
 
             RowLayout {
                 Layout.fillWidth: true
-                WinLabel { Layout.fillWidth: true; text: "明るさ"; font.pixelSize: 13 }
+                WinLabel { Layout.fillWidth: true; text: "Brilho"; font.pixelSize: 13 }
                 WinLabel { text: Math.round(root.brightnessPercent * 100) + "%"; font.pixelSize: 13 }
             }
 
@@ -8104,7 +8184,7 @@ Item {
 
                 TitleText {
                     Layout.fillWidth: true
-                    text: "色の温かみ"
+                    text: "Temperatura da cor"
                     entryDelay: 120
                 }
             }
@@ -8124,28 +8204,12 @@ Item {
 
                 SmallText {
                     Layout.fillWidth: true
-                    text: "寒色"
+                    text: "Fria"
                 }
 
                 SmallText {
-                    text: "暖色"
+                    text: "Quente"
                 }
-            }
-
-            RowLayout {
-                Layout.fillWidth: true
-                WinLabel { Layout.fillWidth: true; text: "ナイトライト"; font.pixelSize: 13 }
-                SoftToggle {
-                    checked: root.nightLightEnabled
-                    entryDelay: 180
-                    onClicked: root.toggleNightLight()
-                }
-            }
-
-            WinSubLabel {
-                Layout.fillWidth: true
-                text: "目の負担を軽減するために画面を暖色に調整します"
-                wrapMode: Text.WordWrap
             }
 
             DividerLine {
@@ -8155,70 +8219,73 @@ Item {
 
             TitleText {
                 Layout.fillWidth: true
-                text: "ディスプレイモード"
+                text: "Efeitos"
                 entryDelay: 215
             }
 
-            RowLayout {
+            WinCard {
                 Layout.fillWidth: true
-                spacing: 10
+                Layout.preferredHeight: 70
 
-                ModeButton {
-                    Layout.fillWidth: true
-                    label: "標準"
-                    active: true
-                    entryDelay: 240
-                    onClicked: {
-                        root.brightnessPercent = 0.70
-                        root.runCommand("brightnessctl set 70% >/dev/null 2>&1; hyprctl hyprsunset identity >/dev/null 2>&1 || true")
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.margins: 13
+                    spacing: 12
+
+                    PopupIcon {
+                        Layout.preferredWidth: 22
+                        Layout.preferredHeight: 22
+                        iconName: "spark"
+                        lineColor: root.winAccent2
                     }
-                }
 
-                ModeButton {
-                    Layout.fillWidth: true
-                    label: "鮮やか"
-                    entryDelay: 280
-                    onClicked: {
-                        root.brightnessPercent = 0.90
-                        root.runCommand("brightnessctl set 90% >/dev/null 2>&1; hyprctl hyprsunset temperature 6200 >/dev/null 2>&1 || true")
-                    }
-                }
-
-                ModeButton {
-                    Layout.fillWidth: true
-                    label: "映画"
-                    entryDelay: 320
-                    onClicked: {
-                        root.brightnessPercent = 0.45
-                        root.runCommand("brightnessctl set 45% >/dev/null 2>&1; hyprctl hyprsunset temperature 4200 >/dev/null 2>&1 || true")
-                    }
-                }
-            }
-
-            WinSubLabel { Layout.fillWidth: true; text: "プレビュー"; color: root.ink; font.weight: Font.Bold; Layout.topMargin: 4 }
-
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: 10
-                Repeater {
-                    model: [
-                        root.wallpaperDir + "/static/aerial-view-tokyo-cityscape-with-fuji-mountain-japan.jpg",
-                        root.wallpaperDir + "/static/claudio-guglieri-G6X3OZqIIm8-unsplash.jpg",
-                        root.wallpaperDir + "/static/clay-banks-hwLAI5lRhdM-unsplash.jpg"
-                    ]
-                    Rectangle {
+                    ColumnLayout {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: 86
-                        radius: 10
-                        clip: true
-                        border.width: index === 0 ? 2 : 1
-                        border.color: index === 0 ? root.winAccent2 : root.winLine
-                        Image { anchors.fill: parent; source: modelData; fillMode: Image.PreserveAspectCrop; asynchronous: true }
+                        spacing: 2
+                        WinLabel { Layout.fillWidth: true; text: "Vibrance"; font.pixelSize: 13 }
+                        WinSubLabel { Layout.fillWidth: true; text: "Aumenta a saturação com hyprshade"; font.pixelSize: 10; elide: Text.ElideRight }
+                    }
+
+                    SoftToggle {
+                        checked: root.vibranceEnabled
+                        entryDelay: 240
+                        onClicked: root.toggleVibrance()
                     }
                 }
             }
 
-            WinActionRow { Layout.fillWidth: true; iconName: "settings"; title: "詳細ディスプレイ設定"; subtitle: root.brightnessDevice; onClicked: root.openDisplaySettings() }
+            WinCard {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 70
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.margins: 13
+                    spacing: 12
+
+                    PopupIcon {
+                        Layout.preferredWidth: 22
+                        Layout.preferredHeight: 22
+                        iconName: "moon"
+                        lineColor: root.winAccent2
+                    }
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 2
+                        WinLabel { Layout.fillWidth: true; text: "Modo noturno"; font.pixelSize: 13 }
+                        WinSubLabel { Layout.fillWidth: true; text: "Aquece a tela para reduzir cansaço visual"; font.pixelSize: 10; elide: Text.ElideRight }
+                    }
+
+                    SoftToggle {
+                        checked: root.nightLightEnabled
+                        entryDelay: 280
+                        onClicked: root.toggleNightLight()
+                    }
+                }
+            }
+
+            WinActionRow { Layout.fillWidth: true; iconName: "settings"; title: "Configurações de display"; subtitle: root.brightnessDevice; onClicked: root.openDisplaySettings() }
         }
     }
 
@@ -8749,6 +8816,57 @@ Item {
             onClicked: function(mouse) {
                 mouse.accepted = true
                 row.clicked()
+            }
+        }
+    }
+
+    component SoundPresetButton: Rectangle {
+        id: presetButton
+
+        property string label: ""
+        property string presetName: ""
+        property bool active: false
+        property bool hovered: false
+        property int entryDelay: 210
+        signal clicked()
+
+        Layout.preferredHeight: 34
+        radius: 10
+        opacity: root.stageOpacity(entryDelay, 170)
+        scale: hovered ? 1.018 : root.stageScale(entryDelay, 0.96, 1.0)
+        transform: Translate {
+            y: root.stageTranslateY(presetButton.entryDelay, 7)
+        }
+        color: active ? root.alpha(root.pink, hovered ? 0.34 : 0.26) : root.alpha(root.card, hovered ? 0.48 : 0.34)
+        border.width: 1
+        border.color: active ? root.alpha(root.pink, 0.42) : (hovered ? root.alpha(root.pink, 0.24) : root.line)
+        antialiasing: true
+
+        Behavior on color { ColorAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
+        Behavior on border.color { ColorAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
+        Behavior on scale { NumberAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
+
+        Text {
+            anchors.centerIn: parent
+            text: presetButton.label
+            color: presetButton.active ? root.pink : root.inkSoft
+            font.family: root.uiFont
+            font.pixelSize: 11
+            font.weight: Font.Bold
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            acceptedButtons: Qt.LeftButton
+            hoverEnabled: true
+            preventStealing: true
+            cursorShape: Qt.PointingHandCursor
+            onEntered: presetButton.hovered = true
+            onExited: presetButton.hovered = false
+            onCanceled: presetButton.hovered = false
+            onClicked: function(mouse) {
+                mouse.accepted = true
+                presetButton.clicked()
             }
         }
     }

@@ -12,6 +12,8 @@ elif [[ "${2:-}" == "--force" ]]; then
 fi
 
 cache_root="${XDG_CACHE_HOME:-$HOME/.cache}/velora-shell/status"
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+audio_control_script="$script_dir/velora-audio-control"
 
 safe_mode_name() {
     printf '%s' "${1:-all}" | tr -cd '[:alnum:]_.-'
@@ -126,7 +128,7 @@ wp_node_name() {
     local target="$1"
     wpctl inspect "$target" 2>/dev/null \
         | awk -F' = ' '
-            /node.description|device.description|node.nick|media.name/ {
+            /device.profile.description|node.nick|node.description|device.description|media.name/ {
                 gsub(/^"/, "", $2)
                 gsub(/"$/, "", $2)
                 print $2
@@ -134,17 +136,45 @@ wp_node_name() {
             }'
 }
 
+friendly_audio_name() {
+    local raw
+    raw="$(clean_field "${1:-}")"
+    raw="${raw#Raptor Lake-P/U/H cAVS }"
+    raw="${raw#cAVS }"
+
+    case "${raw,,}" in
+        ""|"default output") printf 'Saída padrão' ;;
+        "default input") printf 'Entrada padrão' ;;
+        "speaker") printf 'Alto-falante' ;;
+        "digital microphone") printf 'Microfone digital' ;;
+        "stereo microphone") printf 'Microfone estéreo' ;;
+        *"hdmi"*"/"*"displayport"*|*"hdmi"*"displayport"*) printf '%s' "$raw" ;;
+        *) printf '%s' "$raw" ;;
+    esac
+}
+
+audio_status_field() {
+    local status="$1" key="$2"
+    printf '%s\n' "$status" | tr '|' '\n' | awk -F= -v wanted="$key" '$1 == wanted { print $2; exit }'
+}
+
 emit_audio() {
-    local sink_line source_line sink_vol source_vol sink_name source_name
+    local sink_line source_line sink_vol source_vol sink_name source_name audio_status preset engine
     sink_line="$(wp_volume_line '@DEFAULT_AUDIO_SINK@')"
     source_line="$(wp_volume_line '@DEFAULT_AUDIO_SOURCE@')"
     sink_vol="$(wp_volume_value "$sink_line")"
     source_vol="$(wp_volume_value "$source_line")"
     sink_name="$(wp_node_name '@DEFAULT_AUDIO_SINK@')"
     source_name="$(wp_node_name '@DEFAULT_AUDIO_SOURCE@')"
+    if [[ -x "$audio_control_script" ]]; then
+        audio_status="$("$audio_control_script" status 2>/dev/null || true)"
+    fi
+    preset="$(audio_status_field "$audio_status" preset)"
+    engine="$(audio_status_field "$audio_status" ee)"
 
-    printf 'AUDIO_SINK|%s|%s|%s\n' "${sink_vol:-0.60}" "$(wp_muted_value "$sink_line")" "$(clean_field "${sink_name:-Default output}")"
-    printf 'AUDIO_SOURCE|%s|%s|%s\n' "${source_vol:-0.00}" "$(wp_muted_value "$source_line")" "$(clean_field "${source_name:-Default input}")"
+    printf 'AUDIO_SINK|%s|%s|%s\n' "${sink_vol:-0.60}" "$(wp_muted_value "$sink_line")" "$(friendly_audio_name "${sink_name:-Default output}")"
+    printf 'AUDIO_SOURCE|%s|%s|%s\n' "${source_vol:-0.00}" "$(wp_muted_value "$source_line")" "$(friendly_audio_name "${source_name:-Default input}")"
+    printf 'AUDIO_PRESET|%s|%s\n' "$(clean_field "${preset:-Custom}")" "$(clean_field "${engine:-missing}")"
 }
 
 emit_brightness() {
