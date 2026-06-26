@@ -46,6 +46,7 @@ Item {
     property string batteryStateText: "unknown"
     property string batteryTimeText: ""
     property string powerProfile: "unknown"
+    property real powerProfileOverrideUntil: 0
     property bool acOnline: false
     property string searchQuery: ""
     property string searchMode: "apps"
@@ -116,6 +117,21 @@ Item {
     readonly property bool pywalStyle: theme && theme.themeId === "pywal16"
     readonly property bool neon: pywalStyle && theme.themeMode === "dark"
     readonly property bool attachedRight: attachSide === "right"
+
+    function professionalPywalGlass(r, g, b, opacity, tintAmount) {
+        if (!theme || !pywalStyle)
+            return Qt.rgba(r, g, b, opacity)
+
+        const tint = theme.surfacePopup
+        const amount = Math.max(0, Math.min(1, tintAmount))
+        return Qt.rgba(
+            r * (1 - amount) + tint.r * amount,
+            g * (1 - amount) + tint.g * amount,
+            b * (1 - amount) + tint.b * amount,
+            opacity
+        )
+    }
+
     readonly property color ink: theme ? theme.textPrimary : Qt.rgba(0.47, 0.38, 0.55, 0.88)
     readonly property color inkSoft: theme ? theme.textSecondary : Qt.rgba(0.57, 0.48, 0.64, 0.66)
     readonly property color pink: theme ? (pywalStyle ? theme.accentSecondary : theme.accentPrimary) : Qt.rgba(0.88, 0.43, 0.66, 0.92)
@@ -124,10 +140,18 @@ Item {
     readonly property color card: theme ? theme.popupBubbleSurface() : Qt.rgba(1, 1, 1, 0.70)
     readonly property color line: theme ? theme.alpha(theme.borderActive, 0.18) : Qt.rgba(0.70, 0.52, 0.64, 0.18)
     readonly property color borderSoft: theme ? theme.borderSoft : Qt.rgba(1, 1, 1, 0.78)
-    readonly property color winSurface: theme ? alpha(theme.surfacePopup, theme.themeMode === "dark" ? 0.88 : 0.78) : Qt.rgba(0.035, 0.075, 0.12, 0.88)
-    readonly property color winSurfaceDeep: theme ? alpha(theme.surfaceBase, theme.themeMode === "dark" ? 0.76 : 0.62) : Qt.rgba(0.015, 0.045, 0.075, 0.76)
-    readonly property color winCard: theme ? alpha(card, theme.themeMode === "dark" ? 0.42 : 0.54) : Qt.rgba(0.12, 0.20, 0.29, 0.48)
-    readonly property color winCardHover: theme ? alpha(card, theme.themeMode === "dark" ? 0.58 : 0.72) : Qt.rgba(0.16, 0.26, 0.36, 0.62)
+    readonly property color winSurface: theme
+        ? (pywalStyle ? professionalPywalGlass(0.045, 0.047, 0.050, theme.themeMode === "dark" ? 0.86 : 0.76, 0.18) : alpha(theme.surfacePopup, theme.themeMode === "dark" ? 0.88 : 0.78))
+        : Qt.rgba(0.035, 0.075, 0.12, 0.88)
+    readonly property color winSurfaceDeep: theme
+        ? (pywalStyle ? professionalPywalGlass(0.026, 0.028, 0.030, theme.themeMode === "dark" ? 0.72 : 0.58, 0.14) : alpha(theme.surfaceBase, theme.themeMode === "dark" ? 0.76 : 0.62))
+        : Qt.rgba(0.015, 0.045, 0.075, 0.76)
+    readonly property color winCard: theme
+        ? (pywalStyle ? professionalPywalGlass(0.100, 0.104, 0.108, theme.themeMode === "dark" ? 0.44 : 0.54, 0.16) : alpha(card, theme.themeMode === "dark" ? 0.42 : 0.54))
+        : Qt.rgba(0.12, 0.20, 0.29, 0.48)
+    readonly property color winCardHover: theme
+        ? (pywalStyle ? professionalPywalGlass(0.128, 0.132, 0.138, theme.themeMode === "dark" ? 0.58 : 0.70, 0.16) : alpha(card, theme.themeMode === "dark" ? 0.58 : 0.72))
+        : Qt.rgba(0.16, 0.26, 0.36, 0.62)
     readonly property color winLine: theme ? alpha(theme.borderSoft, theme.themeMode === "dark" ? 0.24 : 0.34) : Qt.rgba(1, 1, 1, 0.14)
     readonly property color winAccent: theme ? (pywalStyle ? theme.accentPrimary : theme.accentSecondary) : Qt.rgba(0.10, 0.70, 0.94, 1)
     readonly property color winAccent2: theme ? (pywalStyle ? theme.accentSecondary : theme.accentPrimary) : Qt.rgba(0.17, 0.86, 0.92, 1)
@@ -477,6 +501,13 @@ Item {
         if (!backgroundPollingActive || typeof volumeQuery === "undefined")
             return
 
+        if (popupType === "battery") {
+            if (!batteryQuery.running)
+                batteryQuery.running = true
+            batteryTileRefresh.restart()
+            return
+        }
+
         if (!volumeQuery.running)
             volumeQuery.running = true
         if (!brightnessQuery.running)
@@ -496,6 +527,13 @@ Item {
     function refreshAfterCommand() {
         if (!backgroundPollingActive)
             return
+
+        if (popupType === "battery") {
+            if (!batteryQuery.running)
+                batteryQuery.running = true
+            batteryTileRefresh.restart()
+            return
+        }
 
         if (!volumeQuery.running)
             volumeQuery.running = true
@@ -1377,6 +1415,7 @@ Item {
             return
 
         powerProfile = value
+        powerProfileOverrideUntil = Date.now() + 2500
         runCommand("powerprofilesctl set " + shellQuote(value) + " >/dev/null 2>&1 || true")
     }
 
@@ -1914,6 +1953,22 @@ Item {
         }
     }
 
+    Timer {
+        id: batteryTileRefresh
+        interval: 420
+        repeat: false
+        onTriggered: {
+            if (!root.backgroundPollingActive || root.popupType !== "battery")
+                return
+            if (!brightnessQuery.running)
+                brightnessQuery.running = true
+            if (!wifiQuery.running)
+                wifiQuery.running = true
+            if (!root.nativeBluetoothAvailable && !bluetoothQuery.running)
+                bluetoothQuery.running = true
+        }
+    }
+
     Process {
         id: volumeQuery
 
@@ -2352,7 +2407,7 @@ Item {
         id: batteryQuery
 
         running: false
-        command: [root.popupStatusScript, "battery"]
+        command: [root.popupStatusScript, "battery", "--force"]
 
         stdout: SplitParser {
             onRead: function(lineRaw) {
@@ -2367,7 +2422,9 @@ Item {
                     root.batteryStateText = parts.length > 2 && parts[2].length > 0 ? parts[2] : "unknown"
                     root.batteryTimeText = parts.length > 3 ? parts[3] : ""
                 } else if (parts[0] === "POWER") {
-                    root.powerProfile = parts.length > 1 && parts[1].length > 0 ? parts[1] : "unknown"
+                    var nextProfile = parts.length > 1 && parts[1].length > 0 ? parts[1] : "unknown"
+                    if (Date.now() >= root.powerProfileOverrideUntil || nextProfile === root.powerProfile)
+                        root.powerProfile = nextProfile
                     var online = parts.length > 2 ? parts[2].toLowerCase() : "unknown"
                     root.acOnline = online === "yes" || online === "1" || online === "true" || online === "online"
                 }
@@ -2719,7 +2776,7 @@ Item {
         PopupViewLoader {
             popup: root
             viewType: "battery"
-            viewMargins: 18
+            viewMargins: 16
             sourceComponent: Component {
                 VeloraBatteryPopup {
                     popup: root

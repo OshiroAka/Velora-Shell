@@ -932,7 +932,12 @@ cat > "$HYPR_INCLUDE" <<EOF
 # Matches velora-shell and every velora-shell-* layer namespace.
 exec-once = powerprofilesctl set performance
 exec-once = systemctl --user stop mako.service
+exec-once = "$INSTALL_DIR/scripts/velora-wallpaper-apply" restore
 exec-once = env $VELORA_QS_ENV_LINE qs -d -p "$INSTALL_DIR"
+misc {
+    force_default_wallpaper = 0
+    disable_hyprland_logo = true
+}
 layerrule = blur on, match:namespace ^velora-shell($|-.*)
 layerrule = blur_popups on, match:namespace ^velora-shell($|-.*)
 layerrule = ignore_alpha 0.02, match:namespace ^velora-shell($|-.*)

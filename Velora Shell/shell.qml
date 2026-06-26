@@ -132,7 +132,7 @@ ShellRoot {
     readonly property bool audioVisualizerMounted: sideVisualizerMounted || screenVisualizerMounted
     readonly property real sideVisualizerReveal: frameVisualsMounted ? frameVisualsReveal : (sideVisualizerMounted ? 1 : 0)
     property real screenVisualizerReveal: screenVisualizerMounted ? 1 : 0
-    readonly property real desktopFrameMatteOpacity: sidebarPanelGlassAlpha()
+    readonly property real desktopFrameMatteOpacity: veloraTheme.frameBlurEnabled ? sidebarPanelGlassAlpha() : 0.96
     readonly property int popupFrameGap: veloraTheme.popupAttachedToBar ? 0 : 14
     readonly property int sideQuickPopupBarClearance: 14
     readonly property string popupAttachSide: barOnRight ? "right" : "left"
@@ -181,6 +181,7 @@ ShellRoot {
     readonly property bool sideQuickPopupPanelVisible: sideBarLayoutEnabled && quickPopupPanelVisible
     readonly property bool topBarQuickPopupPanelVisible: topBarLayout && quickPopupPanelVisible
     readonly property string visibleQuickPopupType: quickPopupVisible ? activeQuickPopupType : renderedQuickPopupType
+    readonly property bool batteryPopupVisualActive: sideQuickPopupPanelVisible && visibleQuickPopupType === "battery" && quickPopupSurfaceReveal > 0.015
     readonly property var cachedQuickPopupTypes: [
         "profile",
         "time",
@@ -196,13 +197,13 @@ ShellRoot {
         "wallpaperVisibility"
     ]
     property real quickPopupSurfaceReveal: 0
-    readonly property int quickPopupLineCloseDuration: veloraTheme.motionEnabled ? Math.max(700, Math.round(veloraTheme.motionPanelOut * 1.90)) : 1
+    readonly property int quickPopupLineCloseDuration: veloraTheme.motionEnabled ? Math.max(420, Math.round(veloraTheme.motionPanelOut * 1.18)) : 1
     readonly property int notificationToastOpenDuration: veloraTheme.motionEnabled ? Math.max(420, veloraTheme.motionPanelIn) : 1
     readonly property int notificationToastCloseDuration: veloraTheme.motionEnabled ? Math.max(640, Math.round(quickPopupLineCloseDuration * 0.82)) : 1
-    readonly property bool sideQuickPopupAttachedToBar: sideQuickPopupPanelVisible && quickPopupTypeAttachedToBar(visibleQuickPopupType)
+    readonly property bool sideQuickPopupAttachedToBar: quickPopupVisible && sideQuickPopupPanelVisible && quickPopupTypeAttachedToBar(visibleQuickPopupType)
     readonly property int sideQuickPopupBridgeWidth: sideQuickPopupAttachedToBar && sideVisualizerMounted && barOnRight ? Math.max(popupFrameGap, sideQuickPopupBarClearance) : 0
     readonly property bool quickPopupJoinedToBar: sideQuickPopupAttachedToBar && (popupFrameGap <= 0 || sideQuickPopupBridgeWidth > 0)
-    readonly property real quickPopupTransitionContrast: sideQuickPopupPanelVisible ? (quickPopupSurfaceReveal < 0.98 ? 0.30 : 0.12) : 0
+    readonly property real quickPopupTransitionContrast: (quickPopupVisible && sideQuickPopupPanelVisible) ? (quickPopupSurfaceReveal < 0.98 ? 0.30 : 0.12) : 0
 
     function shellQuote(value) {
         return "'" + String(value || "").replace(/'/g, "'\"'\"'") + "'"
@@ -782,17 +783,44 @@ ShellRoot {
     }
 
     function sidebarPanelGlassAlpha() {
-        return Math.max(0.62, Math.min(veloraTheme.surfaceSidebar.a, 0.78))
+        const base = Math.max(0.62, Math.min(veloraTheme.surfaceSidebar.a, 0.78))
+        return veloraTheme.frameBlurEnabled ? base : 0.96
     }
 
     function sidebarBarGlassAlpha() {
-        return Math.max(veloraTheme.minOpacityForRole("sidebar"), Math.min(veloraTheme.barOpacity, 0.98))
+        const base = Math.max(veloraTheme.minOpacityForRole("sidebar"), Math.min(veloraTheme.barOpacity, 0.98))
+        return veloraTheme.barBlurEnabled ? base : 0.96
     }
 
     function sidebarPanelMaterialColor() {
         if (!frameVisualsMounted)
             return "transparent"
         return veloraTheme.alpha(veloraTheme.surfaceSidebar, sidebarPanelGlassAlpha())
+    }
+
+    function batteryNeutralPanelColor() {
+        return sidebarBarMaterialColor()
+    }
+
+    function batteryNeutralBarColor() {
+        return sidebarBarMaterialColor()
+    }
+
+    function batteryAdaptiveGlassColor(r, g, b, alpha, tintAmount) {
+        const tint = veloraTheme.surfacePopup
+        const amount = veloraTheme.themeId === "pywal16" ? tintAmount : tintAmount * 0.55
+        return Qt.rgba(
+            r * (1 - amount) + tint.r * amount,
+            g * (1 - amount) + tint.g * amount,
+            b * (1 - amount) + tint.b * amount,
+            alpha
+        )
+    }
+
+    function quickPopupSurfaceGlass(type) {
+        if (type === "battery")
+            return batteryNeutralPanelColor()
+        return sidebarBarMaterialColor()
     }
 
     function topWallpaperPopupWidth(screenWidth) {
@@ -1552,7 +1580,7 @@ ShellRoot {
     }
 
     function updateLeftMenuHovering() {
-        leftMenuHovering = leftMenuPinned || leftMenuTriggerHovering || leftMenuHandleHovering || leftMenuPanelHovering || leftMediaWindowHovering || leftMediaWindowEntranceHold
+        leftMenuHovering = leftMenuTriggerHovering || leftMenuHandleHovering || leftMenuPanelHovering || leftMediaWindowHovering || leftMediaWindowEntranceHold
     }
 
     function holdLeftMenuHandleReveal() {
@@ -1574,7 +1602,7 @@ ShellRoot {
     function openLeftDetailWindow(type, centerY, pinned) {
         const value = Number(centerY)
         const nextType = type && type.length > 0 ? type : "media"
-        leftMenuPinned = pinned === true
+        leftMenuPinned = false
         leftMenuInteractiveFocus = false
         const switching = leftMediaWindowOpen && leftDetailWindowType !== nextType
         leftDetailWindowType = nextType
@@ -1716,7 +1744,7 @@ ShellRoot {
         if (type === "notifications")
             return 522
         if (type === "battery")
-            return 522
+            return 405
         if (type === "bluetooth")
             return 410
         if (type === "wallpaperVisibility")
@@ -1760,7 +1788,7 @@ ShellRoot {
         if (type === "notifications")
             return 935
         if (type === "battery")
-            return 500
+            return 640
         if (type === "bluetooth")
             return 500
         if (type === "wallpaperVisibility")
@@ -1777,7 +1805,7 @@ ShellRoot {
     }
 
     function quickPopupTopMargin(type) {
-        if (type === "time" || type === "search")
+        if (type === "time" || type === "search" || type === "battery")
             return Math.max(frameVisualInset + popupFrameGap, 38)
         return frameVisualInset + popupFrameGap
     }
@@ -2155,12 +2183,13 @@ ShellRoot {
         }
 
         function leftMenu(): void {
-            root.leftMenuPinned = true
+            root.leftMenuPinned = false
             root.leftMediaWindowOpen = false
             root.leftMediaWindowEntranceHold = false
             root.leftDetailSwitchProgress = 1
             root.updateLeftMenuHovering()
             root.openLeftMenu()
+            root.scheduleLeftMenuClose()
         }
 
         function closeLeftMenu(): void {
@@ -3357,6 +3386,7 @@ ShellRoot {
                         root.leftMenuTriggerHovering = false
                         root.releaseLeftMenuHandleRevealSoon()
                         root.updateLeftMenuHovering()
+                        root.scheduleLeftMenuClose()
                     }
                 }
             }
@@ -3491,11 +3521,14 @@ ShellRoot {
                         root.leftMenuHandleHovering = false
                         root.releaseLeftMenuHandleRevealSoon()
                         root.updateLeftMenuHovering()
+                        root.scheduleLeftMenuClose()
                     }
                     onClicked: {
-                        root.leftMenuPinned = true
+                        root.leftMenuPinned = false
                         root.leftMenuInteractiveFocus = false
                         root.openLeftMenu()
+                        root.updateLeftMenuHovering()
+                        root.scheduleLeftMenuClose()
                     }
                 }
             }
@@ -3664,6 +3697,15 @@ ShellRoot {
 
                         onDetailWindowRequested: function(detailType, centerY) {
                             root.openLeftDetailWindow(detailType, leftMenuLoader.y + centerY)
+                        }
+
+                        onAgendaRequested: function(centerY) {
+                            root.leftMenuPinned = false
+                            root.leftMenuInteractiveFocus = false
+                            root.leftMediaWindowOpen = false
+                            root.leftMediaWindowEntranceHold = false
+                            root.leftMenuOpen = false
+                            root.openAdaptiveBarPopup("agenda", root.defaultQuickPopupCenterY("agenda"))
                         }
 
                         onSettingsRequested: function(centerY) {
@@ -4503,7 +4545,7 @@ ShellRoot {
                     const bh = Math.max(0, height - root.sidebarVerticalMargin * 2)
                     const radius = Math.min(root.sidebarCornerRadius, Math.max(0, bw / 2), Math.max(0, bh / 2))
                     const frameTop = root.desktopFrameMargin
-                    const frameBottom = Math.max(frameTop, height - root.desktopFrameMargin)
+                    const frameBottom = Math.max(frameTop, root.desktopFrameBottom(height))
                     const capX = root.barOnRight ? bx : 0
                     const capW = root.barOnRight ? Math.max(0, width - bx) : Math.max(0, bx + bw)
                     const outerStripX = root.barOnRight ? bx + bw : 0
@@ -4967,6 +5009,7 @@ ShellRoot {
                         root.leftMenuTriggerHovering = false
                         root.releaseLeftMenuHandleRevealSoon()
                         root.updateLeftMenuHovering()
+                        root.scheduleLeftMenuClose()
                     }
                 }
             }
@@ -5013,11 +5056,14 @@ ShellRoot {
                         root.leftMenuHandleHovering = false
                         root.releaseLeftMenuHandleRevealSoon()
                         root.updateLeftMenuHovering()
+                        root.scheduleLeftMenuClose()
                     }
                     onClicked: {
-                        root.leftMenuPinned = true
+                        root.leftMenuPinned = false
                         root.leftMenuInteractiveFocus = false
                         root.openLeftMenu()
+                        root.updateLeftMenuHovering()
+                        root.scheduleLeftMenuClose()
                     }
                 }
             }
@@ -5070,6 +5116,15 @@ ShellRoot {
 
                         onDetailWindowRequested: function(detailType, centerY) {
                             root.openLeftDetailWindow(detailType, inlineLeftMenuLoader.y + centerY)
+                        }
+
+                        onAgendaRequested: function(centerY) {
+                            root.leftMenuPinned = false
+                            root.leftMenuInteractiveFocus = false
+                            root.leftMediaWindowOpen = false
+                            root.leftMediaWindowEntranceHold = false
+                            root.leftMenuOpen = false
+                            root.openAdaptiveBarPopup("agenda", root.defaultQuickPopupCenterY("agenda"))
                         }
 
                         onSettingsRequested: function(centerY) {
@@ -5457,7 +5512,7 @@ ShellRoot {
                 readonly property real popupCutRight: Math.max(0, Math.min(width, inlineQuickPopupSurface.x + inlineQuickPopupSurface.width - x))
                 readonly property real popupCutTop: Math.max(0, Math.min(height, inlineQuickPopupSurface.y - y))
                 readonly property real popupCutBottom: Math.max(0, Math.min(height, inlineQuickPopupSurface.y + inlineQuickPopupSurface.height - y))
-                readonly property bool popupCutActive: root.sideQuickPopupPanelVisible && root.quickPopupSurfaceReveal > 0.001 && popupCutBottom > popupCutTop && popupCutRight > popupCutLeft
+                readonly property bool popupCutActive: root.quickPopupVisible && root.sideQuickPopupPanelVisible && root.quickPopupSurfaceReveal > 0.12 && popupCutBottom > popupCutTop && popupCutRight > popupCutLeft
                 readonly property bool activeForPaint: root.sideBarLayoutEnabled && root.sideVisualizerMounted && visible && panel.visible && width > 0 && height > 0
 
                 function requestWaveformPaint(force) {
@@ -6241,8 +6296,9 @@ ShellRoot {
                 readonly property int panelWidth: Math.max(parent.width, panel.modelData.width)
                 readonly property int safeWidth: Math.max(320, panelWidth - 96)
                 readonly property int bubbleRadius: attachedToGemini ? panel.geminiTopCornerRadius : Math.min(17, height / 2)
+                readonly property int geminiToastGap: 12
                 readonly property int openY: attachedToGemini
-                    ? Math.round(inlineGeminiTopFrame.y + inlineGeminiTopFrame.height - height)
+                    ? Math.min(Math.round(parent.height - root.desktopFrameMargin - height), Math.round(inlineGeminiTopFrame.y + inlineGeminiTopFrame.height + geminiToastGap))
                     : root.desktopFrameMargin
 
                 width: attachedToGemini ? inlineGeminiTopFrame.width : Math.round(Math.min(safeWidth, Math.max(330, panelWidth * 0.18)))
@@ -6521,20 +6577,24 @@ ShellRoot {
                 VeloraAttachedSurface {
                     id: inlineQuickPopupSurface
 
+                    readonly property bool batterySurface: root.visibleQuickPopupType === "battery"
+                    readonly property int batterySurfaceTop: Math.min(inlineQuickPopupLoader.y, Math.max(root.desktopFrameMargin + 30, inlineQuickPopupLoader.y - 18))
+                    readonly property int batterySurfaceBottom: Math.min(parent.height - root.desktopFrameMargin, inlineQuickPopupLoader.y + inlineQuickPopupLoader.height)
+
                     z: 20
                     theme: veloraTheme
                     attachSide: root.popupAttachSide
-                    useCustomGlass: root.frameVisualsMounted
-                    customGlass: root.sidebarBarMaterialColor()
+                    useCustomGlass: root.frameVisualsMounted || root.visibleQuickPopupType === "battery"
+                    customGlass: root.quickPopupSurfaceGlass(root.visibleQuickPopupType)
                     flattenAttachedEdge: root.quickPopupJoinedToBar
                     lineReveal: true
                     transitionContrast: root.quickPopupTransitionContrast
                     slideOffsetOverride: root.visibleQuickPopupType === "search" || root.visibleQuickPopupType === "agenda" || root.visibleQuickPopupType === "weatherPanel" ? 76 : -1
                     x: inlineQuickPopupLoader.x - (root.barOnRight ? 0 : root.sideQuickPopupBridgeWidth)
-                    y: inlineQuickPopupLoader.y
-                width: inlineQuickPopupLoader.width + root.sideQuickPopupBridgeWidth
-	                height: inlineQuickPopupLoader.height
-	                radius: inlineQuickPopupLoader.cornerRadius
+                    y: batterySurface ? batterySurfaceTop : inlineQuickPopupLoader.y
+                    width: inlineQuickPopupLoader.width + root.sideQuickPopupBridgeWidth
+                    height: batterySurface ? Math.max(0, batterySurfaceBottom - batterySurfaceTop) : inlineQuickPopupLoader.height
+                    radius: batterySurface ? 28 : inlineQuickPopupLoader.cornerRadius
 	                revealProgress: root.quickPopupSurfaceReveal
 	                visible: root.sideQuickPopupPanelVisible && root.quickPopupSurfaceReveal > 0.015 && inlineQuickPopupLoader.contentReady
 	            }
@@ -6606,6 +6666,7 @@ ShellRoot {
 	                        active: showing
 	                            || closing
 	                            || opacity > 0.001
+                                || cacheType === "battery"
 	                            || (root.quickPopupPreloadEnabled && root.cachedQuickPopupIndex(cacheType) < root.quickPopupPreloadCount)
 	                        asynchronous: false
 	                        visible: root.sideQuickPopupPanelVisible && (showing || closing || opacity > 0.001)

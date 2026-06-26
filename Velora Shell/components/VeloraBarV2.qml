@@ -26,7 +26,7 @@ Item {
     readonly property color lilac: theme ? (pywalStyle ? theme.accentPrimary : theme.accentSecondary) : Qt.rgba(0.58, 0.47, 0.76, 0.78)
     readonly property bool popupAttached: activePopupType.length > 0
     readonly property real barGlassAlpha: theme
-        ? Math.max(theme.minOpacityForRole("sidebar"), Math.min(theme.barOpacity, 0.98))
+        ? (theme.barBlurEnabled ? Math.max(theme.minOpacityForRole("sidebar"), Math.min(theme.barOpacity, 0.98)) : 0.96)
         : 0.66
     readonly property color glass: theme
         ? theme.withAlpha(theme.surfaceSidebar, barGlassAlpha)
@@ -107,6 +107,11 @@ Item {
 
     function alpha(colorValue, opacity) {
         return root.theme ? root.theme.alpha(colorValue, opacity) : Qt.rgba(colorValue.r, colorValue.g, colorValue.b, opacity)
+    }
+
+    function profileImageSource() {
+        const customPath = root.theme ? String(root.theme.profileImagePath || "").trim() : ""
+        return customPath.length > 0 ? customPath : Qt.resolvedUrl("../assets/profile-avatar.png")
     }
 
     function fontGlowEnabled() {
@@ -1292,6 +1297,9 @@ Item {
     }
 
     component SectionLabel: Text {
+        visible: root.theme ? root.theme.barLabelsVisible : true
+        Layout.preferredHeight: visible ? implicitHeight : 0
+        Layout.minimumHeight: 0
         color: root.pink
         horizontalAlignment: Text.AlignHCenter
         font.family: root.uiFont
@@ -1698,15 +1706,24 @@ Item {
         Image {
             id: avatarImage
 
+            readonly property string fallbackSource: Qt.resolvedUrl("../assets/profile-avatar.png")
+            property string requestedSource: root.profileImageSource()
+
             anchors.fill: parent
             anchors.margins: 3
-            source: Qt.resolvedUrl("../assets/profile-avatar.png")
+            source: requestedSource
             sourceSize.width: 256
             sourceSize.height: 256
             fillMode: Image.PreserveAspectCrop
             visible: false
             smooth: true
             mipmap: true
+
+            onRequestedSourceChanged: source = requestedSource
+            onStatusChanged: {
+                if (status === Image.Error && source !== fallbackSource)
+                    source = fallbackSource
+            }
         }
 
         Rectangle {

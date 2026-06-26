@@ -133,7 +133,7 @@ def build_css(theme, wal):
 #app-mount,
 #app-mount .theme-dark,
 #app-mount .theme-light {{
-  --velora-wallpaper-image: {css_url(wallpaper)};
+  --velora-wallpaper-image: none;
   --velora-bg: {bg};
   --velora-panel: {panel};
   --velora-panel-2: {panel2};
@@ -213,19 +213,12 @@ def build_css(theme, wal):
 body,
 #app-mount {{
   color: var(--velora-text) !important;
-  background:
-    linear-gradient(90deg, color-mix(in srgb, var(--velora-bg) 12%, transparent 88%), color-mix(in srgb, var(--velora-panel-2) 8%, transparent 92%)),
-    var(--velora-wallpaper-image) center / cover no-repeat fixed !important;
+  background: transparent !important;
 }}
 
 #app-mount::before {{
-  content: "";
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  background: color-mix(in srgb, var(--velora-bg) 10%, transparent 90%);
-  opacity: 1;
-  z-index: 0;
+  content: none !important;
+  display: none !important;
 }}
 
 #app-mount > * {{
@@ -528,9 +521,7 @@ body.theme-light,
   [class*="peopleColumn"],
   [class*="tabBody"]
 ) {{
-  background:
-    linear-gradient(90deg, color-mix(in srgb, var(--velora-bg) 7%, transparent 93%), color-mix(in srgb, var(--velora-panel-2) 4%, transparent 96%)),
-    var(--velora-wallpaper-image) center / cover no-repeat fixed !important;
+  background: transparent !important;
   background-color: transparent !important;
 }}
 

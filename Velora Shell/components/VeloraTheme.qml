@@ -56,6 +56,10 @@ QtObject {
     property bool topBarEnabled: false
     property bool popupAttachedToBar: true
     property bool popupBubblesSolid: false
+    property bool barLabelsVisible: true
+    property bool barBlurEnabled: true
+    property bool frameBlurEnabled: true
+    property string profileImagePath: ""
     property string language: "pt-BR"
     property string fontFamilyId: "noto"
     readonly property string uiFont: language === "ja" ? "Noto Sans CJK JP" : fontFamilyForId(fontFamilyId)
@@ -295,6 +299,10 @@ QtObject {
     function normalizeVisualizerMode(value) {
         const mode = String(value || "wave").toLowerCase()
         return mode === "pixels" || mode === "pixel" || mode === "grid" || mode === "squares" || mode === "square" ? "pixels" : "wave"
+    }
+
+    function truthyEnabled(value) {
+        return value === true || String(value) === "1" || String(value) === "true" || String(value) === "on" || String(value) === "enabled"
     }
 
     function clampVisualizerPixelSize(value) {
@@ -1039,7 +1047,7 @@ QtObject {
     }
 
     function setVisualizerGradientEnabled(enabled, persist) {
-        visualizerGradientEnabled = enabled === true || String(enabled) === "1" || String(enabled) === "true" || String(enabled) === "on"
+        visualizerGradientEnabled = truthyEnabled(enabled)
         if (persist !== false)
             saveVisualizerGradientEnabled()
     }
@@ -1055,7 +1063,7 @@ QtObject {
     }
 
     function setScreenVisualizerEnabled(enabled, persist) {
-        screenVisualizerEnabled = enabled === true || String(enabled) === "1" || String(enabled) === "true" || String(enabled) === "on"
+        screenVisualizerEnabled = truthyEnabled(enabled)
         if (persist !== false)
             saveScreenVisualizerEnabled()
     }
@@ -1071,7 +1079,7 @@ QtObject {
     }
 
     function setTopBarEnabled(enabled, persist) {
-        const nextEnabled = enabled === true || String(enabled) === "1" || String(enabled) === "true" || String(enabled) === "on"
+        const nextEnabled = truthyEnabled(enabled)
         topBarEnabled = nextEnabled
         if (nextEnabled)
             desktopFrameEnabled = false
@@ -1097,7 +1105,7 @@ QtObject {
     }
 
     function setPopupAttachedToBar(enabled, persist) {
-        popupAttachedToBar = enabled === true || String(enabled) === "1" || String(enabled) === "true" || String(enabled) === "on"
+        popupAttachedToBar = truthyEnabled(enabled)
         if (persist !== false)
             savePopupAttachedToBar()
     }
@@ -1113,7 +1121,7 @@ QtObject {
     }
 
     function setPopupBubblesSolid(enabled, persist) {
-        popupBubblesSolid = enabled === true || String(enabled) === "1" || String(enabled) === "true" || String(enabled) === "on" || String(enabled) === "solid"
+        popupBubblesSolid = truthyEnabled(enabled) || String(enabled) === "solid"
         if (persist !== false)
             savePopupBubblesSolid()
     }
@@ -1125,6 +1133,69 @@ QtObject {
         else {
             popupBubblesSaveProc.command = [root.stateScript, "popup-bubbles", "set", mode]
             popupBubblesSaveProc.running = true
+        }
+    }
+
+    function setBarLabelsVisible(enabled, persist) {
+        barLabelsVisible = truthyEnabled(enabled)
+        if (persist !== false)
+            saveBarLabelsVisible()
+    }
+
+    function saveBarLabelsVisible() {
+        const enabled = barLabelsVisible ? "on" : "off"
+        if (barLabelsSaveProc.running)
+            barLabelsSaveProc.pending = enabled
+        else {
+            barLabelsSaveProc.command = [root.stateScript, "bar-labels", "set", enabled]
+            barLabelsSaveProc.running = true
+        }
+    }
+
+    function setBarBlurEnabled(enabled, persist) {
+        barBlurEnabled = truthyEnabled(enabled)
+        if (persist !== false)
+            saveBarBlurEnabled()
+    }
+
+    function saveBarBlurEnabled() {
+        const enabled = barBlurEnabled ? "on" : "off"
+        if (barBlurSaveProc.running)
+            barBlurSaveProc.pending = enabled
+        else {
+            barBlurSaveProc.command = [root.stateScript, "bar-blur", "set", enabled]
+            barBlurSaveProc.running = true
+        }
+    }
+
+    function setFrameBlurEnabled(enabled, persist) {
+        frameBlurEnabled = truthyEnabled(enabled)
+        if (persist !== false)
+            saveFrameBlurEnabled()
+    }
+
+    function saveFrameBlurEnabled() {
+        const enabled = frameBlurEnabled ? "on" : "off"
+        if (frameBlurSaveProc.running)
+            frameBlurSaveProc.pending = enabled
+        else {
+            frameBlurSaveProc.command = [root.stateScript, "frame-blur", "set", enabled]
+            frameBlurSaveProc.running = true
+        }
+    }
+
+    function setProfileImagePath(path, persist) {
+        profileImagePath = String(path || "").trim()
+        if (persist !== false)
+            saveProfileImagePath()
+    }
+
+    function saveProfileImagePath() {
+        if (profileImageSaveProc.running)
+            profileImageSaveProc.pending = profileImagePath
+        else {
+            profileImageSaveProc.command = [root.stateScript, "profile-image", "set", profileImagePath]
+            profileImageSaveProc.running = true
         }
     }
 
@@ -1329,6 +1400,18 @@ QtObject {
 
         if (key === "popupBubbles")
             root.setPopupBubblesSolid(line === "solid" || line === "on" || line === "1" || line === "true", false)
+
+        if (key === "barLabels")
+            root.setBarLabelsVisible(line !== "off" && line !== "0" && line !== "false", false)
+
+        if (key === "barBlur")
+            root.setBarBlurEnabled(line !== "off" && line !== "0" && line !== "false", false)
+
+        if (key === "frameBlur")
+            root.setFrameBlurEnabled(line !== "off" && line !== "0" && line !== "false", false)
+
+        if (key === "profileImage")
+            root.setProfileImagePath(value, false)
     }
 
     Component.onCompleted: {
@@ -1680,6 +1763,70 @@ QtObject {
                 const next = pending
                 pending = ""
                 command = [root.stateScript, "popup-bubbles", "set", next]
+                running = true
+            }
+        }
+    }
+
+    property Process barLabelsSaveProc: Process {
+        property string pending: ""
+
+        running: false
+        command: [root.stateScript, "bar-labels", "set", "on"]
+        onExited: {
+            running = false
+            if (pending.length > 0) {
+                const next = pending
+                pending = ""
+                command = [root.stateScript, "bar-labels", "set", next]
+                running = true
+            }
+        }
+    }
+
+    property Process barBlurSaveProc: Process {
+        property string pending: ""
+
+        running: false
+        command: [root.stateScript, "bar-blur", "set", "on"]
+        onExited: {
+            running = false
+            if (pending.length > 0) {
+                const next = pending
+                pending = ""
+                command = [root.stateScript, "bar-blur", "set", next]
+                running = true
+            }
+        }
+    }
+
+    property Process frameBlurSaveProc: Process {
+        property string pending: ""
+
+        running: false
+        command: [root.stateScript, "frame-blur", "set", "on"]
+        onExited: {
+            running = false
+            if (pending.length > 0) {
+                const next = pending
+                pending = ""
+                command = [root.stateScript, "frame-blur", "set", next]
+                running = true
+            }
+        }
+    }
+
+    property Process profileImageSaveProc: Process {
+        property string pending: ""
+
+        running: false
+        command: [root.stateScript, "profile-image", "set", ""]
+        onExited: {
+            running = false
+            if (pending.length > 0) {
+                const next = pending
+                pending = ""
+                command = [root.stateScript, "profile-image", "set", next]
                 running = true
             }
         }

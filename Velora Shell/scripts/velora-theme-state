@@ -19,6 +19,10 @@ topbar_file="${state_dir}/topbar"
 popup_attach_file="${state_dir}/popup-attach"
 popup_bubbles_file="${state_dir}/popup-bubbles"
 wallpaper_transition_file="${state_dir}/wallpaper-transition"
+bar_labels_file="${state_dir}/bar-labels"
+bar_blur_file="${state_dir}/bar-blur"
+frame_blur_file="${state_dir}/frame-blur"
+profile_image_file="${state_dir}/profile-image"
 command="${1:-get}"
 
 normalize_on_off() {
@@ -150,6 +154,10 @@ case "$command" in
     topbar="off"
     popup_attach="on"
     popup_bubbles="matched"
+    bar_labels="on"
+    bar_blur="on"
+    frame_blur="on"
+    profile_image=""
     wallpaper_transition="$(read_wallpaper_transition)"
 
     [[ -s "$state_file" ]] && theme="$(cat "$state_file")"
@@ -168,6 +176,10 @@ case "$command" in
     [[ -s "$topbar_file" ]] && topbar="$(cat "$topbar_file")"
     [[ -s "$popup_attach_file" ]] && popup_attach="$(normalize_on_off "$(cat "$popup_attach_file")")"
     [[ -s "$popup_bubbles_file" ]] && popup_bubbles="$(normalize_popup_bubbles "$(cat "$popup_bubbles_file")")"
+    [[ -s "$bar_labels_file" ]] && bar_labels="$(normalize_on_off "$(cat "$bar_labels_file")")"
+    [[ -s "$bar_blur_file" ]] && bar_blur="$(normalize_on_off "$(cat "$bar_blur_file")")"
+    [[ -s "$frame_blur_file" ]] && frame_blur="$(normalize_on_off "$(cat "$frame_blur_file")")"
+    [[ -s "$profile_image_file" ]] && profile_image="$(cat "$profile_image_file")"
 
     printf 'theme|%s\n' "$theme"
     printf 'opacity|%s\n' "$opacity"
@@ -185,6 +197,10 @@ case "$command" in
     printf 'topBar|%s\n' "$topbar"
     printf 'popupAttach|%s\n' "$popup_attach"
     printf 'popupBubbles|%s\n' "$popup_bubbles"
+    printf 'barLabels|%s\n' "$bar_labels"
+    printf 'barBlur|%s\n' "$bar_blur"
+    printf 'frameBlur|%s\n' "$frame_blur"
+    printf 'profileImage|%s\n' "$profile_image"
     printf 'wallpaperTransition|%s\n' "$wallpaper_transition"
     ;;
   set)
@@ -558,6 +574,103 @@ case "$command" in
         ;;
     esac
     ;;
+  bar-labels)
+    subcommand="${2:-get}"
+    case "$subcommand" in
+      get)
+        if [[ -s "$bar_labels_file" ]]; then
+          normalize_on_off "$(cat "$bar_labels_file")"
+        else
+          printf 'on\n'
+        fi
+        ;;
+      set)
+        enabled="$(normalize_on_off "${3:-on}")"
+        mkdir -p "$state_dir"
+        printf '%s\n' "$enabled" > "$bar_labels_file"
+        ;;
+      reset)
+        rm -f "$bar_labels_file"
+        ;;
+      *)
+        printf 'usage: %s bar-labels get|set|reset [on|off]\n' "$0" >&2
+        exit 2
+        ;;
+    esac
+    ;;
+  bar-blur)
+    subcommand="${2:-get}"
+    case "$subcommand" in
+      get)
+        if [[ -s "$bar_blur_file" ]]; then
+          normalize_on_off "$(cat "$bar_blur_file")"
+        else
+          printf 'on\n'
+        fi
+        ;;
+      set)
+        enabled="$(normalize_on_off "${3:-on}")"
+        mkdir -p "$state_dir"
+        printf '%s\n' "$enabled" > "$bar_blur_file"
+        ;;
+      reset)
+        rm -f "$bar_blur_file"
+        ;;
+      *)
+        printf 'usage: %s bar-blur get|set|reset [on|off]\n' "$0" >&2
+        exit 2
+        ;;
+    esac
+    ;;
+  frame-blur)
+    subcommand="${2:-get}"
+    case "$subcommand" in
+      get)
+        if [[ -s "$frame_blur_file" ]]; then
+          normalize_on_off "$(cat "$frame_blur_file")"
+        else
+          printf 'on\n'
+        fi
+        ;;
+      set)
+        enabled="$(normalize_on_off "${3:-on}")"
+        mkdir -p "$state_dir"
+        printf '%s\n' "$enabled" > "$frame_blur_file"
+        ;;
+      reset)
+        rm -f "$frame_blur_file"
+        ;;
+      *)
+        printf 'usage: %s frame-blur get|set|reset [on|off]\n' "$0" >&2
+        exit 2
+        ;;
+    esac
+    ;;
+  profile-image)
+    subcommand="${2:-get}"
+    case "$subcommand" in
+      get)
+        if [[ -s "$profile_image_file" ]]; then
+          cat "$profile_image_file"
+        else
+          printf '\n'
+        fi
+        ;;
+      set)
+        profile_image="${3:-}"
+        profile_image="${profile_image//$'\n'/}"
+        mkdir -p "$state_dir"
+        printf '%s\n' "$profile_image" > "$profile_image_file"
+        ;;
+      reset)
+        rm -f "$profile_image_file"
+        ;;
+      *)
+        printf 'usage: %s profile-image get|set|reset [path]\n' "$0" >&2
+        exit 2
+        ;;
+    esac
+    ;;
   topbar)
     subcommand="${2:-get}"
     case "$subcommand" in
@@ -609,7 +722,7 @@ case "$command" in
     esac
     ;;
   *)
-    printf 'usage: %s get|dump|set [theme] | opacity get|set|reset [sidebar popup card] | bar-opacity get|set|reset [opacity] | glow get|set|reset [general sidebar_border popup_border icon text] | border get|set|reset [adapt|manual hue] | layout get|set|reset [left|right] [0|1] | language get|set|reset [ja|en|pt-BR] | font get|set|reset [noto|adwaita|cantarell|dejavu|liberation|fantasque] | visualizer get|set|reset [strength] | visualizer-mode get|set|reset [wave|pixels] | visualizer-pixel-size get|set|reset [3-12] | visualizer-gradient get|set|reset [on|off] | popup-attach get|set|reset [on|off] | popup-bubbles get|set|reset [solid|matched] | topbar get|set|reset [on|off] | wallpaper-transition get|set|reset [transition duration delay]\n' "$0" >&2
+    printf 'usage: %s get|dump|set [theme] | opacity get|set|reset [sidebar popup card] | bar-opacity get|set|reset [opacity] | glow get|set|reset [general sidebar_border popup_border icon text] | border get|set|reset [adapt|manual hue] | layout get|set|reset [left|right] [0|1] | language get|set|reset [ja|en|pt-BR] | font get|set|reset [noto|adwaita|cantarell|dejavu|liberation|fantasque] | visualizer get|set|reset [strength] | visualizer-mode get|set|reset [wave|pixels] | visualizer-pixel-size get|set|reset [3-12] | visualizer-gradient get|set|reset [on|off] | popup-attach get|set|reset [on|off] | popup-bubbles get|set|reset [solid|matched] | bar-labels get|set|reset [on|off] | bar-blur get|set|reset [on|off] | frame-blur get|set|reset [on|off] | profile-image get|set|reset [path] | topbar get|set|reset [on|off] | wallpaper-transition get|set|reset [transition duration delay]\n' "$0" >&2
     exit 2
     ;;
 esac

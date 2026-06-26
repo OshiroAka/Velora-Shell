@@ -270,7 +270,7 @@ def write_user_css(path, p):
   --velora-button-text: {p["button_text"]};
   --velora-radius: 18px;
   --velora-left-width: clamp(236px, 16vw, 312px);
-  --velora-player-height: 104px;
+  --velora-player-height: 118px;
 
   --spice-main: {p["main"]};
   --spice-sidebar: {p["sidebar"]};
@@ -496,7 +496,8 @@ body {{
 [data-testid="now-playing-bar"] {{
   display: flex !important;
   align-items: center !important;
-  gap: 16px !important;
+  justify-content: space-between !important;
+  gap: 22px !important;
   overflow: visible !important;
 }}
 
@@ -518,13 +519,23 @@ body {{
 
 .main-nowPlayingBar-center,
 [data-testid="player-controls"] {{
-  flex: 1 1 auto !important;
+  flex: 1 1 720px !important;
   flex-direction: column !important;
+  min-width: min(420px, 38vw) !important;
+  max-width: 880px !important;
 }}
 
-.main-nowPlayingBar-left,
+.main-nowPlayingBar-left {{
+  flex: 0 1 460px !important;
+  justify-content: flex-start !important;
+  min-width: min(340px, 32vw) !important;
+  max-width: 540px !important;
+}}
+
 .main-nowPlayingBar-right {{
-  flex: 1 1 0 !important;
+  flex: 0 1 360px !important;
+  min-width: min(240px, 24vw) !important;
+  max-width: 430px !important;
 }}
 
 .main-nowPlayingBar-right {{
@@ -536,7 +547,7 @@ body {{
 [data-testid="playback-progressbar"] {{
   display: flex !important;
   align-items: center !important;
-  width: min(520px, 42vw) !important;
+  width: min(780px, 54vw) !important;
   max-width: 100% !important;
 }}
 
@@ -546,8 +557,8 @@ button[data-testid^="control-button-"] {{
   display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
-  min-width: 32px !important;
-  min-height: 32px !important;
+  min-width: 36px !important;
+  min-height: 36px !important;
   color: var(--velora-text) !important;
   --text-base: var(--velora-text) !important;
   --essential-base: var(--velora-text) !important;
@@ -569,8 +580,8 @@ button[aria-label^="Pausar"] {{
   display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
-  min-width: 40px !important;
-  min-height: 40px !important;
+  min-width: 48px !important;
+  min-height: 48px !important;
   background: linear-gradient(135deg, var(--velora-accent), var(--velora-accent-2)) !important;
   color: var(--velora-button-text) !important;
   --text-base: var(--velora-button-text) !important;
@@ -645,10 +656,27 @@ button[data-testid^="control-button-"] svg [fill="none"] {{
 }}
 
 .main-coverSlotExpanded-container,
+.main-nowPlayingWidget-coverArt,
+[data-testid="cover-art-image"],
+[data-testid="now-playing-widget"] img,
 .cover-art,
 .main-image-image,
 img {{
   border-radius: 14px !important;
+}}
+
+.main-coverSlotExpanded-container,
+.main-nowPlayingWidget-coverArt,
+[data-testid="cover-art-image"],
+[data-testid="now-playing-widget"] img {{
+  width: 76px !important;
+  height: 76px !important;
+  min-width: 76px !important;
+  min-height: 76px !important;
+  max-width: 76px !important;
+  max-height: 76px !important;
+  object-fit: cover !important;
+  flex: 0 0 76px !important;
 }}
 
 .main-nowPlayingBar-container,
@@ -656,16 +684,42 @@ img {{
   background: color-mix(in srgb, var(--velora-player) 90%, transparent 10%) !important;
   border-top: 1px solid var(--velora-border) !important;
   min-height: var(--velora-player-height) !important;
-  padding: 8px 16px !important;
+  padding: 10px 24px !important;
 }}
 
 .main-nowPlayingBar-left,
 [data-testid="now-playing-widget"] {{
-  min-width: 240px !important;
+  min-width: min(340px, 32vw) !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 14px !important;
 }}
 
 .main-nowPlayingBar-center {{
-  min-width: min(520px, 44vw) !important;
+  min-width: min(420px, 38vw) !important;
+}}
+
+.main-playerControls-buttons,
+.player-controls__buttons {{
+  gap: 10px !important;
+  min-height: 48px !important;
+}}
+
+.Root__now-playing-bar button svg,
+[data-testid="now-playing-bar"] button svg,
+button[data-testid^="control-button-"] svg {{
+  width: 20px !important;
+  height: 20px !important;
+}}
+
+button[data-testid="play-button"] svg,
+button[data-testid="control-button-playpause"] svg,
+button[aria-label^="Play"] svg,
+button[aria-label^="Pause"] svg,
+button[aria-label^="Tocar"] svg,
+button[aria-label^="Pausar"] svg {{
+  width: 22px !important;
+  height: 22px !important;
 }}
 
 .main-type-ballad,

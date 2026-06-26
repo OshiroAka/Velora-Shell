@@ -9,6 +9,7 @@ duration_arg="${5:-}"
 static_delay_arg="${6:-}"
 worker_stamp=""
 worker_img=""
+restore_mode=0
 
 if [ "$kind" = "__theme-worker" ]; then
   worker_stamp="${2:-}"
@@ -20,10 +21,28 @@ if [ "$kind" = "__theme-worker" ]; then
   static_delay_arg=""
 fi
 
-if [ $# -eq 1 ]; then
+if [ $# -eq 1 ] && [ "$1" != "restore" ] && [ "$1" != "--restore" ]; then
   kind="static"
   path="$1"
   preview="$1"
+fi
+
+if [ "$kind" = "restore" ] || [ "$kind" = "--restore" ]; then
+  restore_mode=1
+  state_file="$HOME/.cache/velora-shell/current_wallpaper"
+  [ -s "$state_file" ] || exit 0
+  IFS='|' read -r kind path preview < "$state_file" || exit 0
+  [ -n "$kind" ] || exit 0
+  [ -n "$path" ] || exit 0
+  case "$kind" in
+    static|bg|live|mpv)
+      [ -f "$path" ] || exit 0
+      ;;
+    engine) ;;
+    *)
+      exit 0
+      ;;
+  esac
 fi
 
 [ -n "$kind" ] || exit 2
@@ -97,6 +116,11 @@ static_apply_delay="$(clamp_decimal "$static_apply_delay" "0.12" "0" "0.80")"
 live_fallback_duration="$(clamp_decimal "$transition_duration" "0.25" "0.15" "0.28")"
 live_fallback_ready_delay="0.05"
 live_reveal_delay="0.45"
+if [ "$restore_mode" -eq 1 ]; then
+  static_apply_delay="0.00"
+  live_fallback_ready_delay="0.00"
+  live_reveal_delay="0.00"
+fi
 if [ "$kind" != "__theme-worker" ]; then
   printf '%s|%s|%s\n' "$kind" "$path" "$preview" > "$HOME/.cache/velora-shell/current_wallpaper"
 fi
@@ -646,7 +670,7 @@ static_wallpaper() {
     monitors="$(hyprctl monitors -j 2>/dev/null | python3 -c 'import json,sys; data=json.load(sys.stdin); print(" ".join(m.get("name","") for m in data if m.get("name")))' 2>/dev/null || true)"
     [ -n "$monitors" ] || monitors="eDP-1"
 
-    if show_static_fallback "$display_img" "$live_fallback_duration"; then
+    if [ "$restore_mode" -ne 1 ] && show_static_fallback "$display_img" "$live_fallback_duration"; then
       has_static_fallback=1
       sleep "$live_fallback_ready_delay" || true
     fi
@@ -697,7 +721,7 @@ live_wallpaper() {
   monitors="$(hyprctl monitors -j 2>/dev/null | python3 -c 'import json,sys; data=json.load(sys.stdin); print(" ".join(m.get("name","") for m in data if m.get("name")))' 2>/dev/null || true)"
   [ -n "$monitors" ] || monitors="eDP-1"
 
-  if show_static_fallback "$theme_path" "$live_fallback_duration"; then
+  if [ "$restore_mode" -ne 1 ] && show_static_fallback "$theme_path" "$live_fallback_duration"; then
     has_static_fallback=1
     sleep "$live_fallback_ready_delay" || true
   fi
@@ -722,7 +746,7 @@ engine_wallpaper() {
   local id="$1"
   local has_static_fallback=0
 
-  if show_static_fallback "$theme_path" "$live_fallback_duration"; then
+  if [ "$restore_mode" -ne 1 ] && show_static_fallback "$theme_path" "$live_fallback_duration"; then
     has_static_fallback=1
     sleep "$live_fallback_ready_delay" || true
   fi

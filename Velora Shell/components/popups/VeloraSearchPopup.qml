@@ -132,7 +132,10 @@ Item {
         searchBox.forceSearchFocus(selectText)
     }
 
-    function focusGeminiInput(selectText) {}
+    function focusGeminiInput(selectText) {
+        if (typeof geminiAskBoxLoader !== "undefined" && geminiAskBoxLoader.item && geminiAskBoxLoader.item.forceGeminiFocus)
+            geminiAskBoxLoader.item.forceGeminiFocus(selectText)
+    }
 
     function appendGeminiOutput(data) {
         const line = String(data || "").trim()
@@ -497,15 +500,19 @@ Item {
 
         property var popup: null
         readonly property bool searchActiveFocus: input.activeFocus
+        property bool pendingSelectText: true
 
         function forceSearchFocus(selectText) {
             if (!popup)
                 return
 
-            popup.forceActiveFocus()
-            input.forceActiveFocus()
+            pendingSelectText = selectText !== false
+            popup.forceActiveFocus(Qt.MouseFocusReason)
+            input.forceActiveFocus(Qt.MouseFocusReason)
             if (selectText !== false)
                 input.selectAll()
+            searchInputRetry.attempts = 0
+            searchInputRetry.restart()
         }
 
         radius: 10
@@ -549,6 +556,7 @@ Item {
                     id: input
 
                     anchors.fill: parent
+                    activeFocusOnPress: true
                     text: box.popup ? box.popup.searchQuery : ""
                     color: box.popup ? box.popup.ink : "white"
                     selectedTextColor: box.popup && box.popup.theme ? box.popup.theme.activeText : "white"
@@ -601,9 +609,34 @@ Item {
             anchors.fill: parent
             acceptedButtons: Qt.LeftButton
             cursorShape: Qt.IBeamCursor
+            preventStealing: true
+            onPressed: function(mouse) {
+                mouse.accepted = true
+                box.forceSearchFocus(false)
+            }
             onClicked: function(mouse) {
                 mouse.accepted = true
                 box.forceSearchFocus()
+            }
+        }
+
+        Timer {
+            id: searchInputRetry
+
+            property int attempts: 0
+
+            interval: 38
+            repeat: false
+            onTriggered: {
+                if (!box.popup)
+                    return
+                box.popup.forceActiveFocus(Qt.MouseFocusReason)
+                input.forceActiveFocus(Qt.MouseFocusReason)
+                if (box.pendingSelectText)
+                    input.selectAll()
+                attempts += 1
+                if (attempts < 8 && !input.activeFocus)
+                    restart()
             }
         }
     }

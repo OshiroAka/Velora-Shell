@@ -630,310 +630,104 @@ def generate_content_css(palette, web_mode=None):
   }}
 }}
 
-@-moz-document domain("youtube.com"), domain("youtu.be") {{
+@-moz-document domain("google.com"), domain("google.com.br") {{
   :root,
   html,
-  body {{
-    color-scheme: dark !important;
-    background: var(--velora-site-bg) !important;
-    background-color: var(--velora-site-bg-color) !important;
-  }}
-
-  ytd-app,
-  ytd-watch-flexy,
-  ytd-browse,
-  ytd-search,
-  ytd-page-manager {{
-    --yt-spec-base-background: var(--velora-site-bg-color) !important;
-    --yt-spec-raised-background: var(--velora-page-surface) !important;
-    --yt-spec-menu-background: var(--velora-page-surface) !important;
-    --yt-spec-general-background-a: transparent !important;
-    --yt-spec-general-background-b: transparent !important;
-    --yt-spec-general-background-c: transparent !important;
-    --yt-spec-brand-background-primary: transparent !important;
-    --yt-spec-brand-background-secondary: transparent !important;
-    --yt-spec-brand-background-solid: transparent !important;
-    --yt-spec-text-primary: var(--velora-page-text) !important;
-    --yt-spec-text-secondary: var(--velora-page-muted) !important;
-    --yt-spec-text-disabled: color-mix(in srgb, var(--velora-page-text), transparent 42%) !important;
-    --yt-spec-call-to-action: var(--velora-page-accent) !important;
-    --yt-spec-badge-chip-background: color-mix(in srgb, var(--velora-page-accent), transparent 78%) !important;
-    --yt-spec-button-chip-background-hover: color-mix(in srgb, var(--velora-page-accent), transparent 72%) !important;
-    --yt-spec-touch-response: color-mix(in srgb, var(--velora-page-accent), transparent 70%) !important;
-    --paper-dialog-background-color: var(--velora-page-surface) !important;
-    --paper-listbox-background-color: var(--velora-page-surface) !important;
+  body,
+  #viewport,
+  #main,
+  #cnt,
+  #rcnt,
+  .L3eUgb,
+  .o3j99,
+  .FPdoLc,
+  .sfbg,
+  .minidiv .sfbg,
+  .appbar,
+  .fbar,
+  #fbar {{
+    color-scheme: {"dark" if dark else "light"} !important;
+    background: linear-gradient(135deg,
+      var(--velora-page-bg),
+      color-mix(in srgb, var(--velora-page-accent-2), var(--velora-page-bg) 78%)) !important;
+    background-color: var(--velora-page-bg) !important;
     color: var(--velora-page-text) !important;
   }}
 
-  ytd-app,
-  #content.ytd-app,
-  #page-manager.ytd-app,
-  ytd-page-manager,
-  ytd-browse,
-  ytd-two-column-browse-results-renderer,
-  ytd-rich-grid-renderer,
-  #contents.ytd-rich-grid-renderer,
-  ytd-rich-grid-row,
-  ytd-search,
-  ytd-section-list-renderer,
-  ytd-item-section-renderer,
-  ytd-watch-flexy,
-  #columns.ytd-watch-flexy,
-  #primary.ytd-watch-flexy,
-  #secondary.ytd-watch-flexy,
-  #secondary-inner,
-  #content.ytd-watch-flexy {{
-    background: var(--velora-site-bg) !important;
-    background-color: var(--velora-site-bg-color) !important;
-    backdrop-filter: var(--velora-site-backdrop) !important;
+  body {{
+    min-height: 100vh !important;
   }}
 
-  ytd-rich-item-renderer,
-  ytd-rich-grid-media,
-  ytd-video-renderer,
-  ytd-compact-video-renderer,
-  ytd-playlist-video-renderer,
-  ytd-thumbnail,
-  ytd-thumbnail #thumbnail {{
+  center,
+  form,
+  #searchform,
+  .A8SBwf,
+  .RNNXgb:hover,
+  .RNNXgb:focus-within {{
     background: transparent !important;
     background-color: transparent !important;
   }}
 
-  #guide-content,
-  #guide-inner-content,
-  ytd-mini-guide-renderer,
-  ytd-multi-page-menu-renderer,
-  ytd-menu-popup-renderer,
-  tp-yt-paper-dialog,
-  tp-yt-paper-listbox,
-  ytd-engagement-panel-section-list-renderer,
-  ytd-playlist-panel-renderer,
-  ytd-rich-section-renderer,
-  ytd-comments-header-renderer,
-  ytd-comment-simplebox-renderer {{
+  .RNNXgb,
+  .aajZCb,
+  .UUbT9,
+  .erkvQe,
+  textarea.gLFyf,
+  input.gLFyf,
+  input[type="text"],
+  input[type="search"] {{
+    background: color-mix(in srgb, var(--velora-page-surface), transparent 6%) !important;
+    background-color: color-mix(in srgb, var(--velora-page-surface), transparent 6%) !important;
+    color: var(--velora-page-text) !important;
+    border-color: color-mix(in srgb, var(--velora-page-accent), transparent 54%) !important;
+    box-shadow: 0 18px 52px var(--velora-page-shadow) !important;
+  }}
+
+  .G43f7e,
+  .sbct,
+  .xtSCL,
+  .mkHrUc,
+  .OBMEnb,
+  g-card,
+  .MjjYud,
+  .kp-wholepage,
+  .Ww4FFb {{
     background: var(--velora-page-surface-soft) !important;
     background-color: var(--velora-page-surface-soft) !important;
+    color: var(--velora-page-text) !important;
     border-color: var(--velora-page-border) !important;
-    color: var(--velora-page-text) !important;
-    backdrop-filter: blur(20px) saturate(1.2) !important;
   }}
 
-  ytd-masthead,
-  #masthead-container,
-  #masthead-container.ytd-app,
-  #container.ytd-masthead,
-  #background.ytd-masthead,
-  #frosted-glass.ytd-masthead,
-  #header.ytd-rich-grid-renderer,
-  #guide-spacer,
-  #chips.ytd-rich-grid-renderer,
-  #chips.ytd-feed-filter-chip-bar-renderer,
-  #container.ytd-feed-filter-chip-bar-renderer,
-  #content.ytd-feed-filter-chip-bar-renderer,
-  ytd-feed-filter-chip-bar-renderer,
-  yt-chip-cloud-renderer,
-  #chips-wrapper,
-  #chips-wrapper.ytd-feed-filter-chip-bar-renderer,
-  #scroll-container.yt-chip-cloud-renderer,
-  #chips.yt-chip-cloud-renderer,
-  #left-arrow.yt-chip-cloud-renderer,
-  #right-arrow.yt-chip-cloud-renderer,
-  .ytd-feed-filter-chip-bar-renderer {{
-    background: transparent !important;
-    background-color: transparent !important;
-    background-image: none !important;
-    box-shadow: none !important;
-    border-color: transparent !important;
-    filter: none !important;
-    backdrop-filter: none !important;
-  }}
-
-  #background.ytd-masthead,
-  #frosted-glass.ytd-masthead,
-  ytd-masthead::before,
-  ytd-masthead::after,
-  #masthead-container::before,
-  #masthead-container::after,
-  #container.ytd-masthead::before,
-  #container.ytd-masthead::after {{
-    display: none !important;
-    content: none !important;
-    background: transparent !important;
-    background-color: transparent !important;
-    background-image: none !important;
-    opacity: 0 !important;
-    box-shadow: none !important;
-    filter: none !important;
-    backdrop-filter: none !important;
-  }}
-
-  ytd-masthead,
-  #background.ytd-masthead {{
-    border-bottom: 0 !important;
-  }}
-
-  ytd-masthead,
-  #masthead-container,
-  #masthead-container.ytd-app,
-  #container.ytd-masthead {{
-    height: 0 !important;
-    min-height: 0 !important;
-    max-height: 0 !important;
-    overflow: visible !important;
-    pointer-events: none !important;
-  }}
-
-  #page-manager.ytd-app,
-  ytd-page-manager,
-  ytd-browse {{
-    margin-top: 0 !important;
-    padding-top: 0 !important;
-  }}
-
-  #start.ytd-masthead,
-  #end.ytd-masthead,
-  #voice-search-button.ytd-masthead,
-  ytd-topbar-logo-renderer,
-  ytd-notification-topbar-button-renderer,
-  ytd-topbar-menu-button-renderer,
-  ytd-button-renderer.ytd-masthead,
-  #buttons.ytd-masthead,
-  ytd-feed-filter-chip-bar-renderer,
-  yt-chip-cloud-renderer,
-  #header.ytd-rich-grid-renderer,
-  #chips.ytd-rich-grid-renderer,
-  #chips-wrapper.ytd-feed-filter-chip-bar-renderer,
-  #scroll-container.yt-chip-cloud-renderer,
-  #left-arrow.yt-chip-cloud-renderer,
-  #right-arrow.yt-chip-cloud-renderer {{
-    display: none !important;
-  }}
-
-  #container.ytd-masthead {{
-    justify-content: center !important;
-    padding: 0 24px !important;
-  }}
-
-  #center.ytd-masthead {{
-    flex: 0 1 min(720px, 72vw) !important;
-    margin: 0 auto !important;
-    max-width: min(720px, 72vw) !important;
-    pointer-events: auto !important;
-    position: relative !important;
-    top: 12px !important;
-    z-index: 2000 !important;
-  }}
-
-  ytd-searchbox {{
-    margin: 0 auto !important;
-    max-width: min(680px, 72vw) !important;
-    pointer-events: auto !important;
-    width: min(680px, 72vw) !important;
-  }}
-
-  ytd-guide-section-renderer:has(ytd-guide-entry-renderer a[href^="/@"]),
-  ytd-guide-section-renderer:has(ytd-guide-entry-renderer a[href^="/channel/"]),
-  ytd-guide-section-renderer:has(ytd-guide-entry-renderer a[href^="/c/"]),
-  ytd-guide-section-renderer:has(ytd-guide-entry-renderer a[href^="/user/"]),
-  ytd-guide-entry-renderer:has(a[href^="/@"]),
-  ytd-guide-entry-renderer:has(a[href^="/channel/"]),
-  ytd-guide-entry-renderer:has(a[href^="/c/"]),
-  ytd-guide-entry-renderer:has(a[href^="/user/"]),
-  ytd-guide-collapsible-section-entry-renderer {{
-    display: none !important;
-  }}
-
-  ytd-rich-grid-renderer,
-  #contents.ytd-rich-grid-renderer {{
-    padding-top: 0 !important;
-    margin-top: 0 !important;
-  }}
-
-  yt-chip-cloud-chip-renderer {{
-    background-color: color-mix(in srgb, var(--velora-page-surface), transparent 20%) !important;
-    border: 1px solid color-mix(in srgb, var(--velora-page-accent), transparent 66%) !important;
+  h1,
+  h2,
+  h3,
+  span,
+  div,
+  p,
+  cite,
+  em,
+  input,
+  textarea,
+  button {{
     color: var(--velora-page-text) !important;
   }}
 
-  ytd-guide-entry-renderer,
-  ytd-mini-guide-entry-renderer {{
-    background-color: transparent !important;
-    border: 1px solid transparent !important;
-    color: var(--velora-page-text) !important;
+  a,
+  a:visited,
+  .LC20lb,
+  .yuRUbf a {{
+    color: var(--velora-page-accent-3) !important;
   }}
 
-  ytd-toggle-button-renderer,
-  ytd-button-renderer,
-  tp-yt-paper-button {{
-    background-color: color-mix(in srgb, var(--velora-page-surface), transparent 18%) !important;
-    border: 1px solid color-mix(in srgb, var(--velora-page-accent), transparent 66%) !important;
-    color: var(--velora-page-text) !important;
-  }}
-
-  yt-chip-cloud-chip-renderer[chip-style="STYLE_DEFAULT"][selected],
-  yt-chip-cloud-chip-renderer[aria-selected="true"],
-  ytd-guide-entry-renderer[active],
-  ytd-mini-guide-entry-renderer[active] {{
-    background: linear-gradient(135deg,
-      color-mix(in srgb, var(--velora-page-accent), transparent 22%),
-      color-mix(in srgb, var(--velora-page-accent-2), transparent 34%)) !important;
-    color: var(--velora-page-accent-text) !important;
-    border-color: color-mix(in srgb, var(--velora-page-accent), transparent 42%) !important;
-  }}
-
-  ytd-searchbox #container,
-  #container.ytd-searchbox,
-  ytd-searchbox input,
-  #search-icon-legacy,
-  ytd-searchbox button,
-  ytd-searchbox #search-form {{
-    background: var(--velora-page-surface) !important;
-    background-color: var(--velora-page-surface) !important;
-    border-color: var(--velora-page-border) !important;
-    color: var(--velora-page-text) !important;
-  }}
-
-  #video-title,
-  #video-title-link,
-  #channel-name,
-  ytd-channel-name,
-  ytd-video-meta-block,
-  yt-formatted-string,
-  yt-attributed-string,
-  a.yt-simple-endpoint {{
-    color: var(--velora-page-text) !important;
-    text-shadow: none !important;
-  }}
-
-  #metadata-line,
-  #metadata-line span,
-  #description,
-  ytd-metadata-row-renderer,
-  ytd-reel-player-overlay-renderer .metadata {{
+  .VuuXrf,
+  .MUxGbd,
+  .IsZvec,
+  .BNeawe,
+  .fl,
+  .gb_E,
+  .gb_F,
+  .gb_Xa {{
     color: var(--velora-page-muted) !important;
-  }}
-
-  ytd-watch-metadata,
-  #description.ytd-watch-metadata,
-  ytd-expander,
-  ytd-comments,
-  ytd-comment-thread-renderer,
-  ytd-reel-shelf-renderer,
-  ytd-rich-shelf-renderer {{
-    background: color-mix(in srgb, var(--velora-page-surface-soft), transparent 14%) !important;
-    border-color: var(--velora-page-border) !important;
-    color: var(--velora-page-text) !important;
-  }}
-
-  #player,
-  #player-container,
-  #player-container-outer,
-  #player-container-inner,
-  ytd-player,
-  #movie_player,
-  .html5-video-player,
-  video {{
-    background-color: #000 !important;
   }}
 }}
 

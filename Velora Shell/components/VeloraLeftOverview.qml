@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
+import Quickshell
 import Quickshell.Io
 import "popups"
 
@@ -30,10 +31,13 @@ Item {
     property int ramPercent: 0
     property int batteryPercent: 0
     property string batteryState: ""
+    property var eventItems: []
+    property var upcomingEventItems: []
     property bool hovered: false
 
     readonly property int cornerRadius: 22
-    readonly property bool backgroundPollingActive: open && visible
+    readonly property bool placeholderOnly: true
+    readonly property bool backgroundPollingActive: open && visible && !placeholderOnly
     readonly property bool hasMedia: mediaTitle.length > 0 || mediaArtist.length > 0 || mediaPlayer.length > 0
     readonly property string uiFont: theme ? theme.uiFont : "Noto Sans"
     readonly property string monoFont: theme ? theme.monoFont : "JetBrains Mono"
@@ -55,11 +59,13 @@ Item {
     readonly property color fill: theme ? theme.alpha(accent, dark ? 0.34 : 0.38) : Qt.rgba(0.80, 0.60, 0.40, 0.58)
     readonly property string mediaCommand: "players=$(playerctl -l 2>/dev/null || true); pick=\"\"; for p in $players; do state=$(playerctl -p \"$p\" status 2>/dev/null || true); if [ \"$state\" = \"Playing\" ]; then pick=\"$p\"; break; fi; done; if [ -z \"$pick\" ]; then pick=$(printf '%s\\n' \"$players\" | sed -n '1p'); fi; [ -z \"$pick\" ] && { printf '\\t\\t\\t\\t0\\tStopped\\t\\n'; exit 0; }; title=$(playerctl -p \"$pick\" metadata title 2>/dev/null || true); artist=$(playerctl -p \"$pick\" metadata artist 2>/dev/null || true); album=$(playerctl -p \"$pick\" metadata album 2>/dev/null || true); length=$(playerctl -p \"$pick\" metadata mpris:length 2>/dev/null || true); art=$(playerctl -p \"$pick\" metadata mpris:artUrl 2>/dev/null || true); pos=$(playerctl -p \"$pick\" position 2>/dev/null || true); status=$(playerctl -p \"$pick\" status 2>/dev/null || true); printf '%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n' \"$title\" \"$artist\" \"$album\" \"$length\" \"$art\" \"$pos\" \"$status\" \"$pick\""
     readonly property string systemCommand: "cpu=$(vmstat 1 2 2>/dev/null | tail -1 | awk '{ if (NF >= 15) printf \"%d\", 100 - $15; else printf \"0\" }'); ram=$(free 2>/dev/null | awk '/Mem:/ { if ($2 > 0) printf \"%d\", ($3 * 100) / $2; else printf \"0\" }'); bat=$(cat /sys/class/power_supply/BAT*/capacity 2>/dev/null | head -n1); state=$(cat /sys/class/power_supply/BAT*/status 2>/dev/null | head -n1); printf '%s|%s|%s|%s\\n' \"${cpu:-0}\" \"${ram:-0}\" \"${bat:-0}\" \"${state:-}\""
+    readonly property string eventsScript: Quickshell.shellDir + "/scripts/velora-events-state"
 
     signal closeRequested()
     signal pointerInsideChanged(bool inside)
     signal mediaWindowRequested(real centerY)
     signal detailWindowRequested(string detailType, real centerY)
+    signal agendaRequested(real centerY)
     signal settingsRequested(real centerY)
 
     opacity: open ? 1 : 0
@@ -125,6 +131,130 @@ Item {
         return day >= 1 && day <= count ? day : ""
     }
 
+    function pad2(value) {
+        const number = Math.max(0, Number(value) || 0)
+        return number < 10 ? "0" + number : "" + number
+    }
+
+    function todayIso() {
+        const d = new Date()
+        return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate())
+    }
+
+    function calendarDateForSlot(slot) {
+        const day = calendarDay(slot)
+        if (day === "")
+            return ""
+        const d = new Date()
+        return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(day)
+    }
+
+    function eventCountForDate(date) {
+        if (!date || date.length <= 0)
+            return 0
+        let count = 0
+        for (let i = 0; i < eventItems.length; ++i) {
+            if (String(eventItems[i].date || "") === date)
+                count += 1
+        }
+        return count
+    }
+
+    function eventIconForCategory(category) {
+        const value = String(category || "").toLowerCase()
+        if (value.indexOf("trabalho") >= 0 || value.indexOf("projeto") >= 0)
+            return "box"
+        if (value.indexOf("estudo") >= 0 || value.indexOf("leitura") >= 0)
+            return "memo"
+        if (value.indexOf("saude") >= 0)
+            return "heart"
+        return "calendar"
+    }
+
+    function normalizeOverviewEvent(item, index) {
+        const source = item || {}
+        const date = String(source.date || todayIso()).trim()
+        const start = String(source.start || "").trim()
+        const end = String(source.end || "").trim()
+        const title = String(source.title || "Evento").trim()
+        const category = String(source.category || "").trim()
+        return {
+            title: title.length > 0 ? title : "Evento",
+            date: date.length > 0 ? date : todayIso(),
+            start: start,
+            end: end,
+            category: category,
+            iconName: String(source.iconName || eventIconForCategory(category)).trim() || "calendar",
+            accentIndex: index % 3
+        }
+    }
+
+    function loadEventsText(rawText) {
+        let parsed = []
+        try {
+            parsed = JSON.parse(String(rawText || "[]"))
+        } catch (error) {
+            parsed = []
+        }
+        if (!Array.isArray(parsed))
+            parsed = []
+        const items = []
+        for (let i = 0; i < parsed.length; ++i)
+            items.push(normalizeOverviewEvent(parsed[i], i))
+        items.sort(function(a, b) {
+            const left = String(a.date || "") + " " + String(a.start || "")
+            const right = String(b.date || "") + " " + String(b.start || "")
+            return left < right ? -1 : (left > right ? 1 : 0)
+        })
+        const today = todayIso()
+        const upcoming = []
+        for (let j = 0; j < items.length; ++j) {
+            if (String(items[j].date || "") >= today)
+                upcoming.push(items[j])
+        }
+        eventItems = items
+        upcomingEventItems = upcoming.slice(0, 3)
+    }
+
+    function eventDateLabel(date) {
+        const today = todayIso()
+        const tomorrow = new Date()
+        tomorrow.setDate(tomorrow.getDate() + 1)
+        const tomorrowIso = tomorrow.getFullYear() + "-" + pad2(tomorrow.getMonth() + 1) + "-" + pad2(tomorrow.getDate())
+        if (date === today)
+            return "Hoje"
+        if (date === tomorrowIso)
+            return "Amanha"
+        const parts = String(date || "").split("-")
+        if (parts.length !== 3)
+            return date || ""
+        const parsed = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]))
+        const weekdays = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sab"]
+        const months = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"]
+        return weekdays[parsed.getDay()] + ", " + parsed.getDate() + " " + months[parsed.getMonth()]
+    }
+
+    function formatEventDetail(eventItem) {
+        const event = eventItem || {}
+        const time = String(event.start || "").length > 0
+            ? String(event.start || "") + (String(event.end || "").length > 0 ? "-" + String(event.end || "") : "")
+            : ""
+        const date = eventDateLabel(String(event.date || ""))
+        return date + (time.length > 0 ? " - " + time : "")
+    }
+
+    function upcomingEventTitle(index) {
+        return index >= 0 && index < upcomingEventItems.length ? upcomingEventItems[index].title : ""
+    }
+
+    function upcomingEventDetail(index) {
+        return index >= 0 && index < upcomingEventItems.length ? formatEventDetail(upcomingEventItems[index]) : ""
+    }
+
+    function upcomingEventIcon(index) {
+        return index >= 0 && index < upcomingEventItems.length ? upcomingEventItems[index].iconName : "calendar"
+    }
+
     function isToday(day) {
         return Number(day) === new Date().getDate()
     }
@@ -146,6 +276,8 @@ Item {
             mediaQuery.running = true
         if (!systemQuery.running)
             systemQuery.running = true
+        if (!eventsQuery.running)
+            eventsQuery.running = true
     }
 
     onBackgroundPollingActiveChanged: if (backgroundPollingActive) triggerRefresh()
@@ -163,6 +295,13 @@ Item {
         repeat: true
         running: root.backgroundPollingActive
         onTriggered: if (!systemQuery.running) systemQuery.running = true
+    }
+
+    Timer {
+        interval: 20000
+        repeat: true
+        running: root.backgroundPollingActive
+        onTriggered: if (!eventsQuery.running) eventsQuery.running = true
     }
 
     Process {
@@ -232,6 +371,19 @@ Item {
         onExited: running = false
     }
 
+    Process {
+        id: eventsQuery
+
+        running: false
+        command: [root.eventsScript, "list"]
+
+        stdout: StdioCollector {
+            onStreamFinished: root.loadEventsText(text)
+        }
+
+        onExited: running = false
+    }
+
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: 22
@@ -285,10 +437,11 @@ Item {
 
                 OverviewCard {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: root.hasMedia ? 214 : 0
-                    visible: root.hasMedia
+                    Layout.preferredHeight: 214
+                    visible: true
 
                     ColumnLayout {
+                        visible: !root.placeholderOnly
                         anchors.fill: parent
                         anchors.margins: 14
                         spacing: 10
@@ -378,7 +531,7 @@ Item {
                                     MediaButton { label: "‹"; onClicked: root.runMediaAction("previous") }
                                     MediaButton { label: root.mediaPlaying ? "Ⅱ" : "▶"; emphasized: true; onClicked: root.runMediaAction("play-pause") }
                                     MediaButton { label: "›"; onClicked: root.runMediaAction("next") }
-                                    MediaButton { label: "♡"; onClicked: root.runMediaAction("loop Playlist") }
+                                    MediaButton { label: "↻"; onClicked: root.runMediaAction("loop Playlist") }
                                 }
 
                                 Item { Layout.fillHeight: true }
@@ -389,24 +542,35 @@ Item {
 
                 OverviewCard {
                     Layout.fillWidth: true
-                    Layout.fillHeight: true
+                    Layout.preferredHeight: 248
 
                     ColumnLayout {
+                        visible: !root.placeholderOnly
                         anchors.fill: parent
-                        anchors.margins: 16
-                        spacing: 10
+                        anchors.margins: 14
+                        spacing: 5
 
                         RowLayout {
                             Layout.fillWidth: true
                             SectionTitle { Layout.fillWidth: true; title: "Notificacoes"; iconName: "bell" }
-                            Text { text: "Ver tudo"; color: root.accent2; font.family: root.uiFont; font.pixelSize: 12; font.weight: Font.Bold }
+                            Text {
+                                id: viewAllNotificationsText
+                                text: "Ver tudo"
+                                color: root.accent2
+                                font.family: root.uiFont
+                                font.pixelSize: 12
+                                font.weight: Font.Bold
+                            }
                         }
 
                         NotificationRow { iconName: "memo"; title: "Nova mensagem"; timeText: "agora"; accentIndex: 0 }
                         NotificationRow { iconName: "spark"; title: "Push realizado com sucesso"; timeText: "ha 1 h"; accentIndex: 1 }
                         NotificationRow { iconName: "clock"; title: "Reuniao amanha as 14:00"; timeText: "ha 3 h"; accentIndex: 2 }
+                        Item { Layout.fillHeight: true }
                     }
                 }
+
+                Item { Layout.fillHeight: true }
             }
 
             ColumnLayout {
@@ -419,6 +583,7 @@ Item {
                     Layout.preferredHeight: 278
 
                     ColumnLayout {
+                        visible: !root.placeholderOnly
                         anchors.fill: parent
                         anchors.margins: 14
                         spacing: 8
@@ -476,18 +641,43 @@ Item {
                                     Repeater {
                                         model: 42
                                         Rectangle {
+                                            readonly property var dayValue: root.calendarDay(index)
+                                            readonly property string cellDate: root.calendarDateForSlot(index)
+                                            readonly property int eventCount: root.eventCountForDate(cellDate)
+                                            readonly property bool today: root.isToday(dayValue)
+
                                             Layout.fillWidth: true
                                             Layout.fillHeight: true
                                             radius: 8
-                                            color: root.isToday(root.calendarDay(index)) ? root.fill : "transparent"
+                                            color: today ? root.fill : (eventCount > 0 ? root.alpha(root.accent2, 0.16) : "transparent")
+                                            border.width: eventCount > 0 && !today ? 1 : 0
+                                            border.color: root.alpha(root.accent2, 0.24)
 
                                             Text {
                                                 anchors.centerIn: parent
-                                                text: root.calendarDay(index)
-                                                color: root.isToday(text) ? (root.theme ? root.theme.activeText : "#ffffff") : root.inkSoft
+                                                text: parent.dayValue
+                                                color: parent.today ? (root.theme ? root.theme.activeText : "#ffffff") : (parent.eventCount > 0 ? root.ink : root.inkSoft)
                                                 font.family: root.uiFont
                                                 font.pixelSize: 10
-                                                font.weight: root.isToday(text) ? Font.Bold : Font.Medium
+                                                font.weight: parent.today || parent.eventCount > 0 ? Font.Bold : Font.Medium
+                                            }
+
+                                            Row {
+                                                anchors.horizontalCenter: parent.horizontalCenter
+                                                anchors.bottom: parent.bottom
+                                                anchors.bottomMargin: 2
+                                                spacing: 2
+                                                visible: parent.eventCount > 0
+
+                                                Repeater {
+                                                    model: Math.min(3, parent.parent.eventCount)
+                                                    Rectangle {
+                                                        width: 3
+                                                        height: 3
+                                                        radius: 2
+                                                        color: parent.parent.today && root.theme ? root.theme.activeText : root.accent2
+                                                    }
+                                                }
                                             }
                                         }
                                     }
@@ -495,9 +685,44 @@ Item {
                             }
                         }
 
-                        SectionTitle { title: "Proximo"; iconName: "memo" }
-                        EventRow { title: "Revisar projeto"; detail: "Amanha - 14:00" }
-                        EventRow { title: "Leitura"; detail: "Qui, 26 jun - 19:30" }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            SectionTitle { Layout.fillWidth: true; title: "Proximo"; iconName: "memo" }
+                            Text {
+                                id: viewAgendaText
+                                text: "Agenda"
+                                color: root.accent2
+                                font.family: root.uiFont
+                                font.pixelSize: 11
+                                font.weight: Font.Bold
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: root.agendaRequested(viewAgendaText.mapToItem(root, 0, viewAgendaText.height / 2).y)
+                                }
+                            }
+                        }
+
+                        Repeater {
+                            model: Math.min(2, root.upcomingEventItems.length)
+                            EventRow {
+                                title: root.upcomingEventTitle(index)
+                                detail: root.upcomingEventDetail(index)
+                                iconName: root.upcomingEventIcon(index)
+                                accentIndex: index
+                            }
+                        }
+
+                        Text {
+                            Layout.fillWidth: true
+                            visible: root.upcomingEventItems.length <= 0
+                            text: "Sem eventos"
+                            color: root.inkMuted
+                            font.family: root.uiFont
+                            font.pixelSize: 11
+                            font.weight: Font.Medium
+                        }
                     }
                 }
 
@@ -506,6 +731,7 @@ Item {
                     Layout.fillHeight: true
 
                     ColumnLayout {
+                        visible: !root.placeholderOnly
                         anchors.fill: parent
                         anchors.margins: 14
                         spacing: 10
@@ -617,7 +843,10 @@ Item {
         property int accentIndex: 0
 
         Layout.fillWidth: true
-        Layout.preferredHeight: 40
+        Layout.minimumHeight: 31
+        Layout.preferredHeight: 31
+        Layout.maximumHeight: 31
+        implicitHeight: 31
         radius: 10
         color: root.cardSoftLow
 
@@ -625,18 +854,18 @@ Item {
             anchors.fill: parent
             anchors.leftMargin: 12
             anchors.rightMargin: 12
-            spacing: 10
+            spacing: 9
 
             Rectangle {
-                Layout.preferredWidth: 24
-                Layout.preferredHeight: 24
-                radius: 7
+                Layout.preferredWidth: 20
+                Layout.preferredHeight: 20
+                radius: 6
                 color: root.alpha(root.accent2, 0.20 + accentIndex * 0.04)
 
                 VeloraPopupIcon {
                     anchors.centerIn: parent
-                    width: 14
-                    height: 14
+                    width: 12
+                    height: 12
                     iconName: parent.parent.parent.iconName
                     lineColor: root.accent2
                 }
@@ -664,6 +893,8 @@ Item {
     component EventRow: RowLayout {
         property string title: ""
         property string detail: ""
+        property string iconName: "memo"
+        property int accentIndex: 0
 
         Layout.fillWidth: true
         spacing: 10
@@ -672,12 +903,12 @@ Item {
             Layout.preferredWidth: 24
             Layout.preferredHeight: 24
             radius: 7
-            color: root.alpha(root.accent2, 0.17)
+            color: root.alpha(root.accent2, 0.17 + accentIndex * 0.04)
             VeloraPopupIcon {
                 anchors.centerIn: parent
                 width: 14
                 height: 14
-                iconName: "memo"
+                iconName: parent.parent.iconName
                 lineColor: root.accent2
             }
         }

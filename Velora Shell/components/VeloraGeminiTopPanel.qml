@@ -43,10 +43,16 @@ Item {
 
     clip: true
 
+    function queuePromptFocus(selectText) {
+        focusTimer.selectText = selectText !== false
+        focusTimer.attempts = 0
+        focusTimer.restart()
+    }
+
     function forcePromptFocus(selectText) {
         root.activated()
-        root.forceActiveFocus()
-        promptInput.forceActiveFocus()
+        root.forceActiveFocus(Qt.MouseFocusReason)
+        promptInput.forceActiveFocus(Qt.MouseFocusReason)
         if (selectText !== false)
             promptInput.selectAll()
     }
@@ -167,9 +173,9 @@ Item {
     onGeminiAnswerChanged: queueGeminiTyping()
     onOpenChanged: {
         if (open && autoFocus)
-            focusTimer.restart()
+            queuePromptFocus(false)
     }
-    onFocusRequestChanged: if (open && autoFocus) focusTimer.restart()
+    onFocusRequestChanged: if (open && autoFocus) queuePromptFocus(false)
 
     HoverHandler {
         onHoveredChanged: root.pointerInsideChanged(hovered)
@@ -213,9 +219,17 @@ Item {
     Timer {
         id: focusTimer
 
+        property int attempts: 0
+        property bool selectText: false
+
         interval: 55
         repeat: false
-        onTriggered: root.forcePromptFocus(false)
+        onTriggered: {
+            root.forcePromptFocus(selectText)
+            attempts += 1
+            if (attempts < 9 && !promptInput.activeFocus)
+                restart()
+        }
     }
 
     Keys.onEscapePressed: root.closeRequested()
@@ -309,6 +323,7 @@ Item {
                             id: promptInput
 
                             anchors.fill: parent
+                            activeFocusOnPress: true
                             text: root.geminiPrompt
                             color: root.ink
                             selectedTextColor: root.theme ? root.theme.activeText : "white"
@@ -360,9 +375,14 @@ Item {
                     anchors.fill: parent
                     acceptedButtons: Qt.LeftButton
                     cursorShape: Qt.IBeamCursor
+                    preventStealing: true
+                    onPressed: function(mouse) {
+                        mouse.accepted = true
+                        root.queuePromptFocus(false)
+                    }
                     onClicked: {
                         mouse.accepted = true
-                        root.forcePromptFocus()
+                        root.queuePromptFocus()
                     }
                 }
             }

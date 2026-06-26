@@ -21,8 +21,8 @@ Item {
     readonly property color settingsLightText: theme ? theme.textPrimary : Qt.rgba(0.27, 0.21, 0.39, 0.94)
     readonly property color settingsLightTextSoft: theme ? theme.textSecondary : Qt.rgba(0.39, 0.32, 0.52, 0.70)
     readonly property color settingsLightAccent: accentPrimary()
-    readonly property color settingsLightLine: theme ? alpha(theme.borderSoft, theme.themeMode === "dark" ? 0.24 : 0.34) : Qt.rgba(0.42, 0.31, 0.53, 0.10)
-    readonly property color settingsLightPanel: theme ? alpha(theme.surfaceCard, theme.themeMode === "dark" ? 0.42 : 0.48) : Qt.rgba(1, 1, 1, 0.54)
+    readonly property color settingsLightLine: theme ? alpha(theme.borderSoft, theme.themeMode === "dark" ? 0.34 : 0.42) : Qt.rgba(0.42, 0.31, 0.53, 0.10)
+    readonly property color settingsLightPanel: theme ? alpha(theme.surfaceCard, theme.themeMode === "dark" ? 0.56 : 0.62) : Qt.rgba(1, 1, 1, 0.54)
     readonly property string homeDir: Quickshell.env("HOME") || ""
     readonly property string wallpaperDir: homeDir + "/Pictures/Wallpapers"
     readonly property string stateScript: Quickshell.shellDir + "/scripts/velora-theme-state"
@@ -34,10 +34,9 @@ Item {
     readonly property string codeTransparencyScript: Quickshell.shellDir + "/scripts/velora-code-transparency"
     readonly property var navItems: [
         { key: "general", icon: "home" },
+        { key: "bar", icon: "volume" },
         { key: "appearance", icon: "palette" },
-        { key: "wallpaper", icon: "image" },
-        { key: "visualizer", icon: "volume" },
-        { key: "language", icon: "language" }
+        { key: "integrations", icon: "puzzle" }
     ]
     readonly property var fallbackLanguageOptions: [
         { id: "ja", label: "日本語", shortLabel: "JP" },
@@ -180,6 +179,16 @@ Item {
 
     function fontGlowEnabled() {
         return root.theme && root.theme.textGlow.a > 0.001
+    }
+
+    function profileImageSource() {
+        const customPath = root.theme ? String(root.theme.profileImagePath || "").trim() : ""
+        return customPath.length > 0 ? customPath : Qt.resolvedUrl("../assets/profile-avatar.png")
+    }
+
+    function chooseProfileImage() {
+        if (!profileImageChooser.running)
+            profileImageChooser.running = true
     }
 
     function tr(key) {
@@ -410,15 +419,15 @@ Item {
     }
 
     function wallpaperNavIndex() {
-        return 2
+        return -1
     }
 
     function visualizerNavIndex() {
-        return 3
+        return 1
     }
 
     function languageNavIndex() {
-        return 4
+        return -1
     }
 
     function visualizerModeOptions() {
@@ -558,6 +567,26 @@ Item {
 
         running: false
         command: ["bash", "-lc", "xdg-open \"$HOME/Pictures/Wallpapers\" >/dev/null 2>&1 || true"]
+        onExited: running = false
+    }
+
+    Process {
+        id: profileImageChooser
+
+        running: false
+        command: ["bash", "-lc", "file=\"\"; if command -v zenity >/dev/null 2>&1; then file=$(zenity --file-selection --title='Escolher foto de perfil' --file-filter='Imagens | *.png *.jpg *.jpeg *.webp' 2>/dev/null || true); elif command -v kdialog >/dev/null 2>&1; then file=$(kdialog --getopenfilename \"$HOME\" 'Images (*.png *.jpg *.jpeg *.webp)' 2>/dev/null || true); fi; [ -n \"$file\" ] && printf '%s\\n' \"$file\""]
+
+        stdout: SplitParser {
+            onRead: function(data) {
+                const path = String(data || "").trim()
+                if (path.length <= 0 || !root.theme)
+                    return
+                root.theme.setProfileImagePath(path)
+                root.noticeText = root.tr("profilePhotoUpdated")
+                noticeReset.restart()
+            }
+        }
+
         onExited: running = false
     }
 
@@ -1586,9 +1615,9 @@ Item {
     component NewSettingsView: Rectangle {
         id: settingsView
 
-        readonly property color bg: root.theme ? root.theme.withAlpha(root.theme.surfacePopup, root.theme.themeMode === "dark" ? Math.max(0.56, Math.min(0.78, root.theme.surfacePopup.a)) : Math.max(0.50, Math.min(0.70, root.theme.surfacePopup.a))) : Qt.rgba(1.0, 0.965, 0.995, 0.68)
-        readonly property color panel: root.theme ? root.alpha(root.theme.surfaceCard, root.theme.themeMode === "dark" ? 0.36 : 0.42) : Qt.rgba(1, 1, 1, 0.42)
-        readonly property color panelStrong: root.theme ? root.alpha(root.theme.surfaceCard, root.theme.themeMode === "dark" ? 0.52 : 0.58) : Qt.rgba(1, 1, 1, 0.58)
+        readonly property color bg: root.theme ? root.theme.mix(root.theme.surfacePopup, root.theme.accentPrimary, root.pywalStyle ? 0.05 : 0.02, root.theme.themeMode === "dark" ? Math.max(0.66, Math.min(0.84, root.theme.surfacePopup.a)) : Math.max(0.56, Math.min(0.74, root.theme.surfacePopup.a))) : Qt.rgba(1.0, 0.965, 0.995, 0.68)
+        readonly property color panel: root.theme ? root.theme.mix(root.theme.surfaceCard, root.theme.accentPrimary, root.pywalStyle ? 0.08 : 0.04, root.theme.themeMode === "dark" ? 0.50 : 0.56) : Qt.rgba(1, 1, 1, 0.42)
+        readonly property color panelStrong: root.theme ? root.theme.mix(root.theme.surfaceCard, root.theme.accentSecondary, root.pywalStyle ? 0.16 : 0.08, root.theme.themeMode === "dark" ? 0.64 : 0.70) : Qt.rgba(1, 1, 1, 0.58)
         readonly property color text: root.settingsLightText
         readonly property color textSoft: root.settingsLightTextSoft
         readonly property color line: root.settingsLightLine
@@ -1600,25 +1629,21 @@ Item {
 
         function sectionTitle() {
             if (root.activeNav === 1)
+                return root.tr("bar")
+            if (root.activeNav === 2)
                 return root.tr("appearance")
-            if (root.activeNav === root.wallpaperNavIndex())
-                return root.tr("wallpaper")
-            if (root.activeNav === root.visualizerNavIndex())
-                return root.tr("visualizer")
-            if (root.activeNav === root.languageNavIndex())
-                return root.tr("language")
+            if (root.activeNav === 3)
+                return root.tr("integrations")
             return root.tr("general")
         }
 
         function sectionSubtitle() {
             if (root.activeNav === 1)
+                return root.tr("barHint")
+            if (root.activeNav === 2)
                 return root.tr("appearanceHint")
-            if (root.activeNav === root.wallpaperNavIndex())
-                return root.tr("wallpaperHint")
-            if (root.activeNav === root.visualizerNavIndex())
-                return root.tr("visualizerHint")
-            if (root.activeNav === root.languageNavIndex())
-                return root.tr("languageHint")
+            if (root.activeNav === 3)
+                return root.tr("integrationsHint")
             return root.tr("generalHint")
         }
 
@@ -1633,19 +1658,6 @@ Item {
         radius: root.cornerRadius
         color: bg
         clip: true
-
-        Image {
-            anchors.fill: parent
-            source: root.currentWallpaperPreview()
-            fillMode: Image.PreserveAspectCrop
-            opacity: root.pywalStyle ? 0.18 : 0.12
-            asynchronous: true
-        }
-
-        Rectangle {
-            anchors.fill: parent
-            color: root.theme ? root.alpha(root.theme.surfacePopup, root.theme.themeMode === "dark" ? 0.20 : 0.28) : Qt.rgba(1, 1, 1, 0.30)
-        }
 
         Rectangle {
             x: 18
@@ -1733,9 +1745,30 @@ Item {
                         Layout.preferredWidth: 48
                         Layout.preferredHeight: 48
                         radius: 24
-                        color: Qt.rgba(1, 1, 1, 0.70)
+                        color: settingsView.panelStrong
+                        border.width: 1
+                        border.color: root.alpha(root.settingsLightAccent, 0.28)
                         clip: true
-                        Image { anchors.fill: parent; anchors.margins: 3; source: Qt.resolvedUrl("../assets/profile-avatar.png"); fillMode: Image.PreserveAspectCrop }
+
+                        Image {
+                            id: profileSidebarImage
+
+                            readonly property string fallbackSource: Qt.resolvedUrl("../assets/profile-avatar.png")
+                            property string requestedSource: root.profileImageSource()
+
+                            anchors.fill: parent
+                            anchors.margins: 3
+                            source: requestedSource
+                            fillMode: Image.PreserveAspectCrop
+                            smooth: true
+                            mipmap: true
+
+                            onRequestedSourceChanged: source = requestedSource
+                            onStatusChanged: {
+                                if (status === Image.Error && source !== fallbackSource)
+                                    source = fallbackSource
+                            }
+                        }
                     }
 
                     ColumnLayout {
@@ -1894,7 +1927,8 @@ Item {
                     }
 
                     SettingsCard {
-                        Layout.preferredHeight: 238
+                        visible: false
+                        Layout.preferredHeight: 0
                         title: root.tr("integrations")
                         subtitle: root.tr("integrationsHint")
 
@@ -1966,10 +2000,101 @@ Item {
                         }
                     }
 
+                    SettingsCard {
+                        Layout.preferredHeight: 188
+                        title: root.tr("language")
+                        subtitle: root.tr("languageHint")
+
+                        RowLayout {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.bottom: parent.bottom
+                            anchors.margins: 18
+                            spacing: 14
+
+                            Repeater {
+                                model: root.languageOptions()
+
+                                LanguageButton {
+                                    required property var modelData
+
+                                    Layout.fillWidth: true
+                                    itemData: modelData
+                                    active: root.currentLanguage() === modelData.id
+                                    onClicked: root.selectLanguage(modelData.id)
+                                }
+                            }
+                        }
+                    }
+
+                    SettingsCard {
+                        Layout.preferredHeight: 184
+                        title: root.tr("profile")
+                        subtitle: root.tr("profileHint")
+
+                        RowLayout {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.bottom: parent.bottom
+                            anchors.margins: 18
+                            spacing: 16
+
+                            Rectangle {
+                                Layout.preferredWidth: 66
+                                Layout.preferredHeight: 66
+                                radius: 33
+                                color: settingsView.panelStrong
+                                border.width: 1
+                                border.color: root.alpha(root.settingsLightAccent, 0.36)
+                                clip: true
+
+                                Image {
+                                    id: profileCardImage
+
+                                    readonly property string fallbackSource: Qt.resolvedUrl("../assets/profile-avatar.png")
+                                    property string requestedSource: root.profileImageSource()
+
+                                    anchors.fill: parent
+                                    anchors.margins: 3
+                                    source: requestedSource
+                                    fillMode: Image.PreserveAspectCrop
+                                    smooth: true
+                                    mipmap: true
+
+                                    onRequestedSourceChanged: source = requestedSource
+                                    onStatusChanged: {
+                                        if (status === Image.Error && source !== fallbackSource)
+                                            source = fallbackSource
+                                    }
+                                }
+                            }
+
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 10
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: root.tr("profilePhotoNotice")
+                                    color: settingsView.textSoft
+                                    font.family: root.uiFont
+                                    font.pixelSize: 11
+                                    wrapMode: Text.WordWrap
+                                }
+
+                                RectButton {
+                                    label: root.tr("changeProfilePhoto")
+                                    widthHint: 190
+                                    onClicked: root.chooseProfileImage()
+                                }
+                            }
+                        }
+                    }
+
                 }
 
                 GridLayout {
-                    visible: root.activeNav === 1
+                    visible: root.activeNav === 2
                     Layout.fillWidth: true
                     columns: settingsView.contentColumns
                     columnSpacing: 14
@@ -2117,7 +2242,8 @@ Item {
                     }
 
                     SettingsCard {
-                        Layout.preferredHeight: 262
+                        visible: false
+                        Layout.preferredHeight: 0
                         title: root.tr("glow")
                         subtitle: root.tr("appearanceHint")
 
@@ -2204,6 +2330,90 @@ Item {
                     rowSpacing: 14
 
                     SettingsCard {
+                        Layout.preferredHeight: 238
+                        title: root.tr("barOptions")
+                        subtitle: root.tr("barOptionsHint")
+
+                        ColumnLayout {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.bottom: parent.bottom
+                            anchors.margins: 18
+                            spacing: 8
+
+                            SettingsToggleRow {
+                                Layout.fillWidth: true
+                                label: root.theme && root.theme.barLabelsVisible ? root.tr("barTitlesOn") : root.tr("barTitlesOff")
+                                checked: root.theme ? root.theme.barLabelsVisible : true
+                                onClicked: if (root.theme) root.theme.setBarLabelsVisible(!root.theme.barLabelsVisible)
+                            }
+
+                            SettingsToggleRow {
+                                Layout.fillWidth: true
+                                label: root.theme && root.theme.barBlurEnabled ? root.tr("barBlurOn") : root.tr("barBlurOff")
+                                checked: root.theme ? root.theme.barBlurEnabled : true
+                                onClicked: if (root.theme) root.theme.setBarBlurEnabled(!root.theme.barBlurEnabled)
+                            }
+
+                            SettingsToggleRow {
+                                Layout.fillWidth: true
+                                label: root.theme && root.theme.frameBlurEnabled ? root.tr("frameBlurOn") : root.tr("frameBlurOff")
+                                checked: root.theme ? root.theme.frameBlurEnabled : true
+                                onClicked: if (root.theme) root.theme.setFrameBlurEnabled(!root.theme.frameBlurEnabled)
+                            }
+
+                            SettingsToggleRow {
+                                Layout.fillWidth: true
+                                label: root.tr("popupAttach")
+                                checked: root.theme ? root.theme.popupAttachedToBar : true
+                                onClicked: if (root.theme) root.theme.setPopupAttachedToBar(!root.theme.popupAttachedToBar)
+                            }
+                        }
+                    }
+
+                    SettingsCard {
+                        Layout.preferredHeight: 262
+                        title: root.tr("barGlow")
+                        subtitle: root.tr("barGlowHint")
+
+                        ColumnLayout {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.bottom: parent.bottom
+                            anchors.margins: 18
+                            spacing: 10
+
+                            SettingsSlider {
+                                Layout.fillWidth: true
+                                label: root.tr("barGlow")
+                                value: root.theme ? root.theme.generalGlow : 0.50
+                                onMoved: function(v) { if (root.theme) root.theme.applyGlow(v, root.theme.sidebarBorderGlowLevel, root.theme.popupBorderGlowLevel, root.theme.iconGlowLevel, root.theme.textGlowLevel) }
+                            }
+
+                            SettingsSlider {
+                                Layout.fillWidth: true
+                                label: root.tr("borderGlow")
+                                value: root.theme ? root.theme.sidebarBorderGlowLevel : 0.50
+                                onMoved: function(v) { if (root.theme) root.theme.applyGlow(root.theme.generalGlow, v, v, root.theme.iconGlowLevel, root.theme.textGlowLevel) }
+                            }
+
+                            SettingsSlider {
+                                Layout.fillWidth: true
+                                label: root.tr("iconGlow")
+                                value: root.theme ? root.theme.iconGlowLevel : 0.50
+                                onMoved: function(v) { if (root.theme) root.theme.applyGlow(root.theme.generalGlow, root.theme.sidebarBorderGlowLevel, root.theme.popupBorderGlowLevel, v, root.theme.textGlowLevel) }
+                            }
+
+                            SettingsSlider {
+                                Layout.fillWidth: true
+                                label: root.tr("fontGlow")
+                                value: root.theme ? root.theme.textGlowLevel : 0.78
+                                onMoved: function(v) { if (root.theme) root.theme.applyTextGlow(v) }
+                            }
+                        }
+                    }
+
+                    SettingsCard {
                         Layout.preferredHeight: 186
                         title: root.tr("visualizerMode")
                         subtitle: root.tr("visualizerModeHint")
@@ -2275,6 +2485,61 @@ Item {
                                 label: root.theme && root.theme.visualizerGradientEnabled ? root.tr("visualizerGradientOn") : root.tr("visualizerGradientOff")
                                 checked: root.theme ? root.theme.visualizerGradientEnabled : true
                                 onClicked: if (root.theme) root.theme.setVisualizerGradientEnabled(!root.theme.visualizerGradientEnabled)
+                            }
+                        }
+                    }
+
+                    SettingsCard {
+                        Layout.columnSpan: settingsView.contentColumns
+                        Layout.preferredHeight: 300
+                        title: root.tr("wallpaperMotion")
+                        subtitle: root.tr("wallpaperMotionHint")
+
+                        ColumnLayout {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.bottom: parent.bottom
+                            anchors.margins: 18
+                            spacing: 10
+
+                            GridLayout {
+                                Layout.fillWidth: true
+                                columns: settingsView.bodyW > 900 ? 6 : 3
+                                columnSpacing: 8
+                                rowSpacing: 8
+
+                                Repeater {
+                                    model: root.wallpaperTransitionOptions()
+
+                                    TransitionButton {
+                                        required property var modelData
+
+                                        Layout.fillWidth: true
+                                        label: modelData.label
+                                        active: root.wallpaperTransition === modelData.id
+                                        onClicked: root.setWallpaperTransition(modelData.id)
+                                    }
+                                }
+                            }
+
+                            SettingsSlider {
+                                Layout.fillWidth: true
+                                label: root.tr("transitionDuration")
+                                minValue: 0.15
+                                maxValue: 3.00
+                                value: root.wallpaperTransitionDuration
+                                valueText: root.secondsText(root.wallpaperTransitionDuration)
+                                onMoved: function(v) { root.setWallpaperTransitionDuration(v) }
+                            }
+
+                            SettingsSlider {
+                                Layout.fillWidth: true
+                                label: root.tr("staticDelay")
+                                minValue: 0
+                                maxValue: 0.80
+                                value: root.wallpaperStaticDelay
+                                valueText: root.secondsText(root.wallpaperStaticDelay)
+                                onMoved: function(v) { root.setWallpaperStaticDelay(v) }
                             }
                         }
                     }
@@ -2416,6 +2681,72 @@ Item {
                 }
 
                 GridLayout {
+                    visible: root.activeNav === 3
+                    Layout.fillWidth: true
+                    columns: settingsView.contentColumns
+                    columnSpacing: 14
+                    rowSpacing: 14
+
+                    SettingsCard {
+                        Layout.preferredHeight: 238
+                        title: root.tr("integrationOptions")
+                        subtitle: root.tr("integrationsHint")
+
+                        ColumnLayout {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.bottom: parent.bottom
+                            anchors.margins: 18
+                            spacing: 8
+
+                            SettingsToggleRow {
+                                Layout.fillWidth: true
+                                label: root.zenAutoRestart ? root.tr("zenRestartOn") : root.tr("zenRestartOff")
+                                checked: root.zenAutoRestart
+                                onClicked: root.setZenAutoRestart(!root.zenAutoRestart)
+                            }
+
+                            SettingsToggleRow {
+                                Layout.fillWidth: true
+                                label: root.spotifyAutoRestart ? root.tr("spotifyRestartOn") : root.tr("spotifyRestartOff")
+                                checked: root.spotifyAutoRestart
+                                onClicked: root.setSpotifyAutoRestart(!root.spotifyAutoRestart)
+                            }
+
+                            SettingsToggleRow {
+                                Layout.fillWidth: true
+                                label: root.webThemeBalance ? root.tr("webBalanceOn") : root.tr("webBalanceOff")
+                                checked: root.webThemeBalance
+                                onClicked: root.setWebThemeBalance(!root.webThemeBalance)
+                            }
+                        }
+                    }
+
+                    SettingsCard {
+                        Layout.preferredHeight: 166
+                        title: root.tr("codeOpacity")
+                        subtitle: root.tr("codeOpacityHint")
+
+                        ColumnLayout {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.bottom: parent.bottom
+                            anchors.margins: 18
+                            spacing: 10
+
+                            SettingsSlider {
+                                Layout.fillWidth: true
+                                label: root.tr("codeOpacity")
+                                minValue: 0.60
+                                maxValue: 0.98
+                                value: root.codeOpacity
+                                onMoved: function(v) { root.setCodeOpacity(v) }
+                            }
+                        }
+                    }
+                }
+
+                GridLayout {
                     visible: root.activeNav === root.languageNavIndex()
                     Layout.fillWidth: true
                     columns: 1
@@ -2498,9 +2829,11 @@ Item {
 
         Layout.preferredHeight: 50
         radius: 11
-        color: active ? Qt.rgba(0.96, 0.72, 0.88, 0.32) : (hovered ? Qt.rgba(1, 1, 1, 0.28) : "transparent")
+        color: active
+            ? (root.theme ? root.alpha(root.theme.activeBg, Math.max(0.34, root.theme.activeBg.a)) : Qt.rgba(0.96, 0.72, 0.88, 0.32))
+            : (hovered ? (root.theme ? root.alpha(root.theme.hoverBg, Math.max(0.20, root.theme.hoverBg.a)) : Qt.rgba(1, 1, 1, 0.28)) : "transparent")
         border.width: active || hovered ? 1 : 0
-        border.color: Qt.rgba(0.90, 0.52, 0.74, 0.24)
+        border.color: root.theme ? root.alpha(root.theme.borderActive, active ? 0.40 : 0.22) : Qt.rgba(0.90, 0.52, 0.74, 0.24)
         scale: navMouse.pressed ? 0.98 : (hovered ? 1.01 : 1.0)
 
         RowLayout {
@@ -2533,9 +2866,9 @@ Item {
         Layout.preferredHeight: 190
         Layout.minimumHeight: 170
         radius: 13
-        color: Qt.rgba(1, 1, 1, 0.46)
+        color: root.theme ? root.theme.mix(root.theme.surfaceCard, root.theme.accentPrimary, root.pywalStyle ? 0.10 : 0.04, root.theme.themeMode === "dark" ? 0.58 : 0.64) : Qt.rgba(1, 1, 1, 0.46)
         border.width: 1
-        border.color: Qt.rgba(0.38, 0.28, 0.50, 0.08)
+        border.color: root.theme ? root.alpha(root.theme.borderSoft, root.theme.themeMode === "dark" ? 0.42 : 0.48) : Qt.rgba(0.38, 0.28, 0.50, 0.08)
 
         Text { x: 18; y: 18; width: parent.width - 36; text: parent.title; color: root.settingsLightText; font.family: root.uiFont; font.pixelSize: 14; font.weight: Font.Bold; elide: Text.ElideRight }
         Text { x: 18; y: 44; width: parent.width - 36; text: parent.subtitle; color: root.settingsLightTextSoft; font.family: root.uiFont; font.pixelSize: 11; elide: Text.ElideRight }
