@@ -54,6 +54,9 @@ Item {
     property var searchResults: []
     property bool searchReady: false
     property int searchFocusRequest: 0
+    property var appUsageStats: ({})
+    property var appUsageLoadBuffer: ({})
+    property var frequentApps: []
     property bool eventsLoaded: false
     property bool eventsSaveQueued: false
     property string agendaSection: "events"
@@ -174,6 +177,7 @@ Item {
     readonly property string visibilityScript: Quickshell.shellDir + "/scripts/velora-wallpaper-visibility"
     readonly property string popupStatusScript: Quickshell.shellDir + "/scripts/velora-popup-status"
     readonly property string geminiScript: Quickshell.shellDir + "/scripts/velora-gemini-ask"
+    readonly property string appUsageScript: Quickshell.shellDir + "/scripts/velora-app-usage"
     readonly property bool nativeBluetoothAvailable: Bluetooth.defaultAdapter !== null
     readonly property bool bluetoothIsAvailable: nativeBluetoothAvailable || bluetoothAvailable
     readonly property bool bluetoothIsPowered: nativeBluetoothAvailable ? (Bluetooth.defaultAdapter ? Bluetooth.defaultAdapter.enabled : false) : bluetoothPowered
@@ -563,8 +567,10 @@ Item {
         if (open) {
             restartEntryAnimation()
             restartPopupIntroAnimation()
-            if (popupType === "search")
+            if (popupType === "search") {
                 ensureSearchReady()
+                loadAppUsage()
+            }
             refreshStatusQueries()
             if (popupType === "wallpaperVisibility")
                 ensureWallpaperVisibilityLoaded()
@@ -742,6 +748,140 @@ Item {
         searchResults = out.slice(0, 4)
         searchSelectedIndex = Math.max(0, Math.min(searchSelectedIndex, Math.max(0, searchResults.length - 1)))
         searchReady = true
+        rebuildFrequentApps()
+    }
+
+    function appUsageKey(entry) {
+        if (!entry)
+            return ""
+        const id = textOf(entry.id)
+        return id.length > 0 ? id : textOf(entry.name)
+    }
+
+    function appUsageRecord(entry) {
+        const key = appUsageKey(entry)
+        if (key.length <= 0 || !appUsageStats)
+            return ({ count: 0, lastUsed: 0 })
+        const record = appUsageStats[key]
+        return record ? record : ({ count: 0, lastUsed: 0 })
+    }
+
+    function appUsageSubtitle(entry) {
+        const record = appUsageRecord(entry)
+        const count = Number(record.count || 0)
+        if (count === 1)
+            return "Aberto 1 vez pela busca"
+        if (count > 1)
+            return "Aberto " + count + " vezes pela busca"
+        return textOf(entry ? (entry.genericName || entry.comment || "Aplicativo") : "Aplicativo")
+    }
+
+    function rebuildFrequentApps() {
+        const list = DesktopEntries.applications.values || []
+        const ranked = []
+        const seen = ({})
+
+        function appendEntry(entry) {
+            if (!entry || entry.noDisplay)
+                return false
+            const key = root.appUsageKey(entry)
+            if (key.length <= 0 || seen[key])
+                return false
+            seen[key] = true
+            ranked.push(entry)
+            return true
+        }
+
+        const used = []
+        for (var i = 0; i < list.length; ++i) {
+            const entry = list[i]
+            if (!entry || entry.noDisplay)
+                continue
+            const record = appUsageRecord(entry)
+            if (Number(record.count || 0) > 0)
+                used.push(entry)
+        }
+
+        used.sort(function(a, b) {
+            const ar = root.appUsageRecord(a)
+            const br = root.appUsageRecord(b)
+            const countDelta = Number(br.count || 0) - Number(ar.count || 0)
+            if (countDelta !== 0)
+                return countDelta
+            const timeDelta = Number(br.lastUsed || 0) - Number(ar.lastUsed || 0)
+            if (timeDelta !== 0)
+                return timeDelta
+            return root.textOf(a.name).localeCompare(root.textOf(b.name))
+        })
+
+        for (var usedIndex = 0; usedIndex < used.length && ranked.length < 3; ++usedIndex)
+            appendEntry(used[usedIndex])
+
+        const preferredGroups = [
+            ["zen", "brave", "firefox"],
+            ["dolphin", "thunar", "nautilus", "files"],
+            ["discord", "vesktop", "webcord"],
+            ["code", "codium"],
+            ["kitty", "alacritty", "foot", "konsole"]
+        ]
+        for (var groupIndex = 0; groupIndex < preferredGroups.length && ranked.length < 3; ++groupIndex) {
+            const group = preferredGroups[groupIndex]
+            var groupAlreadyPresent = false
+            for (var rankedIndex = 0; rankedIndex < ranked.length && !groupAlreadyPresent; ++rankedIndex) {
+                const rankedText = searchEntryText(ranked[rankedIndex])
+                for (var rankedTermIndex = 0; rankedTermIndex < group.length; ++rankedTermIndex) {
+                    if (rankedText.indexOf(group[rankedTermIndex]) >= 0) {
+                        groupAlreadyPresent = true
+                        break
+                    }
+                }
+            }
+            if (groupAlreadyPresent)
+                continue
+
+            var groupAdded = false
+            for (var termIndex = 0; termIndex < group.length && !groupAdded; ++termIndex) {
+                const term = group[termIndex]
+                for (var entryIndex = 0; entryIndex < list.length; ++entryIndex) {
+                    const candidate = list[entryIndex]
+                    if (candidate && !candidate.noDisplay && searchEntryText(candidate).indexOf(term) >= 0 && appendEntry(candidate)) {
+                        groupAdded = true
+                        break
+                    }
+                }
+            }
+        }
+
+        for (var fallbackIndex = 0; fallbackIndex < list.length && ranked.length < 3; ++fallbackIndex)
+            appendEntry(list[fallbackIndex])
+
+        frequentApps = ranked.slice(0, 3)
+    }
+
+    function loadAppUsage() {
+        if (appUsageLoadProcess.running)
+            return
+        appUsageLoadBuffer = ({})
+        appUsageLoadProcess.command = [appUsageScript, "list", "1000"]
+        appUsageLoadProcess.running = true
+    }
+
+    function recordAppUsage(entry) {
+        const key = appUsageKey(entry)
+        if (key.length <= 0)
+            return
+
+        const next = ({})
+        for (var currentKey in appUsageStats)
+            next[currentKey] = appUsageStats[currentKey]
+        const current = appUsageRecord(entry)
+        next[key] = {
+            count: Number(current.count || 0) + 1,
+            lastUsed: Math.floor(Date.now() / 1000)
+        }
+        appUsageStats = next
+        rebuildFrequentApps()
+        Quickshell.execDetached([appUsageScript, "record", key])
     }
 
     function ensureSearchReady() {
@@ -767,6 +907,7 @@ Item {
         if (!entry)
             return
 
+        recordAppUsage(entry)
         entry.execute()
         searchQuery = ""
         searchSelectedIndex = 0
@@ -1846,6 +1987,8 @@ Item {
         syncTrackedNotifications()
         if (open && popupType === "search")
             ensureSearchReady()
+        if (open && popupType === "search")
+            loadAppUsage()
         if (open && (popupType === "time" || popupType === "agenda"))
             ensureEventsLoaded(false)
         refreshStatusQueries()
@@ -1879,10 +2022,47 @@ Item {
         target: DesktopEntries.applications
 
         function onValuesChanged() {
-            if (root.open && root.popupType === "search")
+            if (root.open && root.popupType === "search") {
                 root.rebuildSearch()
-            else
+                root.rebuildFrequentApps()
+            } else {
                 root.searchReady = false
+            }
+        }
+    }
+
+    Process {
+        id: appUsageLoadProcess
+
+        running: false
+        command: [root.appUsageScript, "list", "1000"]
+
+        stdout: SplitParser {
+            onRead: function(data) {
+                const line = String(data || "").trim()
+                if (line.length <= 0)
+                    return
+                try {
+                    const record = JSON.parse(line)
+                    const key = String(record.id || "")
+                    if (key.length > 0)
+                        root.appUsageLoadBuffer[key] = {
+                            count: Number(record.count || 0),
+                            lastUsed: Number(record.lastUsed || 0)
+                        }
+                } catch (error) {
+                    console.warn("Velora app usage: registro invalido", line)
+                }
+            }
+        }
+
+        onExited: {
+            running = false
+            const next = ({})
+            for (var key in root.appUsageLoadBuffer)
+                next[key] = root.appUsageLoadBuffer[key]
+            root.appUsageStats = next
+            root.rebuildFrequentApps()
         }
     }
 

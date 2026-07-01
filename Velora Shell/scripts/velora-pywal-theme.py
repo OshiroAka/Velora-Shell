@@ -3,6 +3,7 @@ import argparse
 import colorsys
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -61,6 +62,11 @@ def rgb_distance(a, b):
     return sum((a[i] - b[i]) ** 2 for i in range(3)) ** 0.5
 
 
+def rgb_from_hsv(h, s, v):
+    r, g, b = colorsys.hsv_to_rgb(h, max(0, min(1, s)), max(0, min(1, v)))
+    return (r * 255, g * 255, b * 255)
+
+
 def palette_candidates(palette):
     preferred = [9, 10, 11, 12, 13, 14, 1, 2, 3, 4, 5, 6, 8]
     seen = set()
@@ -114,6 +120,142 @@ def pick_palette_accent(palette, background, used=None, fallback=None):
     if fallback:
         return hex_to_rgb(fallback)
     return background
+
+
+def wallpaper_histogram_colors(path):
+    if not path:
+        return []
+
+    wallpaper = Path(path)
+    if not wallpaper.exists():
+        return []
+
+    try:
+        proc = subprocess.run(
+            [
+                "magick",
+                str(wallpaper),
+                "-resize",
+                "128x128!",
+                "-colors",
+                "32",
+                "-format",
+                "%c",
+                "histogram:info:-",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=1.5,
+            check=False,
+        )
+    except Exception:
+        return []
+
+    if proc.returncode != 0:
+        return []
+
+    colors = []
+    pattern = re.compile(r"^\s*(\d+):\s*\(([^)]+)\)")
+    for line in proc.stdout.splitlines():
+        match = pattern.match(line)
+        if not match:
+            continue
+        try:
+            count = int(match.group(1))
+            channels = [float(part.strip()) for part in match.group(2).split(",")[:3]]
+            if len(channels) == 3:
+                colors.append((count, tuple(channels)))
+        except Exception:
+            continue
+    return colors
+
+
+def lyric_color_score(color, background, count=0):
+    h, s, v = hsv(color)
+    contrast = abs(luminance(color) - luminance(background))
+    distance = min(1.0, rgb_distance(color, background) / 255)
+    warm_bonus = 0.0
+    if 0.07 <= h <= 0.18:
+        warm_bonus = 0.26
+    elif h <= 0.07 or 0.18 < h <= 0.28:
+        warm_bonus = 0.12
+
+    count_bonus = min(0.10, (count ** 0.5) / 900) if count > 0 else 0.0
+    neutral_penalty = 0.42 if s < 0.18 else 0.0
+    dark_penalty = 0.22 if v < 0.24 else 0.0
+    white_penalty = 0.28 if s < 0.12 and v > 0.70 else 0.0
+    return s * 0.38 + v * 0.22 + contrast * 0.18 + distance * 0.14 + warm_bonus + count_bonus - neutral_penalty - dark_penalty - white_penalty
+
+
+def boost_lyrics_color(color, mode):
+    h, s, v = hsv(color)
+    if mode == "dark":
+        s = max(s, 0.48)
+        v = max(v, 0.74)
+    else:
+        s = max(s, 0.42)
+        v = max(v, 0.52)
+    return rgb_from_hsv(h, s, v)
+
+
+def pick_lyrics_color(palette, background, mode, wallpaper_colors):
+    picked = pick_lyrics_palette(palette, background, mode, wallpaper_colors, 1)
+    if picked:
+        return hex_to_rgb(picked[0])
+
+    return boost_lyrics_color(pick_palette_accent(palette, background, fallback="#f2b84b"), mode)
+
+
+def pick_lyrics_palette(palette, background, mode, wallpaper_colors, limit=8):
+    candidates = []
+    for count, color in wallpaper_colors:
+        candidates.append((count, color))
+    for color in palette_candidates(palette):
+        candidates.append((0, color))
+
+    ranked = sorted(
+        candidates,
+        key=lambda item: lyric_color_score(item[1], background, item[0]),
+        reverse=True,
+    )
+
+    result = []
+    for _, color in ranked:
+        h, s, v = hsv(color)
+        if s < 0.16 or v < 0.20:
+            continue
+        if rgb_distance(color, background) < 36:
+            continue
+        boosted = boost_lyrics_color(color, mode)
+        if any(rgb_distance(boosted, chosen) < 34 and hue_distance(hsv(boosted)[0], hsv(chosen)[0]) < 0.06 for chosen in result):
+            continue
+        result.append(boosted)
+        if len(result) >= limit:
+            break
+
+    fallbacks = [
+        pick_palette_accent(palette, background, fallback="#f2b84b"),
+        pick_palette_accent(palette, background, result, "#7bdff2"),
+        pick_palette_accent(palette, background, result, "#f2a65a"),
+    ]
+    for color in fallbacks:
+        boosted = boost_lyrics_color(color, mode)
+        if all(rgb_distance(boosted, chosen) >= 28 for chosen in result):
+            result.append(boosted)
+        if len(result) >= limit:
+            break
+
+    seed = result[0] if result else boost_lyrics_color(pick_palette_accent(palette, background, fallback="#f2b84b"), mode)
+    seed_h, seed_s, seed_v = hsv(seed)
+    for offset in (0.08, -0.08, 0.16, -0.16, 0.28, -0.28, 0.40, -0.40):
+        if len(result) >= limit:
+            break
+        color = rgb_from_hsv((seed_h + offset) % 1.0, max(seed_s, 0.46), max(seed_v, 0.68))
+        if all(rgb_distance(color, chosen) >= 24 for chosen in result):
+            result.append(color)
+
+    return [rgb_to_hex(color) for color in result[:limit]]
 
 
 def text_on(color):
@@ -170,6 +312,9 @@ def build_theme():
     accent_primary = pick_palette_accent(palette, background, fallback="#e8a6c8")
     accent_secondary = pick_palette_accent(palette, background, [accent_primary], "#c894f2")
     accent_tertiary = pick_palette_accent(palette, background, [accent_primary, accent_secondary], "#a8d8ff")
+    wallpaper_colors = wallpaper_histogram_colors(raw.get("wallpaper", ""))
+    lyrics_palette = pick_lyrics_palette(palette, background, mode, wallpaper_colors)
+    lyrics_color = hex_to_rgb(lyrics_palette[0]) if lyrics_palette else pick_lyrics_color(palette, background, mode, wallpaper_colors)
 
     if mode == "dark":
         dark_base = mix(background, (0, 0, 0), 0.18)
@@ -224,6 +369,8 @@ def build_theme():
         "accentPrimary": rgb_to_hex(accent_primary),
         "accentSecondary": rgb_to_hex(accent_secondary),
         "accentTertiary": rgb_to_hex(accent_tertiary),
+        "lyricsColor": rgb_to_hex(lyrics_color),
+        "lyricsPalette": lyrics_palette,
         "borderSoft": rgba((255, 255, 255), border_alpha),
         "borderActive": rgba(accent_primary, 0.78 if mode != "dark" else 0.48),
         "borderGlow": rgba(accent_primary, 0.26 if mode != "dark" else 0.46),

@@ -14,6 +14,19 @@ ShellRoot {
         id: veloraTheme
     }
 
+    Component.onCompleted: Qt.callLater(function() {
+        root.syncTopBarWindowGaps()
+    })
+
+    Connections {
+        target: veloraTheme
+        function onTopBarEnabledChanged() {
+            root.syncTopBarWindowGaps()
+            if (root.topBarLayout)
+                root.disableGeminiTopNow()
+        }
+    }
+
     NotificationServer {
         id: veloraNotificationServer
 
@@ -56,6 +69,7 @@ ShellRoot {
     property bool geminiTopOpen: false
     property bool geminiTopWindowOpen: false
     property bool geminiTopKeyboardFocus: false
+    property string geminiTopMode: "gemini"
     property bool geminiTopTriggerHovering: false
     property bool geminiTopPanelHovering: false
     property int geminiTopFocusRequest: 0
@@ -67,7 +81,20 @@ ShellRoot {
     property bool settingsPanelPreloadEnabled: false
     property bool quickPopupPreloadEnabled: false
     property int quickPopupPreloadCount: 0
+    property bool wallpaperWaveMounted: false
+    property string wallpaperWaveFrameDir: ""
+    property string wallpaperWaveToken: ""
+    property string wallpaperWaveSourcePath: ""
+    property real wallpaperWaveDirectionX: 1
+    property real wallpaperWaveDirectionY: 0
+    property real wallpaperWavePhase: 0
+    property string wallpaperWaveTransition: "wave"
+    property int wallpaperWaveLastDirection: -1
+    property real wallpaperWaveProgress: 0
+    property int wallpaperWaveDurationMs: 1000
     property string appLaunchCommand: ""
+    property string appliedWindowGaps: ""
+    property string pendingWindowGaps: ""
     property int searchPopupFocusAttempts: 0
     property bool rightDashboardOpen: false
     property real topBarPopupCenterX: 0
@@ -116,7 +143,7 @@ ShellRoot {
     readonly property int desktopFrameMargin: 14
     readonly property int sidebarOuterMargin: desktopFrameMargin
     readonly property int sidebarVerticalMargin: 20
-    readonly property int sidebarCornerRadius: 24
+    readonly property int sidebarCornerRadius: Math.round(veloraTheme.barCornerRadius)
     readonly property int sideVisualizerWaveWidth: 58
     readonly property int barPanelWidth: sideBarLayoutEnabled ? sidebarVisualWidth + sidebarOuterMargin : 0
     readonly property int barReserveWidth: sideBarLayoutEnabled ? barPanelWidth : 0
@@ -124,12 +151,17 @@ ShellRoot {
     readonly property bool frameVisualsEnabled: veloraTheme.desktopFrameEnabled && !topBarLayout
     readonly property int frameVisualInset: frameVisualsEnabled ? desktopFrameMargin : 0
     readonly property bool frameVisualsMounted: frameVisualsEnabled || frameVisualsReveal > 0.01
+    readonly property bool topBarFrameVisualsMounted: topBarLayout && !shellSuppressedByFullscreen
+    readonly property bool topBarCenterVisualizerMounted: topBarLayout && !shellSuppressedByFullscreen && veloraTheme.visualizerStrength > 0.01
+    // Keep the old full-frame visualizer disabled; the top-bar visualizer is rendered in a small centered rail.
+    readonly property bool topBarFrameVisualizerMounted: false
     property real frameVisualsReveal: frameVisualsEnabled ? 1 : 0
     property bool sideVisualizerWithoutFrame: true
     readonly property bool screenVisualizerWanted: false
     readonly property bool sideVisualizerMounted: sideBarLayoutEnabled && !screenVisualizerWanted && veloraTheme.visualizerStrength > 0.01 && (frameVisualsMounted || sideVisualizerWithoutFrame)
     readonly property bool screenVisualizerMounted: screenVisualizerWanted
-    readonly property bool audioVisualizerMounted: sideVisualizerMounted || screenVisualizerMounted
+    readonly property bool audioVisualizerMounted: sideVisualizerMounted || screenVisualizerMounted || topBarCenterVisualizerMounted
+    property var topBarCavaValues: []
     readonly property real sideVisualizerReveal: frameVisualsMounted ? frameVisualsReveal : (sideVisualizerMounted ? 1 : 0)
     property real screenVisualizerReveal: screenVisualizerMounted ? 1 : 0
     readonly property real desktopFrameMatteOpacity: veloraTheme.frameBlurEnabled ? sidebarPanelGlassAlpha() : 0.96
@@ -144,6 +176,7 @@ ShellRoot {
     readonly property string topWallpaperDir: topWallpaperHomeDir + "/Pictures/Wallpapers"
     readonly property string topWallpaperScanScript: Quickshell.shellDir + "/scripts/velora-wallpaper-scan"
     readonly property string topWallpaperApplyScript: Quickshell.shellDir + "/scripts/velora-wallpaper-apply"
+    readonly property string lyricsStateScript: Quickshell.shellDir + "/scripts/velora-lyrics-state"
     readonly property string filesCommand: "if command -v dolphin >/dev/null 2>&1; then dolphin \"$HOME\" >/dev/null 2>&1 & elif command -v thunar >/dev/null 2>&1; then thunar \"$HOME\" >/dev/null 2>&1 & else xdg-open \"$HOME\" >/dev/null 2>&1 & fi"
     readonly property string browserCommand: "if command -v zen-browser >/dev/null 2>&1; then zen-browser >/dev/null 2>&1 & elif command -v firefox >/dev/null 2>&1; then firefox >/dev/null 2>&1 & fi"
     readonly property var topWallpaperFallbackEntries: [
@@ -166,6 +199,22 @@ ShellRoot {
     property real quickPopupCenterY: 300
     property bool quickPopupWindowOpen: false
     property string renderedQuickPopupType: ""
+    property bool lyricsAvailable: false
+    property string lyricsTitle: ""
+    property string lyricsArtist: ""
+    property string lyricsLine: ""
+    property string lyricsReason: ""
+    property string lyricsTimingMode: ""
+    property bool lyricsMaskEditorOpen: false
+    property var lyricsMaskEditorPoints: []
+    property var lyricsWords: []
+    property int lyricsActiveIndex: -1
+    property real lyricsPositionSeconds: 0
+    property real lyricsDurationSeconds: 0
+    property string lyricsGhostText: ""
+    property int lyricsGhostSide: 0
+    property real lyricsPhraseProgress: 1
+    readonly property bool lyricsOverlayMounted: veloraTheme.lyricsEnabled && !shellSuppressedByFullscreen && (lyricsWords.length > 0 || lyricsReason === "between-lines")
     readonly property bool wallpaperSelectorHoverPreview: hoverPopupType === "theme" && !wallpaperSelectorOpen
     readonly property bool settingsPanelHoverPreview: hoverPopupType === "settings" && !settingsPanelOpen
     readonly property bool wallpaperSelectorPreview: (focusMode && focusTarget === "theme" && !wallpaperSelectorOpen) || wallpaperSelectorHoverPreview
@@ -209,12 +258,517 @@ ShellRoot {
         return "'" + String(value || "").replace(/'/g, "'\"'\"'") + "'"
     }
 
+    function wallpaperWaveSafeName(value) {
+        return String(value || "eDP-1").replace(/[^A-Za-z0-9_]/g, "-")
+    }
+
+    function wallpaperWaveReadyPath(screenName) {
+        if (!wallpaperWaveFrameDir || !wallpaperWaveToken)
+            return ""
+        return wallpaperWaveFrameDir + "/" + wallpaperWaveToken + "-" + wallpaperWaveSafeName(screenName) + ".ready"
+    }
+
+    function wallpaperWaveUrl(path) {
+        const value = String(path || "")
+        if (value.indexOf("file://") === 0)
+            return value
+        return value.length > 0 ? "file://" + value : ""
+    }
+
+    function randomizeWallpaperWaveDirection() {
+        const directions = [
+            [1, 0],
+            [-1, 0],
+            [0, 1],
+            [0, -1],
+            [1, 1],
+            [1, -1],
+            [-1, 1],
+            [-1, -1]
+        ]
+        let next = Math.floor(Math.random() * directions.length)
+        if (directions.length > 1 && next === wallpaperWaveLastDirection)
+            next = (next + 1 + Math.floor(Math.random() * (directions.length - 1))) % directions.length
+
+        wallpaperWaveLastDirection = next
+        wallpaperWaveDirectionX = directions[next][0]
+        wallpaperWaveDirectionY = directions[next][1]
+        wallpaperWavePhase = Math.random() * Math.PI * 2
+    }
+
+    function prepareWallpaperWave(frameDir, token, durationMs, sourcePath, transitionType) {
+        wallpaperWaveAnimation.stop()
+        wallpaperWaveMounted = false
+        wallpaperWaveFrameDir = String(frameDir || "")
+        wallpaperWaveToken = String(token || "")
+        wallpaperWaveSourcePath = String(sourcePath || "")
+        wallpaperWaveTransition = transitionType === "grow" || transitionType === "outer" ? transitionType : "wave"
+        wallpaperWaveDurationMs = Math.max(150, Math.min(3000, Number(durationMs) || 1000))
+        wallpaperWaveProgress = 0
+        randomizeWallpaperWaveDirection()
+        wallpaperWaveMounted = wallpaperWaveFrameDir.length > 0 && wallpaperWaveToken.length > 0 && wallpaperWaveSourcePath.length > 0
+    }
+
+    function revealWallpaperWave(token) {
+        if (!wallpaperWaveMounted || String(token || "") !== wallpaperWaveToken)
+            return
+
+        wallpaperWaveProgress = 0
+        wallpaperWaveAnimation.restart()
+    }
+
+    function cancelWallpaperWave(token) {
+        if (token && String(token) !== wallpaperWaveToken)
+            return
+
+        wallpaperWaveAnimation.stop()
+        wallpaperWaveProgress = 0
+        wallpaperWaveMounted = false
+        wallpaperWaveFrameDir = ""
+        wallpaperWaveToken = ""
+        wallpaperWaveSourcePath = ""
+        wallpaperWaveTransition = "wave"
+    }
+
     function launchApp(command) {
         if (!command || command.length <= 0 || appLaunchProcess.running)
             return
 
         appLaunchCommand = command
         appLaunchProcess.running = true
+    }
+
+    function syncTopBarWindowGaps() {
+        const target = topBarLayout ? "92,30,25,30" : "25,25,25,25"
+        if (target === appliedWindowGaps && pendingWindowGaps.length <= 0)
+            return
+
+        pendingWindowGaps = target
+        if (typeof windowGapProcess === "undefined" || windowGapProcess.running)
+            return
+
+        applyPendingWindowGaps()
+    }
+
+    function clearLyricsOverlay(reason) {
+        lyricsAvailable = false
+        lyricsTitle = ""
+        lyricsArtist = ""
+        lyricsLine = ""
+        lyricsReason = String(reason || "")
+        lyricsTimingMode = ""
+        lyricsWords = []
+        lyricsActiveIndex = -1
+        lyricsPositionSeconds = 0
+        lyricsDurationSeconds = 0
+        lyricsGhostText = ""
+        lyricsGhostSide = 0
+        lyricsPhraseProgress = 1
+    }
+
+    function applyLyricsPayload(payload) {
+        if (!payload || payload.ok !== true || !payload.words || payload.words.length <= 0) {
+            clearLyricsOverlay(payload && payload.reason ? payload.reason : "no-lyrics")
+            return
+        }
+
+        const oldPhrase = lyricsPhraseForWords(lyricsWords, lyricsActiveIndex, 0)
+        const nextWords = payload.words.slice()
+        const nextActiveIndex = Math.max(0, Math.min(nextWords.length - 1, Number(payload.activeIndex) || 0))
+        const nextPhrase = lyricsPhraseForWords(nextWords, nextActiveIndex, 0)
+
+        if (lyricsCinematicModeActive() && oldPhrase.text.length > 0 && nextPhrase.text.length > 0 && oldPhrase.text !== nextPhrase.text) {
+            lyricsGhostText = oldPhrase.text
+            lyricsGhostSide = oldPhrase.side
+            lyricsPhraseAnimation.stop()
+            lyricsPhraseProgress = 0
+            lyricsPhraseAnimation.start()
+        } else if (lyricsPhraseProgress < 1 && nextPhrase.text.length <= 0) {
+            lyricsPhraseProgress = 1
+        }
+
+        lyricsAvailable = true
+        lyricsTitle = String(payload.title || "")
+        lyricsArtist = String(payload.artist || "")
+        lyricsLine = String(payload.line || "")
+        lyricsTimingMode = String(payload.timingMode || "")
+        lyricsWords = nextWords
+        lyricsActiveIndex = nextActiveIndex
+        lyricsPositionSeconds = Number(payload.position) || 0
+        lyricsDurationSeconds = Number(payload.duration) || 0
+        lyricsReason = ""
+    }
+
+    function lyricsCinematicModeActive() {
+        return topBarLayout && veloraTheme.lyricsCinematicEnabled && veloraTheme.lyricsLayoutMode === "two"
+    }
+
+    function lyricsWordText(value) {
+        return String(value || "").replace(/\s+/g, " ").trim()
+    }
+
+    function lyricsPhraseChunksFor(words) {
+        const chunks = []
+        const source = Array.isArray(words) ? words : []
+        var current = []
+        var start = 0
+
+        for (let i = 0; i < source.length; i += 1) {
+            const word = lyricsWordText(source[i])
+            if (word.length <= 0)
+                continue
+
+            if (current.length <= 0)
+                start = i
+            current.push(word)
+
+            const punctuationBreak = /[,;:?!]$/.test(word)
+            const longWord = word.length >= 9
+            const maxChunk = longWord ? 2 : 3
+            if (punctuationBreak || current.length >= maxChunk || i === source.length - 1) {
+                chunks.push({
+                    text: current.join(" "),
+                    start: start,
+                    end: i + 1,
+                    index: chunks.length,
+                    side: chunks.length % 2
+                })
+                current = []
+            }
+        }
+
+        return chunks
+    }
+
+    function lyricsPhraseForWords(words, activeIndex, offset) {
+        const chunks = lyricsPhraseChunksFor(words)
+        if (chunks.length <= 0)
+            return { text: "", start: 0, end: 0, index: 0, side: 0 }
+
+        const active = Math.max(0, Math.min((Array.isArray(words) ? words.length : 1) - 1, Number(activeIndex) || 0))
+        var chunkIndex = 0
+        for (let i = 0; i < chunks.length; i += 1) {
+            if (active >= chunks[i].start && active < chunks[i].end) {
+                chunkIndex = i
+                break
+            }
+        }
+
+        chunkIndex = Math.max(0, Math.min(chunks.length - 1, chunkIndex + (Number(offset) || 0)))
+        return chunks[chunkIndex]
+    }
+
+    function lyricsCurrentPhrase() {
+        return lyricsPhraseForWords(lyricsWords, lyricsActiveIndex, 0)
+    }
+
+    function lyricsNextPhrase() {
+        return lyricsPhraseForWords(lyricsWords, lyricsActiveIndex, 1)
+    }
+
+    function renderedLyricsWords() {
+        const words = Array.isArray(lyricsWords) ? lyricsWords : []
+        if (words.length <= 0)
+            return []
+
+        const active = Math.max(0, Math.min(words.length - 1, lyricsActiveIndex))
+        const mode = (veloraTheme.lyricsLayoutMode === "two" || veloraTheme.lyricsLayoutMode === "four")
+            ? "progressive"
+            : (veloraTheme.lyricsLayoutMode === "simple" ? "current" : veloraTheme.lyricsRevealMode)
+        let first = 0
+        let last = words.length
+
+        if (mode === "current") {
+            first = active
+            last = active + 1
+        } else if (mode === "progressive") {
+            last = active + 1
+        }
+
+        const visible = []
+        for (let i = first; i < last; i += 1)
+            visible.push({ text: words[i], sourceIndex: i })
+        return visible
+    }
+
+    function lyricsBlockSplitStart(blockIndex, blockCount) {
+        const words = Array.isArray(lyricsWords) ? lyricsWords : []
+        const count = Math.max(1, Number(blockCount) || 1)
+        const index = Math.max(0, Math.min(count - 1, Number(blockIndex) || 0))
+        return Math.floor(words.length * index / count)
+    }
+
+    function lyricsBlockSplitEnd(blockIndex, blockCount) {
+        const words = Array.isArray(lyricsWords) ? lyricsWords : []
+        const count = Math.max(1, Number(blockCount) || 1)
+        const index = Math.max(0, Math.min(count - 1, Number(blockIndex) || 0))
+        return Math.floor(words.length * (index + 1) / count)
+    }
+
+    function renderedLyricsBlockWords(blockIndex, blockCount) {
+        const visible = renderedLyricsWords()
+        const start = lyricsBlockSplitStart(blockIndex, blockCount)
+        const end = lyricsBlockSplitEnd(blockIndex, blockCount)
+        const blockWords = []
+        for (let i = 0; i < visible.length; i += 1) {
+            const word = visible[i]
+            const sourceIndex = Number(word.sourceIndex)
+            if (sourceIndex >= start && sourceIndex < end)
+                blockWords.push(word)
+        }
+        return blockWords
+    }
+
+    function renderedLyricsSideWords(side) {
+        return renderedLyricsBlockWords(side === "right" ? 1 : 0, 2)
+    }
+
+    function lyricsWordColor(sourceIndex, blockIndex) {
+        const useBlockStyle = blockIndex !== undefined && Number(blockIndex) >= 0
+        const blockMode = useBlockStyle ? veloraTheme.lyricsBlockColorMode(blockIndex) : "inherit"
+        const colorMode = blockMode === "inherit" ? veloraTheme.lyricsColorMode : blockMode
+        if (colorMode === "manual")
+            return useBlockStyle && blockMode !== "inherit" ? veloraTheme.lyricsBlockManualColor(blockIndex) : veloraTheme.lyricsManualColor
+        if (colorMode === "palette" && veloraTheme.lyricsPalette && veloraTheme.lyricsPalette.length > 0)
+            return veloraTheme.lyricsPalette[Math.abs(Number(sourceIndex) || 0) % veloraTheme.lyricsPalette.length]
+        return veloraTheme.lyricsPywalColor
+    }
+
+    function lyricsClampUnit(value) {
+        const n = Number(value)
+        if (isNaN(n))
+            return 0
+        return Math.max(0, Math.min(1, n))
+    }
+
+    function lyricsMixColor(a, b, amount, opacity) {
+        const t = lyricsClampUnit(amount)
+        const o = opacity === undefined ? (a.a + (b.a - a.a) * t) : lyricsClampUnit(opacity)
+        return Qt.rgba(
+            lyricsClampUnit(a.r + (b.r - a.r) * t),
+            lyricsClampUnit(a.g + (b.g - a.g) * t),
+            lyricsClampUnit(a.b + (b.b - a.b) * t),
+            o
+        )
+    }
+
+    function lyricsTextureNoise(sourceIndex) {
+        const seed = Math.sin((Number(sourceIndex) + 1) * 12.9898) * 43758.5453
+        return seed - Math.floor(seed)
+    }
+
+    function lyricsMaterialTarget(red, green, blue, alpha, texture) {
+        return Qt.rgba(
+            lyricsClampUnit(red + texture),
+            lyricsClampUnit(green + texture),
+            lyricsClampUnit(blue + texture),
+            lyricsClampUnit(alpha)
+        )
+    }
+
+    function lyricsMaterialColor(baseColor, sourceIndex, active) {
+        const mode = veloraTheme.lyricsMaterialMode
+        const intensity = lyricsClampUnit(veloraTheme.lyricsMaterialIntensity)
+        const noise = lyricsTextureNoise(sourceIndex)
+        const texture = (noise - 0.5) * 0.18 * intensity
+        let result = baseColor
+
+        if (mode === "cloud") {
+            const target = lyricsMaterialTarget(0.72, 0.84, 0.98, baseColor.a, texture)
+            result = lyricsMixColor(result, target, 0.34 + intensity * 0.42, baseColor.a)
+        } else if (mode === "glass") {
+            const target = lyricsMaterialTarget(0.88, 0.95, 1.0, baseColor.a, texture * 0.65)
+            result = lyricsMixColor(result, target, 0.28 + intensity * 0.50, baseColor.a)
+        } else if (mode === "metal") {
+            const highlight = noise > 0.52 ? 0.80 : 0.42
+            const target = lyricsMaterialTarget(highlight, highlight + 0.04, highlight + 0.10, baseColor.a, texture * 1.15)
+            result = lyricsMixColor(result, target, 0.22 + intensity * 0.48, baseColor.a)
+        } else if (mode === "sky") {
+            const target = lyricsMaterialTarget(0.50, 0.68, 0.90, baseColor.a, texture * 0.80)
+            result = lyricsMixColor(result, target, 0.28 + intensity * 0.44, baseColor.a)
+        }
+
+        if (veloraTheme.lyricsFogEnabled) {
+            const fog = lyricsClampUnit(veloraTheme.lyricsFogIntensity)
+            const target = Qt.rgba(0.68, 0.78, 0.90, result.a)
+            result = lyricsMixColor(result, target, fog * (active ? 0.26 : 0.38), result.a)
+        }
+
+        return result
+    }
+
+    function lyricsRenderedWordOpacity(active) {
+        let opacity = active ? 1.0 : 0.46
+        const mode = veloraTheme.lyricsMaterialMode
+        if (mode === "glass")
+            opacity *= 1 - lyricsClampUnit(veloraTheme.lyricsMaterialIntensity) * 0.14
+        else if (mode === "cloud" || mode === "sky")
+            opacity *= 1 - lyricsClampUnit(veloraTheme.lyricsMaterialIntensity) * 0.07
+
+        if (veloraTheme.lyricsFogEnabled)
+            opacity *= 1 - lyricsClampUnit(veloraTheme.lyricsFogIntensity) * (active ? 0.18 : 0.26)
+
+        return Math.max(active ? 0.48 : 0.18, Math.min(1, opacity))
+    }
+
+    function lyricsOutlineColor(active) {
+        if (veloraTheme.lyricsDepthEnabled) {
+            const depth = lyricsClampUnit(veloraTheme.lyricsDepthIntensity)
+            const alpha = (active ? 0.18 : 0.12) + depth * (active ? 0.24 : 0.16)
+            return Qt.rgba(0.05, 0.12, 0.20, alpha)
+        }
+        return veloraTheme.themeMode === "dark" ? Qt.rgba(0, 0, 0, 0.55) : Qt.rgba(0, 0, 0, 0.28)
+    }
+
+    function normalizedLyricsRepeatWord(value) {
+        return String(value || "")
+            .toLowerCase()
+            .replace(/[^0-9a-zà-öø-ÿ]+/g, "")
+            .replace(/(.)\1+/g, "$1")
+    }
+
+    function lyricsWordScale(sourceIndex) {
+        const words = Array.isArray(lyricsWords) ? lyricsWords : []
+        const index = Math.max(0, Math.min(words.length - 1, Number(sourceIndex) || 0))
+        const current = normalizedLyricsRepeatWord(words[index])
+        if (!current)
+            return 1
+
+        let repeat = 0
+        for (let i = index - 1; i >= 0; i -= 1) {
+            if (normalizedLyricsRepeatWord(words[i]) !== current)
+                break
+            repeat += 1
+        }
+        return 1 + Math.min(0.28, repeat * 0.08)
+    }
+
+    function lyricsBlockPositionX(panelWidth, blockIndex) {
+        if (blockIndex === 1)
+            return Math.round(Math.max(0, Math.min(panelWidth - 24, panelWidth * veloraTheme.lyricsSecondPositionX / 100)))
+        if (blockIndex === 2)
+            return Math.round(Math.max(0, Math.min(panelWidth - 24, panelWidth * veloraTheme.lyricsThirdPositionX / 100)))
+        if (blockIndex === 3)
+            return Math.round(Math.max(0, Math.min(panelWidth - 24, panelWidth * veloraTheme.lyricsFourthPositionX / 100)))
+        return Math.round(Math.max(0, Math.min(panelWidth - 24, panelWidth * veloraTheme.lyricsPositionX / 100)))
+    }
+
+    function lyricsBlockPositionY(panelHeight, blockIndex) {
+        if (blockIndex === 1)
+            return Math.round(Math.max(0, Math.min(panelHeight - 24, panelHeight * veloraTheme.lyricsSecondPositionY / 100)))
+        if (blockIndex === 2)
+            return Math.round(Math.max(0, Math.min(panelHeight - 24, panelHeight * veloraTheme.lyricsThirdPositionY / 100)))
+        if (blockIndex === 3)
+            return Math.round(Math.max(0, Math.min(panelHeight - 24, panelHeight * veloraTheme.lyricsFourthPositionY / 100)))
+        return Math.round(Math.max(0, Math.min(panelHeight - 24, panelHeight * veloraTheme.lyricsPositionY / 100)))
+    }
+
+    function lyricsBlockWidth(panelWidth, blockIndex) {
+        const x = lyricsBlockPositionX(panelWidth, blockIndex)
+        if (veloraTheme.lyricsLayoutMode === "four")
+            return Math.max(140, panelWidth * 0.32)
+        if (blockIndex === 0 && veloraTheme.lyricsLayoutMode === "two")
+            return Math.max(160, panelWidth * 0.42)
+        return Math.max(160, panelWidth - x - 24)
+    }
+
+    function lyricsBlockGlowEnabled(blockIndex) {
+        if (blockIndex === undefined || Number(blockIndex) < 0)
+            return veloraTheme.lyricsGlowEnabled
+        return veloraTheme.lyricsBlockGlowEnabled(blockIndex)
+    }
+
+    function lyricsBlockGlowIntensity(blockIndex) {
+        if (blockIndex === undefined || Number(blockIndex) < 0)
+            return veloraTheme.lyricsGlowIntensity
+        return veloraTheme.lyricsBlockGlowIntensity(blockIndex)
+    }
+
+    function openLyricsMaskEditor() {
+        veloraTheme.applyLyricsMaskSettings(true, veloraTheme.lyricsMaskBrushSize, veloraTheme.lyricsMaskData, true)
+        lyricsMaskEditorPoints = []
+        lyricsMaskEditorOpen = true
+        settingsPanelOpen = false
+    }
+
+    function closeLyricsMaskEditor() {
+        lyricsMaskEditorPoints = []
+        lyricsMaskEditorOpen = false
+    }
+
+    function normalizedMaskPoint(item, x, y) {
+        return {
+            x: Math.max(0, Math.min(1, Number(x) / Math.max(1, item.width))),
+            y: Math.max(0, Math.min(1, Number(y) / Math.max(1, item.height)))
+        }
+    }
+
+    function appendLyricsMaskPoint(item, x, y) {
+        const next = normalizedMaskPoint(item, x, y)
+        const points = Array.isArray(lyricsMaskEditorPoints) ? lyricsMaskEditorPoints.slice() : []
+        const last = points.length > 0 ? points[points.length - 1] : null
+        if (last) {
+            const minDistance = Math.max(0.0025, veloraTheme.lyricsMaskBrushSize / Math.max(1, Math.max(item.width, item.height)) * 0.20)
+            const dx = next.x - last.x
+            const dy = next.y - last.y
+            if (Math.sqrt(dx * dx + dy * dy) < minDistance)
+                return
+        }
+        if (points.length >= 180)
+            points[points.length - 1] = next
+        else
+            points.push(next)
+        lyricsMaskEditorPoints = points
+    }
+
+    function commitLyricsMaskStroke() {
+        const points = Array.isArray(lyricsMaskEditorPoints) ? lyricsMaskEditorPoints.slice() : []
+        if (points.length < 2) {
+            lyricsMaskEditorPoints = []
+            return
+        }
+
+        let strokes = []
+        try {
+            strokes = JSON.parse(veloraTheme.lyricsMaskData || "[]")
+        } catch (e) {
+            strokes = []
+        }
+        if (!Array.isArray(strokes))
+            strokes = []
+        strokes.push({ brush: veloraTheme.lyricsMaskBrushSize, points: points })
+        if (strokes.length > 14)
+            strokes = strokes.slice(strokes.length - 14)
+        veloraTheme.applyLyricsMaskSettings(true, veloraTheme.lyricsMaskBrushSize, JSON.stringify(strokes), true)
+        lyricsMaskEditorPoints = []
+    }
+
+    function pollLyricsNow() {
+        if (!veloraTheme.lyricsEnabled || shellSuppressedByFullscreen) {
+            clearLyricsOverlay("disabled")
+            return
+        }
+
+        if (!lyricsQuery.running)
+            lyricsQuery.running = true
+    }
+
+    function lyricsPollIntervalMs() {
+        if (!lyricsAvailable && lyricsReason.length > 0 && lyricsReason !== "between-lines")
+            return topBarLayout ? 700 : 360
+
+        return topBarLayout ? 180 : 110
+    }
+
+    function applyPendingWindowGaps() {
+        if (pendingWindowGaps.length <= 0 || typeof windowGapProcess === "undefined")
+            return
+
+        const target = pendingWindowGaps
+        pendingWindowGaps = ""
+        appliedWindowGaps = target
+        windowGapProcess.command = ["hyprctl", "keyword", "general:gaps_out", target]
+        windowGapProcess.running = true
     }
 
     function notificationCleanText(value) {
@@ -626,6 +1180,71 @@ ShellRoot {
     }
 
     Process {
+        id: lyricsQuery
+
+        running: false
+        command: [root.lyricsStateScript, "status", "--lead", (veloraTheme.lyricsSyncOffsetMs / 1000).toFixed(3)]
+
+        stdout: SplitParser {
+            onRead: function(data) {
+                const line = String(data || "").trim()
+                if (line.length <= 0)
+                    return
+
+                try {
+                    root.applyLyricsPayload(JSON.parse(line))
+                } catch (error) {
+                    root.clearLyricsOverlay("parse-error")
+                }
+            }
+        }
+
+        onExited: running = false
+    }
+
+    NumberAnimation {
+        id: lyricsPhraseAnimation
+
+        target: root
+        property: "lyricsPhraseProgress"
+        from: 0
+        to: 1
+        duration: veloraTheme.motionEnabled ? 260 : 1
+        easing.type: Easing.OutCubic
+    }
+
+    Timer {
+        id: lyricsPollTimer
+
+        interval: root.lyricsPollIntervalMs()
+        repeat: true
+        running: veloraTheme.lyricsEnabled && !root.shellSuppressedByFullscreen
+        triggeredOnStart: true
+        onTriggered: root.pollLyricsNow()
+    }
+
+    Connections {
+        target: veloraTheme
+        function onLyricsEnabledChanged() {
+            if (veloraTheme.lyricsEnabled)
+                root.pollLyricsNow()
+            else
+                root.clearLyricsOverlay("disabled")
+        }
+    }
+
+    Process {
+        id: windowGapProcess
+
+        running: false
+        command: ["hyprctl", "keyword", "general:gaps_out", "25,25,25,25"]
+        onExited: {
+            running = false
+            root.applyPendingWindowGaps()
+        }
+    }
+
+    Process {
         id: topWallpaperScan
 
         running: false
@@ -677,6 +1296,70 @@ ShellRoot {
         command: [root.topWallpaperApplyScript, "static", ""]
         onExited: {
             running = false
+            if (root.topWallpaperPopupOpen)
+                topWallpaperPreloadRefreshTimer.restart()
+        }
+    }
+
+    Process {
+        id: topWallpaperPreload
+
+        running: false
+        command: [root.topWallpaperApplyScript, "__transition-preload-current"]
+        onExited: running = false
+    }
+
+    Process {
+        id: topWallpaperPreloadStop
+
+        running: false
+        command: [root.topWallpaperApplyScript, "__transition-preload-stop"]
+        onExited: running = false
+    }
+
+    Timer {
+        id: topWallpaperPreloadRefreshTimer
+
+        interval: 1100
+        repeat: false
+        onTriggered: {
+            if (root.topWallpaperPopupOpen && !topWallpaperPreload.running) {
+                topWallpaperPreload.command = [root.topWallpaperApplyScript, "__transition-preload-current"]
+                topWallpaperPreload.running = true
+            }
+        }
+    }
+
+    Timer {
+        id: topWallpaperPreloadStopTimer
+
+        interval: 1600
+        repeat: false
+        onTriggered: {
+            if (!root.topWallpaperPopupOpen && !topWallpaperPreloadStop.running) {
+                topWallpaperPreloadStop.command = [root.topWallpaperApplyScript, "__transition-preload-stop"]
+                topWallpaperPreloadStop.running = true
+            }
+        }
+    }
+
+    NumberAnimation {
+        id: wallpaperWaveAnimation
+
+        target: root
+        property: "wallpaperWaveProgress"
+        from: 0
+        to: 1
+        duration: root.wallpaperWaveDurationMs
+        easing.type: Easing.InOutSine
+
+        onFinished: {
+            root.wallpaperWaveProgress = 1
+            root.wallpaperWaveMounted = false
+            root.wallpaperWaveFrameDir = ""
+            root.wallpaperWaveToken = ""
+            root.wallpaperWaveSourcePath = ""
+            root.wallpaperWaveTransition = "wave"
         }
     }
 
@@ -782,6 +1465,29 @@ ShellRoot {
         return veloraTheme.alpha(veloraTheme.surfaceSidebar, desktopFrameMatteOpacity)
     }
 
+    function topBarFrameMatteColor() {
+        if (!topBarFrameVisualsMounted)
+            return "transparent"
+        const base = Math.max(0.58, Math.min(veloraTheme.surfaceSidebar.a, 0.74))
+        return veloraTheme.alpha(veloraTheme.surfaceSidebar, veloraTheme.frameBlurEnabled ? base : 0.96)
+    }
+
+    function topBarFrameBorderColor() {
+        if (!topBarFrameVisualsMounted)
+            return "transparent"
+        if (veloraTheme.themeId === "pywal16")
+            return veloraTheme.alpha(veloraTheme.sidebarBorderGlow, Math.min(0.14, Math.max(0.055, veloraTheme.sidebarBorderGlow.a * 0.36)))
+        return veloraTheme.alpha(veloraTheme.borderSoft, veloraTheme.themeMode === "dark" ? 0.075 : 0.17)
+    }
+
+    function topBarFrameInnerLineColor() {
+        if (!topBarFrameVisualsMounted)
+            return "transparent"
+        if (veloraTheme.themeMode === "dark")
+            return Qt.rgba(1, 1, 1, 0.035)
+        return veloraTheme.alpha(topBarFrameBorderColor(), veloraTheme.themeId === "pywal16" ? 0.12 : 0.18)
+    }
+
     function sidebarPanelGlassAlpha() {
         const base = Math.max(0.62, Math.min(veloraTheme.surfaceSidebar.a, 0.78))
         return veloraTheme.frameBlurEnabled ? base : 0.96
@@ -840,6 +1546,34 @@ ShellRoot {
 
     function desktopFrameY(screenHeight) {
         return desktopFrameMargin
+    }
+
+    function topBarPanelTopMargin(screenHeight) {
+        return Math.round(Math.min(14, Math.max(10, screenHeight * 0.011)))
+    }
+
+    function topBarPanelHeight(screenHeight) {
+        return Math.round(Math.min(54, Math.max(50, screenHeight * 0.045)))
+    }
+
+    function topBarPanelStageWidth(screenWidth) {
+        return Math.round(Math.min(1040, Math.max(860, screenWidth * 0.540)))
+    }
+
+    function topBarFrameMargin(screenWidth) {
+        return Math.round(Math.min(8, Math.max(5, screenWidth * 0.0042)))
+    }
+
+    function topBarFrameTop(screenHeight) {
+        return Math.round(topBarPanelTopMargin(screenHeight) + topBarPanelHeight(screenHeight) - 24)
+    }
+
+    function topBarFrameBottomInset(screenHeight) {
+        return Math.round(Math.min(8, Math.max(5, screenHeight * 0.006)))
+    }
+
+    function topBarFrameRadius(screenHeight) {
+        return Math.round(Math.min(37, Math.max(30, screenHeight * 0.030)))
     }
 
     function desktopFrameBottomInset(screenHeight) {
@@ -913,6 +1647,11 @@ ShellRoot {
         topWallpaperKeyboardFocus = nextOpen && withKeyboardFocus === true
 
         if (topWallpaperPopupOpen) {
+            topWallpaperPreloadStopTimer.stop()
+            if (!topWallpaperPreload.running) {
+                topWallpaperPreload.command = [root.topWallpaperApplyScript, "__transition-preload-current"]
+                topWallpaperPreload.running = true
+            }
             wallpaperSelectorOpen = false
             wallpaperSelectorWindowOpen = false
             settingsPanelOpen = false
@@ -924,13 +1663,20 @@ ShellRoot {
             topWallpaperCardsMountTimer.restart()
             topWallpaperDeferredScanTimer.restart()
         } else {
+            topWallpaperPreloadRefreshTimer.stop()
+            topWallpaperPreloadStopTimer.restart()
             topWallpaperCardsMountTimer.stop()
             topWallpaperDeferredScanTimer.stop()
             root.topWallpaperCardsMounted = false
         }
     }
 
-    function openGeminiTop(withKeyboardFocus) {
+    function openGeminiTop(withKeyboardFocus, mode) {
+        if (topBarLayout) {
+            disableGeminiTopNow()
+            return
+        }
+
         exitFocus()
         closeQuickPopup()
         wallpaperSelectorOpen = false
@@ -941,6 +1687,7 @@ ShellRoot {
         closeLegacyLeftMenu()
         toggleTopWallpaperPopup(false, false)
         geminiTopUnmountTimer.stop()
+        geminiTopMode = mode === "search" ? "search" : "gemini"
         geminiTopKeyboardFocus = withKeyboardFocus === true
         geminiTopWindowOpen = true
         geminiTopOpen = true
@@ -949,9 +1696,24 @@ ShellRoot {
     }
 
     function openGeminiTopFromMouse() {
+        if (topBarLayout)
+            return
+
         geminiTopHoverCloseTimer.stop()
         if (!geminiTopOpen)
-            openGeminiTop(false)
+            openGeminiTop(false, "gemini")
+    }
+
+    function disableGeminiTopNow() {
+        geminiTopOpen = false
+        geminiTopWindowOpen = false
+        geminiTopKeyboardFocus = false
+        geminiTopTriggerHovering = false
+        geminiTopPanelHovering = false
+        if (typeof geminiTopHoverCloseTimer !== "undefined")
+            geminiTopHoverCloseTimer.stop()
+        if (typeof geminiTopUnmountTimer !== "undefined")
+            geminiTopUnmountTimer.stop()
     }
 
     function closeGeminiTop() {
@@ -964,10 +1726,28 @@ ShellRoot {
     }
 
     function toggleGeminiTop() {
-        if (geminiTopOpen)
+        if (topBarLayout) {
+            disableGeminiTopNow()
+            return
+        }
+
+        if (geminiTopOpen && geminiTopMode === "gemini")
             closeGeminiTop()
         else
-            openGeminiTop(true)
+            openGeminiTop(true, "gemini")
+    }
+
+    function toggleTopSearch() {
+        if (topBarLayout) {
+            disableGeminiTopNow()
+            openAdaptiveBarPopup("search", topBarPopupCenterX > 0 ? topBarPopupCenterX : defaultQuickPopupCenterY("search"))
+            return
+        }
+
+        if (geminiTopOpen && geminiTopMode === "search")
+            closeGeminiTop()
+        else
+            openGeminiTop(true, "search")
     }
 
     function switchToSideBarLayout(position) {
@@ -1030,6 +1810,12 @@ ShellRoot {
 
     function sideRailMaterialColor() {
         if (!sideVisualizerMounted)
+            return "transparent"
+        return veloraTheme.alpha(veloraTheme.surfaceSidebar, sidebarPanelGlassAlpha())
+    }
+
+    function topBarRailMaterialColor() {
+        if (!topBarCenterVisualizerMounted)
             return "transparent"
         return veloraTheme.alpha(veloraTheme.surfaceSidebar, sidebarPanelGlassAlpha())
     }
@@ -1233,6 +2019,7 @@ ShellRoot {
     }
 
     function prepareWallpaperSelector(centerY) {
+        toggleTopWallpaperPopup(false, false)
         topBarPopupCenterX = 0
         setQuickPopupCenter("theme", centerY)
         discardQuickPopupAnimation()
@@ -1277,6 +2064,7 @@ ShellRoot {
     }
 
     function prepareSettingsPanel(centerY) {
+        toggleTopWallpaperPopup(false, false)
         topBarPopupCenterX = 0
         setQuickPopupCenter("settings", centerY)
         discardQuickPopupAnimation()
@@ -1291,6 +2079,7 @@ ShellRoot {
 
     function openQuickPopup(type, centerY) {
         exitFocus()
+        toggleTopWallpaperPopup(false, false)
         if (geminiTopOpen)
             closeGeminiTop()
         if (type !== "search")
@@ -1423,6 +2212,9 @@ ShellRoot {
         if (!type || type.length <= 0)
             return
 
+        if (geminiTopOpen && geminiTopMode === "search")
+            return
+
         if (wallpaperSelectorOpen || settingsPanelOpen)
             return
 
@@ -1520,6 +2312,9 @@ ShellRoot {
     }
 
     function previewAdaptiveBarPopup(type, centerY) {
+        if (geminiTopOpen && geminiTopMode === "search")
+            return
+
         if (!sideBarLayoutEnabled) {
             previewTopBarPopup(type, centerY)
             return
@@ -2057,6 +2852,18 @@ ShellRoot {
             theme()
         }
 
+        function wallpaperWavePrepare(frameDir: string, token: string, durationMs: int, sourcePath: string, transitionType: string): void {
+            root.prepareWallpaperWave(frameDir, token, durationMs, sourcePath, transitionType)
+        }
+
+        function wallpaperWaveReveal(token: string): void {
+            root.revealWallpaperWave(token)
+        }
+
+        function wallpaperWaveCancel(token: string): void {
+            root.cancelWallpaperWave(token)
+        }
+
         function topWallpaper(): void {
             root.toggleTopWallpaperPopup(null, true)
         }
@@ -2099,7 +2906,7 @@ ShellRoot {
         }
 
         function search(): void {
-            root.openAdaptiveBarPopup("search", root.defaultQuickPopupCenterY("search"))
+            root.toggleTopSearch()
         }
 
         function gemini(): void {
@@ -2265,6 +3072,1541 @@ ShellRoot {
     }
 
     Variants {
+        model: root.wallpaperWaveMounted ? Quickshell.screens : []
+
+        PanelWindow {
+            id: wallpaperWavePanel
+
+            required property var modelData
+            readonly property string outputName: modelData && modelData.name ? String(modelData.name) : "eDP-1"
+
+            screen: modelData
+            color: "transparent"
+            implicitWidth: modelData.width > 0 ? modelData.width : 1
+            implicitHeight: modelData.height > 0 ? modelData.height : 1
+            exclusiveZone: 0
+            exclusionMode: ExclusionMode.Ignore
+            focusable: false
+
+            WlrLayershell.layer: WlrLayer.Bottom
+            WlrLayershell.namespace: "velora-wallpaper-transition"
+            WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+
+            anchors {
+                top: true
+                bottom: true
+                left: true
+                right: true
+            }
+
+            mask: Region {}
+
+            VeloraWallpaperTransition {
+                anchors.fill: parent
+                source: root.wallpaperWaveUrl(root.wallpaperWaveSourcePath)
+                directionX: root.wallpaperWaveDirectionX
+                directionY: root.wallpaperWaveDirectionY
+                wavePhase: root.wallpaperWavePhase
+                transitionType: root.wallpaperWaveTransition
+                readyPath: root.wallpaperWaveReadyPath(wallpaperWavePanel.outputName)
+                transitionProgress: root.wallpaperWaveProgress
+            }
+        }
+    }
+
+    Variants {
+        model: root.lyricsOverlayMounted ? Quickshell.screens : []
+
+        PanelWindow {
+            id: lyricsPanel
+
+            required property var modelData
+            readonly property int panelWidth: modelData.width > 0 ? modelData.width : 1920
+            readonly property int panelHeight: modelData.height > 0 ? modelData.height : 1200
+            readonly property color lyricsTextColor: veloraTheme.lyricsColorMode === "manual" ? veloraTheme.lyricsManualColor : veloraTheme.lyricsPywalColor
+            property real floatPhase: 0
+
+            function wordFloatX(sourceIndex) {
+                return veloraTheme.lyricsFloatEnabled && !root.topBarLayout ? Math.sin(floatPhase + Number(sourceIndex) * 1.37) * veloraTheme.lyricsFloatIntensity : 0
+            }
+
+            function wordFloatY(sourceIndex) {
+                return veloraTheme.lyricsFloatEnabled && !root.topBarLayout ? Math.cos(floatPhase * 0.82 + Number(sourceIndex) * 1.11) * veloraTheme.lyricsFloatIntensity * 0.45 : 0
+            }
+
+            function lyricsGlowRadius(blockIndex) {
+                const glowRadius = root.lyricsBlockGlowEnabled(blockIndex) ? Math.round(8 + root.lyricsBlockGlowIntensity(blockIndex) * 30) : 0
+                const depthRadius = veloraTheme.lyricsDepthEnabled ? Math.round(4 + veloraTheme.lyricsDepthIntensity * 16) : 0
+                return Math.max(1, glowRadius, depthRadius)
+            }
+
+            function lyricsGlowSamples(blockIndex) {
+                const glowRadius = lyricsGlowRadius(blockIndex)
+                return Math.max(17, glowRadius * 2 + 1)
+            }
+
+            function lyricsEffectEnabled(blockIndex) {
+                return (root.lyricsBlockGlowEnabled(blockIndex) && root.lyricsBlockGlowIntensity(blockIndex) > 0.01) || veloraTheme.lyricsDepthEnabled
+            }
+
+            function lyricsEffectHorizontalOffset(blockIndex) {
+                if (!veloraTheme.lyricsDepthEnabled)
+                    return 0
+                return Math.round(1 + veloraTheme.lyricsDepthIntensity * 4)
+            }
+
+            function lyricsEffectVerticalOffset(blockIndex) {
+                if (!veloraTheme.lyricsDepthEnabled)
+                    return 0
+                return Math.round(2 + veloraTheme.lyricsDepthIntensity * 6)
+            }
+
+            function lyricsGlowColor(colorValue, active, blockIndex) {
+                if (root.lyricsBlockGlowEnabled(blockIndex) && root.lyricsBlockGlowIntensity(blockIndex) > 0.01) {
+                    const intensity = root.lyricsBlockGlowIntensity(blockIndex)
+                    const alpha = Math.min(0.92, (active ? 0.28 : 0.16) + intensity * (active ? 0.50 : 0.34))
+                    return veloraTheme.withAlpha(colorValue, alpha)
+                }
+
+                const depth = veloraTheme.lyricsDepthEnabled ? veloraTheme.lyricsDepthIntensity : 0
+                return Qt.rgba(0.04, 0.10, 0.18, (active ? 0.20 : 0.13) + depth * (active ? 0.28 : 0.20))
+            }
+
+            function cinematicPhraseWidth(side) {
+                return Math.round(Math.min(panelWidth * 0.36, Math.max(320, panelWidth * 0.26)))
+            }
+
+            function cinematicPhraseX(side, role) {
+                const widthHint = cinematicPhraseWidth(side)
+                const progress = root.lyricsPhraseProgress
+                const dir = side === 0 ? -1 : 1
+                const pct = side === 0 ? veloraTheme.lyricsPositionX : veloraTheme.lyricsSecondPositionX
+                const base = Math.max(18, Math.min(panelWidth - widthHint - 18, panelWidth * pct / 100))
+
+                if (role === "previous")
+                    return Math.round(base + dir * (38 + 70 * progress))
+                if (role === "next")
+                    return Math.round(base - dir * 76)
+                return Math.round(base - dir * (56 * (1 - progress)))
+            }
+
+            function cinematicPhraseY(side, role) {
+                const progress = root.lyricsPhraseProgress
+                const pct = side === 0 ? veloraTheme.lyricsPositionY : veloraTheme.lyricsSecondPositionY
+                const base = Math.max(root.topBarPanelTopMargin(panelHeight) + root.topBarPanelHeight(panelHeight) + 18, Math.min(panelHeight * 0.62, panelHeight * pct / 100))
+
+                if (role === "previous")
+                    return Math.round(base + 20 + progress * 24)
+                if (role === "next")
+                    return Math.round(base + 16)
+                return Math.round(base + (1 - progress) * 10)
+            }
+
+            function cinematicTextColor(side, sourceIndex, active) {
+                const color = root.lyricsWordColor(sourceIndex, side)
+                return root.lyricsMaterialColor(color, sourceIndex, active)
+            }
+
+            NumberAnimation on floatPhase {
+                from: 0
+                to: 6.28318
+                duration: 5200
+                loops: Animation.Infinite
+                running: veloraTheme.lyricsFloatEnabled && root.lyricsOverlayMounted && !root.topBarLayout
+            }
+
+            screen: modelData
+            color: "transparent"
+            implicitWidth: panelWidth
+            implicitHeight: panelHeight
+            exclusiveZone: 0
+            exclusionMode: ExclusionMode.Ignore
+            focusable: false
+
+            WlrLayershell.layer: WlrLayer.Bottom
+            WlrLayershell.namespace: "velora-shell-lyrics"
+            WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+
+            anchors {
+                top: true
+                bottom: true
+                left: true
+                right: true
+            }
+
+            mask: Region {}
+
+            Item {
+                id: lyricsContent
+
+                anchors.fill: parent
+                layer.enabled: veloraTheme.lyricsMaskEnabled && veloraTheme.lyricsMaskHasStrokes
+                layer.smooth: true
+                layer.effect: OpacityMask {
+                    maskSource: lyricsCutMaskSource
+                }
+
+            Item {
+                id: lyricsCinematicLayer
+
+                anchors.fill: parent
+                visible: root.lyricsCinematicModeActive()
+                z: 3
+
+                Text {
+                    id: lyricsPreviousPhraseText
+
+                    readonly property int phraseSide: root.lyricsGhostSide
+                    readonly property real progress: root.lyricsPhraseProgress
+
+                    visible: root.lyricsGhostText.length > 0 && progress < 0.995
+                    text: root.lyricsGhostText
+                    x: lyricsPanel.cinematicPhraseX(phraseSide, "previous")
+                    y: lyricsPanel.cinematicPhraseY(phraseSide, "previous")
+                    width: lyricsPanel.cinematicPhraseWidth(phraseSide)
+                    wrapMode: Text.WordWrap
+                    lineHeight: 0.92
+                    color: lyricsPanel.cinematicTextColor(phraseSide, root.lyricsActiveIndex, false)
+                    opacity: Math.max(0, 0.42 * (1 - progress))
+                    scale: Math.max(0.78, 0.94 - progress * 0.12)
+                    transformOrigin: Item.Center
+                    font.family: veloraTheme.uiFont
+                    font.pixelSize: Math.round(veloraTheme.lyricsFontSize * 0.92)
+                    font.weight: Font.Black
+                    font.letterSpacing: 0
+                    style: Text.Outline
+                    styleColor: root.lyricsOutlineColor(false)
+                    renderType: Text.NativeRendering
+                    layer.enabled: lyricsPanel.lyricsEffectEnabled(phraseSide)
+                    layer.smooth: true
+                    layer.effect: DropShadow {
+                        horizontalOffset: lyricsPanel.lyricsEffectHorizontalOffset(lyricsPreviousPhraseText.phraseSide)
+                        verticalOffset: lyricsPanel.lyricsEffectVerticalOffset(lyricsPreviousPhraseText.phraseSide)
+                        radius: lyricsPanel.lyricsGlowRadius(lyricsPreviousPhraseText.phraseSide)
+                        samples: lyricsPanel.lyricsGlowSamples(lyricsPreviousPhraseText.phraseSide)
+                        spread: 0
+                        transparentBorder: true
+                        color: lyricsPanel.lyricsGlowColor(lyricsPreviousPhraseText.color, false, lyricsPreviousPhraseText.phraseSide)
+                    }
+                }
+
+                Text {
+                    id: lyricsNextPhraseText
+
+                    readonly property var phrase: root.lyricsNextPhrase()
+                    readonly property int phraseSide: Number(phrase.side) || 0
+                    readonly property int phraseStart: Number(phrase.start) || 0
+
+                    visible: phrase.text.length > 0 && phrase.text !== root.lyricsCurrentPhrase().text
+                    text: phrase.text
+                    x: lyricsPanel.cinematicPhraseX(phraseSide, "next")
+                    y: lyricsPanel.cinematicPhraseY(phraseSide, "next")
+                    width: lyricsPanel.cinematicPhraseWidth(phraseSide)
+                    wrapMode: Text.WordWrap
+                    lineHeight: 0.92
+                    color: lyricsPanel.cinematicTextColor(phraseSide, phraseStart, false)
+                    opacity: Math.min(0.20, 0.06 + root.lyricsPhraseProgress * 0.14)
+                    scale: 0.82
+                    transformOrigin: Item.Center
+                    font.family: veloraTheme.uiFont
+                    font.pixelSize: Math.round(veloraTheme.lyricsFontSize * 0.86)
+                    font.weight: Font.Black
+                    font.letterSpacing: 0
+                    style: Text.Outline
+                    styleColor: root.lyricsOutlineColor(false)
+                    renderType: Text.NativeRendering
+                }
+
+                Text {
+                    id: lyricsCurrentPhraseText
+
+                    readonly property var phrase: root.lyricsCurrentPhrase()
+                    readonly property int phraseSide: Number(phrase.side) || 0
+                    readonly property int phraseStart: Number(phrase.start) || 0
+                    readonly property real progress: root.lyricsPhraseProgress
+
+                    visible: phrase.text.length > 0
+                    text: phrase.text
+                    x: lyricsPanel.cinematicPhraseX(phraseSide, "current")
+                    y: lyricsPanel.cinematicPhraseY(phraseSide, "current")
+                    width: lyricsPanel.cinematicPhraseWidth(phraseSide)
+                    wrapMode: Text.WordWrap
+                    lineHeight: 0.90
+                    color: lyricsPanel.cinematicTextColor(phraseSide, phraseStart, true)
+                    opacity: Math.max(0.22, 0.18 + progress * 0.82)
+                    scale: 0.92 + progress * 0.08
+                    transformOrigin: Item.Center
+                    font.family: veloraTheme.uiFont
+                    font.pixelSize: Math.round(veloraTheme.lyricsFontSize * 1.08)
+                    font.weight: Font.Black
+                    font.letterSpacing: 0
+                    style: Text.Outline
+                    styleColor: root.lyricsOutlineColor(true)
+                    renderType: Text.NativeRendering
+                    layer.enabled: lyricsPanel.lyricsEffectEnabled(phraseSide)
+                    layer.smooth: true
+                    layer.effect: DropShadow {
+                        horizontalOffset: lyricsPanel.lyricsEffectHorizontalOffset(lyricsCurrentPhraseText.phraseSide)
+                        verticalOffset: lyricsPanel.lyricsEffectVerticalOffset(lyricsCurrentPhraseText.phraseSide)
+                        radius: lyricsPanel.lyricsGlowRadius(lyricsCurrentPhraseText.phraseSide)
+                        samples: lyricsPanel.lyricsGlowSamples(lyricsCurrentPhraseText.phraseSide)
+                        spread: 0
+                        transparentBorder: true
+                        color: lyricsPanel.lyricsGlowColor(lyricsCurrentPhraseText.color, true, lyricsCurrentPhraseText.phraseSide)
+                    }
+                }
+            }
+
+            Item {
+                id: lyricsBlock
+
+                readonly property real wordStep: Math.round(veloraTheme.lyricsFontSize + veloraTheme.lyricsWordSpacing)
+                readonly property bool centered: veloraTheme.lyricsLayoutMode === "centered"
+                readonly property bool cascade: veloraTheme.lyricsLayoutMode === "cascade"
+                readonly property var visibleWords: root.renderedLyricsWords()
+
+                visible: veloraTheme.lyricsLayoutMode !== "two" && veloraTheme.lyricsLayoutMode !== "four"
+                x: Math.round(Math.max(0, Math.min(parent.width - 24, parent.width * veloraTheme.lyricsPositionX / 100)))
+                y: Math.round(Math.max(0, Math.min(parent.height - 24, parent.height * veloraTheme.lyricsPositionY / 100)))
+                width: Math.max(240, parent.width - x - 24)
+                height: Math.max(80, visibleWords.length * wordStep + 20)
+                opacity: veloraTheme.lyricsOpacity
+                clip: false
+                scale: veloraTheme.lyricsScale
+                rotation: veloraTheme.lyricsRotation
+                transformOrigin: Item.TopLeft
+                transform: [
+                    Rotation {
+                        origin.x: 0
+                        origin.y: 0
+                        axis.x: 1
+                        axis.y: 0
+                        axis.z: 0
+                        angle: veloraTheme.lyricsTiltX
+                    },
+                    Rotation {
+                        origin.x: 0
+                        origin.y: 0
+                        axis.x: 0
+                        axis.y: 1
+                        axis.z: 0
+                        angle: veloraTheme.lyricsTiltY
+                    }
+                ]
+
+                Repeater {
+                    model: lyricsBlock.visibleWords
+
+                    Text {
+                        id: lyricsMainWordText
+
+                        required property int index
+                        required property var modelData
+
+                        readonly property int sourceIndex: Number(modelData.sourceIndex)
+                        readonly property bool activeWord: root.lyricsTimingMode === "plain-estimated" || !veloraTheme.lyricsActiveWordEnabled || sourceIndex === root.lyricsActiveIndex
+                        readonly property string displayWord: veloraTheme.lyricsUppercase ? String(modelData.text).toUpperCase() : String(modelData.text)
+                        readonly property color baseWordColor: root.lyricsWordColor(sourceIndex, -1)
+
+                        text: displayWord
+                        x: (lyricsBlock.centered ? -paintedWidth / 2 : (lyricsBlock.cascade ? index * Math.max(8, veloraTheme.lyricsFontSize * 0.18) : 0)) + lyricsPanel.wordFloatX(sourceIndex)
+                        y: index * lyricsBlock.wordStep + lyricsPanel.wordFloatY(sourceIndex)
+                        color: root.lyricsMaterialColor(baseWordColor, sourceIndex, activeWord)
+                        opacity: root.lyricsRenderedWordOpacity(activeWord)
+                        scale: root.lyricsWordScale(sourceIndex)
+                        transformOrigin: Item.Center
+                        font.family: veloraTheme.uiFont
+                        font.pixelSize: Math.round(veloraTheme.lyricsFontSize)
+                        font.weight: Font.Black
+                        font.letterSpacing: 0
+                        style: (veloraTheme.lyricsShadowEnabled || veloraTheme.lyricsDepthEnabled) ? Text.Outline : Text.Normal
+                        styleColor: root.lyricsOutlineColor(activeWord)
+                        renderType: Text.NativeRendering
+                        layer.enabled: lyricsPanel.lyricsEffectEnabled(-1)
+                        layer.smooth: true
+                        layer.effect: DropShadow {
+                            horizontalOffset: lyricsPanel.lyricsEffectHorizontalOffset(-1)
+                            verticalOffset: lyricsPanel.lyricsEffectVerticalOffset(-1)
+                            radius: lyricsPanel.lyricsGlowRadius(-1)
+                            samples: lyricsPanel.lyricsGlowSamples(-1)
+                            spread: 0
+                            transparentBorder: true
+                            color: lyricsPanel.lyricsGlowColor(lyricsMainWordText.color, lyricsMainWordText.activeWord, -1)
+                        }
+                    }
+                }
+            }
+
+            Item {
+                id: lyricsLeftBlock
+
+                readonly property real wordStep: Math.round(veloraTheme.lyricsFontSize + veloraTheme.lyricsWordSpacing)
+                readonly property var visibleWords: root.renderedLyricsSideWords("left")
+
+                visible: veloraTheme.lyricsLayoutMode === "two" && !root.lyricsCinematicModeActive()
+                x: Math.round(Math.max(0, Math.min(parent.width - 24, parent.width * veloraTheme.lyricsPositionX / 100)))
+                y: Math.round(Math.max(0, Math.min(parent.height - 24, parent.height * veloraTheme.lyricsPositionY / 100)))
+                width: Math.max(160, parent.width * 0.42)
+                height: Math.max(80, visibleWords.length * wordStep + 20)
+                opacity: veloraTheme.lyricsOpacity
+                clip: false
+                scale: veloraTheme.lyricsScale
+                rotation: veloraTheme.lyricsRotation
+                transformOrigin: Item.TopLeft
+                transform: [
+                    Rotation {
+                        origin.x: 0
+                        origin.y: 0
+                        axis.x: 1
+                        axis.y: 0
+                        axis.z: 0
+                        angle: veloraTheme.lyricsTiltX
+                    },
+                    Rotation {
+                        origin.x: 0
+                        origin.y: 0
+                        axis.x: 0
+                        axis.y: 1
+                        axis.z: 0
+                        angle: veloraTheme.lyricsTiltY
+                    }
+                ]
+
+                Repeater {
+                    model: lyricsLeftBlock.visibleWords
+
+                    Text {
+                        id: lyricsLeftWordText
+
+                        required property int index
+                        required property var modelData
+
+                        readonly property int sourceIndex: Number(modelData.sourceIndex)
+                        readonly property bool activeWord: root.lyricsTimingMode === "plain-estimated" || !veloraTheme.lyricsActiveWordEnabled || sourceIndex === root.lyricsActiveIndex
+                        readonly property string displayWord: veloraTheme.lyricsUppercase ? String(modelData.text).toUpperCase() : String(modelData.text)
+                        readonly property color baseWordColor: root.lyricsWordColor(sourceIndex, 0)
+
+                        text: displayWord
+                        x: lyricsPanel.wordFloatX(sourceIndex)
+                        y: index * lyricsLeftBlock.wordStep + lyricsPanel.wordFloatY(sourceIndex)
+                        color: root.lyricsMaterialColor(baseWordColor, sourceIndex, activeWord)
+                        opacity: root.lyricsRenderedWordOpacity(activeWord)
+                        scale: root.lyricsWordScale(sourceIndex)
+                        transformOrigin: Item.Center
+                        font.family: veloraTheme.uiFont
+                        font.pixelSize: Math.round(veloraTheme.lyricsFontSize)
+                        font.weight: Font.Black
+                        font.letterSpacing: 0
+                        style: (veloraTheme.lyricsShadowEnabled || veloraTheme.lyricsDepthEnabled) ? Text.Outline : Text.Normal
+                        styleColor: root.lyricsOutlineColor(activeWord)
+                        renderType: Text.NativeRendering
+                        layer.enabled: lyricsPanel.lyricsEffectEnabled(0)
+                        layer.smooth: true
+                        layer.effect: DropShadow {
+                            horizontalOffset: lyricsPanel.lyricsEffectHorizontalOffset(0)
+                            verticalOffset: lyricsPanel.lyricsEffectVerticalOffset(0)
+                            radius: lyricsPanel.lyricsGlowRadius(0)
+                            samples: lyricsPanel.lyricsGlowSamples(0)
+                            spread: 0
+                            transparentBorder: true
+                            color: lyricsPanel.lyricsGlowColor(lyricsLeftWordText.color, lyricsLeftWordText.activeWord, 0)
+                        }
+                    }
+                }
+            }
+
+            Item {
+                id: lyricsRightBlock
+
+                readonly property real wordStep: Math.round(veloraTheme.lyricsFontSize + veloraTheme.lyricsWordSpacing)
+                readonly property var visibleWords: root.renderedLyricsSideWords("right")
+
+                visible: veloraTheme.lyricsLayoutMode === "two" && !root.lyricsCinematicModeActive()
+                x: Math.round(Math.max(0, Math.min(parent.width - 24, parent.width * veloraTheme.lyricsSecondPositionX / 100)))
+                y: Math.round(Math.max(0, Math.min(parent.height - 24, parent.height * veloraTheme.lyricsSecondPositionY / 100)))
+                width: Math.max(160, parent.width - x - 24)
+                height: Math.max(80, visibleWords.length * wordStep + 20)
+                opacity: veloraTheme.lyricsOpacity
+                clip: false
+                scale: veloraTheme.lyricsScale
+                rotation: veloraTheme.lyricsRotation
+                transformOrigin: Item.TopLeft
+                transform: [
+                    Rotation {
+                        origin.x: 0
+                        origin.y: 0
+                        axis.x: 1
+                        axis.y: 0
+                        axis.z: 0
+                        angle: veloraTheme.lyricsTiltX
+                    },
+                    Rotation {
+                        origin.x: 0
+                        origin.y: 0
+                        axis.x: 0
+                        axis.y: 1
+                        axis.z: 0
+                        angle: veloraTheme.lyricsTiltY
+                    }
+                ]
+
+                Repeater {
+                    model: lyricsRightBlock.visibleWords
+
+                    Text {
+                        id: lyricsRightWordText
+
+                        required property int index
+                        required property var modelData
+
+                        readonly property int sourceIndex: Number(modelData.sourceIndex)
+                        readonly property bool activeWord: root.lyricsTimingMode === "plain-estimated" || !veloraTheme.lyricsActiveWordEnabled || sourceIndex === root.lyricsActiveIndex
+                        readonly property string displayWord: veloraTheme.lyricsUppercase ? String(modelData.text).toUpperCase() : String(modelData.text)
+                        readonly property color baseWordColor: root.lyricsWordColor(sourceIndex, 1)
+
+                        text: displayWord
+                        x: lyricsPanel.wordFloatX(sourceIndex)
+                        y: index * lyricsRightBlock.wordStep + lyricsPanel.wordFloatY(sourceIndex)
+                        color: root.lyricsMaterialColor(baseWordColor, sourceIndex, activeWord)
+                        opacity: root.lyricsRenderedWordOpacity(activeWord)
+                        scale: root.lyricsWordScale(sourceIndex)
+                        transformOrigin: Item.Center
+                        font.family: veloraTheme.uiFont
+                        font.pixelSize: Math.round(veloraTheme.lyricsFontSize)
+                        font.weight: Font.Black
+                        font.letterSpacing: 0
+                        style: (veloraTheme.lyricsShadowEnabled || veloraTheme.lyricsDepthEnabled) ? Text.Outline : Text.Normal
+                        styleColor: root.lyricsOutlineColor(activeWord)
+                        renderType: Text.NativeRendering
+                        layer.enabled: lyricsPanel.lyricsEffectEnabled(1)
+                        layer.smooth: true
+                        layer.effect: DropShadow {
+                            horizontalOffset: lyricsPanel.lyricsEffectHorizontalOffset(1)
+                            verticalOffset: lyricsPanel.lyricsEffectVerticalOffset(1)
+                            radius: lyricsPanel.lyricsGlowRadius(1)
+                            samples: lyricsPanel.lyricsGlowSamples(1)
+                            spread: 0
+                            transparentBorder: true
+                            color: lyricsPanel.lyricsGlowColor(lyricsRightWordText.color, lyricsRightWordText.activeWord, 1)
+                        }
+                    }
+                }
+            }
+
+            Repeater {
+                model: veloraTheme.lyricsLayoutMode === "four" ? [0, 1, 2, 3] : []
+
+                Item {
+                    id: lyricsFourBlock
+
+                    required property int index
+                    required property int modelData
+
+                    readonly property int blockIndex: Number(modelData)
+                    readonly property real wordStep: Math.round(veloraTheme.lyricsFontSize + veloraTheme.lyricsWordSpacing)
+                    readonly property var visibleWords: root.renderedLyricsBlockWords(blockIndex, 4)
+
+                    x: root.lyricsBlockPositionX(parent.width, blockIndex)
+                    y: root.lyricsBlockPositionY(parent.height, blockIndex)
+                    width: root.lyricsBlockWidth(parent.width, blockIndex)
+                    height: Math.max(80, visibleWords.length * wordStep + 20)
+                    opacity: veloraTheme.lyricsOpacity
+                    clip: false
+                    scale: veloraTheme.lyricsScale
+                    rotation: veloraTheme.lyricsRotation
+                    transformOrigin: Item.TopLeft
+                    transform: [
+                        Rotation {
+                            origin.x: 0
+                            origin.y: 0
+                            axis.x: 1
+                            axis.y: 0
+                            axis.z: 0
+                            angle: veloraTheme.lyricsTiltX
+                        },
+                        Rotation {
+                            origin.x: 0
+                            origin.y: 0
+                            axis.x: 0
+                            axis.y: 1
+                            axis.z: 0
+                            angle: veloraTheme.lyricsTiltY
+                        }
+                    ]
+
+                    Repeater {
+                        model: lyricsFourBlock.visibleWords
+
+                        Text {
+                            id: lyricsFourWordText
+
+                            required property int index
+                            required property var modelData
+
+                            readonly property int sourceIndex: Number(modelData.sourceIndex)
+                            readonly property bool activeWord: root.lyricsTimingMode === "plain-estimated" || !veloraTheme.lyricsActiveWordEnabled || sourceIndex === root.lyricsActiveIndex
+                            readonly property string displayWord: veloraTheme.lyricsUppercase ? String(modelData.text).toUpperCase() : String(modelData.text)
+                            readonly property color baseWordColor: root.lyricsWordColor(sourceIndex, lyricsFourBlock.blockIndex)
+
+                            text: displayWord
+                            x: lyricsPanel.wordFloatX(sourceIndex)
+                            y: index * lyricsFourBlock.wordStep + lyricsPanel.wordFloatY(sourceIndex)
+                            color: root.lyricsMaterialColor(baseWordColor, sourceIndex, activeWord)
+                            opacity: root.lyricsRenderedWordOpacity(activeWord)
+                            scale: root.lyricsWordScale(sourceIndex)
+                            transformOrigin: Item.Center
+                            font.family: veloraTheme.uiFont
+                            font.pixelSize: Math.round(veloraTheme.lyricsFontSize)
+                            font.weight: Font.Black
+                            font.letterSpacing: 0
+                            style: (veloraTheme.lyricsShadowEnabled || veloraTheme.lyricsDepthEnabled) ? Text.Outline : Text.Normal
+                            styleColor: root.lyricsOutlineColor(activeWord)
+                            renderType: Text.NativeRendering
+                            layer.enabled: lyricsPanel.lyricsEffectEnabled(lyricsFourBlock.blockIndex)
+                            layer.smooth: true
+                            layer.effect: DropShadow {
+                                horizontalOffset: lyricsPanel.lyricsEffectHorizontalOffset(lyricsFourBlock.blockIndex)
+                                verticalOffset: lyricsPanel.lyricsEffectVerticalOffset(lyricsFourBlock.blockIndex)
+                                radius: lyricsPanel.lyricsGlowRadius(lyricsFourBlock.blockIndex)
+                                samples: lyricsPanel.lyricsGlowSamples(lyricsFourBlock.blockIndex)
+                                spread: 0
+                                transparentBorder: true
+                                color: lyricsPanel.lyricsGlowColor(lyricsFourWordText.color, lyricsFourWordText.activeWord, lyricsFourBlock.blockIndex)
+                            }
+                        }
+                    }
+                }
+            }
+            }
+
+            Canvas {
+                id: lyricsCutMaskCanvas
+
+                anchors.fill: parent
+                visible: veloraTheme.lyricsMaskEnabled && veloraTheme.lyricsMaskHasStrokes
+
+                onPaint: {
+                    const ctx = getContext("2d")
+                    ctx.reset()
+                    ctx.clearRect(0, 0, width, height)
+                    ctx.fillStyle = "rgba(255,255,255,1)"
+                    ctx.fillRect(0, 0, width, height)
+                    const strokes = veloraTheme.lyricsMaskStrokes || []
+                    ctx.globalCompositeOperation = "destination-out"
+                    ctx.lineCap = "round"
+                    ctx.lineJoin = "round"
+                    const feather = Math.max(0, Number(veloraTheme.lyricsMaskFeather) || 0)
+                    function drawMaskStroke(points, lineWidth, alpha) {
+                        ctx.globalAlpha = Math.max(0, Math.min(1, alpha))
+                        ctx.lineWidth = Math.max(1, lineWidth)
+                        ctx.beginPath()
+                        ctx.moveTo(points[0].x * width, points[0].y * height)
+                        for (let p = 1; p < points.length; p += 1)
+                            ctx.lineTo(points[p].x * width, points[p].y * height)
+                        ctx.stroke()
+                    }
+                    for (let i = 0; i < strokes.length; i += 1) {
+                        const stroke = strokes[i] || {}
+                        const points = stroke.points || []
+                        if (points.length < 2)
+                            continue
+                        const brush = Math.max(1, Number(stroke.brush) || veloraTheme.lyricsMaskBrushSize)
+                        if (feather > 0) {
+                            drawMaskStroke(points, brush + feather * 2.0, 0.16)
+                            drawMaskStroke(points, brush + feather, 0.34)
+                        }
+                        drawMaskStroke(points, brush, 1)
+                    }
+                    ctx.globalAlpha = 1
+                    ctx.globalCompositeOperation = "source-over"
+                }
+
+                Connections {
+                    target: veloraTheme
+                    function onLyricsMaskRevisionChanged() { lyricsCutMaskCanvas.requestPaint() }
+                    function onLyricsMaskFeatherChanged() { lyricsCutMaskCanvas.requestPaint() }
+                }
+
+                onWidthChanged: requestPaint()
+                onHeightChanged: requestPaint()
+                onVisibleChanged: if (visible) requestPaint()
+            }
+
+            ShaderEffectSource {
+                id: lyricsCutMaskSource
+
+                anchors.fill: parent
+                visible: false
+                sourceItem: lyricsCutMaskCanvas
+                hideSource: true
+                live: true
+                recursive: true
+            }
+        }
+    }
+
+    Variants {
+        model: root.lyricsMaskEditorOpen ? Quickshell.screens : []
+
+        PanelWindow {
+            id: lyricsMaskEditorPanel
+
+            required property var modelData
+            readonly property int panelWidth: modelData.width > 0 ? modelData.width : 1920
+            readonly property int panelHeight: modelData.height > 0 ? modelData.height : 1200
+
+            screen: modelData
+            color: "transparent"
+            implicitWidth: panelWidth
+            implicitHeight: panelHeight
+            exclusiveZone: 0
+            exclusionMode: ExclusionMode.Ignore
+            focusable: true
+
+            WlrLayershell.layer: WlrLayer.Overlay
+            WlrLayershell.namespace: "velora-shell-lyrics-mask-editor"
+            WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
+
+            anchors {
+                top: true
+                bottom: true
+                left: true
+                right: true
+            }
+
+            mask: Region {
+                item: lyricsMaskEditorInputMask
+            }
+
+            Item {
+                id: lyricsMaskEditorInputMask
+                anchors.fill: parent
+                focus: true
+                Keys.onEscapePressed: root.closeLyricsMaskEditor()
+                Component.onCompleted: forceActiveFocus()
+            }
+
+            Rectangle {
+                anchors.fill: parent
+                color: Qt.rgba(0, 0, 0, 0.12)
+            }
+
+            Canvas {
+                id: lyricsMaskEditorCanvas
+
+                anchors.fill: parent
+                opacity: 0.82
+
+                onPaint: {
+                    const ctx = getContext("2d")
+                    ctx.reset()
+                    ctx.clearRect(0, 0, width, height)
+                    const strokes = veloraTheme.lyricsMaskStrokes || []
+                    ctx.lineCap = "round"
+                    ctx.lineJoin = "round"
+                    for (let i = 0; i < strokes.length; i += 1) {
+                        const stroke = strokes[i] || {}
+                        const points = stroke.points || []
+                        if (points.length < 2)
+                            continue
+                        ctx.strokeStyle = "rgba(255,80,160,0.56)"
+                        ctx.lineWidth = Math.max(1, Number(stroke.brush) || veloraTheme.lyricsMaskBrushSize)
+                        ctx.beginPath()
+                        ctx.moveTo(points[0].x * width, points[0].y * height)
+                        for (let p = 1; p < points.length; p += 1)
+                            ctx.lineTo(points[p].x * width, points[p].y * height)
+                        ctx.stroke()
+                    }
+
+                    const live = root.lyricsMaskEditorPoints || []
+                    if (live.length >= 2) {
+                        ctx.strokeStyle = "rgba(255,255,255,0.78)"
+                        ctx.lineWidth = Math.max(1, veloraTheme.lyricsMaskBrushSize)
+                        ctx.beginPath()
+                        ctx.moveTo(live[0].x * width, live[0].y * height)
+                        for (let j = 1; j < live.length; j += 1)
+                            ctx.lineTo(live[j].x * width, live[j].y * height)
+                        ctx.stroke()
+                    }
+                }
+
+                Connections {
+                    target: veloraTheme
+                    function onLyricsMaskRevisionChanged() { lyricsMaskEditorCanvas.requestPaint() }
+                }
+
+                onWidthChanged: requestPaint()
+                onHeightChanged: requestPaint()
+            }
+
+            MouseArea {
+                anchors.fill: parent
+                acceptedButtons: Qt.LeftButton
+                cursorShape: Qt.CrossCursor
+                onPressed: function(mouse) {
+                    root.lyricsMaskEditorPoints = []
+                    root.appendLyricsMaskPoint(lyricsMaskEditorPanel, mouse.x, mouse.y)
+                    lyricsMaskEditorCanvas.requestPaint()
+                }
+                onPositionChanged: function(mouse) {
+                    if (!pressed)
+                        return
+                    root.appendLyricsMaskPoint(lyricsMaskEditorPanel, mouse.x, mouse.y)
+                    lyricsMaskEditorCanvas.requestPaint()
+                }
+                onReleased: {
+                    root.commitLyricsMaskStroke()
+                    lyricsMaskEditorCanvas.requestPaint()
+                }
+            }
+
+            Row {
+                z: 4
+                anchors.top: parent.top
+                anchors.right: parent.right
+                anchors.topMargin: 18
+                anchors.rightMargin: 18
+                spacing: 8
+
+                Rectangle {
+                    width: 86
+                    height: 36
+                    radius: 10
+                    color: veloraTheme.withAlpha(veloraTheme.surfacePopup, 0.72)
+                    border.width: 1
+                    border.color: veloraTheme.withAlpha(veloraTheme.borderSoft, 0.38)
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "Limpar"
+                        color: veloraTheme.textPrimary
+                        font.family: veloraTheme.uiFont
+                        font.pixelSize: 12
+                        font.weight: Font.DemiBold
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: {
+                            veloraTheme.clearLyricsMask(true)
+                            lyricsMaskEditorCanvas.requestPaint()
+                        }
+                    }
+                }
+
+                Rectangle {
+                    width: 86
+                    height: 36
+                    radius: 10
+                    color: veloraTheme.withAlpha(veloraTheme.accentPrimary, 0.76)
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "Concluir"
+                        color: veloraTheme.buttonPrimaryText
+                        font.family: veloraTheme.uiFont
+                        font.pixelSize: 12
+                        font.weight: Font.DemiBold
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: root.closeLyricsMaskEditor()
+                    }
+                }
+            }
+        }
+    }
+
+    Variants {
+        model: root.topBarFrameVisualsMounted ? Quickshell.screens : []
+
+        PanelWindow {
+            id: topBarFramePanel
+
+            required property var modelData
+            readonly property int panelWidth: modelData.width > 0 ? modelData.width : 1920
+            readonly property int panelHeight: modelData.height > 0 ? modelData.height : 1200
+
+            screen: modelData
+            color: "transparent"
+            implicitWidth: panelWidth
+            implicitHeight: panelHeight
+            exclusiveZone: 0
+            exclusionMode: ExclusionMode.Ignore
+            focusable: false
+
+            WlrLayershell.layer: WlrLayer.Bottom
+            WlrLayershell.namespace: "velora-shell-topbar-frame"
+            WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+
+            anchors {
+                top: true
+                bottom: true
+                left: true
+                right: true
+            }
+
+            mask: Region {}
+
+            Canvas {
+                id: topBarFrameCanvas
+
+                anchors.fill: parent
+                antialiasing: true
+                opacity: root.layoutSwitchOpacity
+
+                function roundedRectPath(ctx, x, y, w, h, radius) {
+                    const r = Math.min(radius, Math.max(0, w / 2), Math.max(0, h / 2))
+                    const x2 = x + w
+                    const y2 = y + h
+
+                    ctx.beginPath()
+                    ctx.moveTo(x + r, y)
+                    ctx.lineTo(x2 - r, y)
+                    ctx.arcTo(x2, y, x2, y + r, r)
+                    ctx.lineTo(x2, y2 - r)
+                    ctx.arcTo(x2, y2, x2 - r, y2, r)
+                    ctx.lineTo(x + r, y2)
+                    ctx.arcTo(x, y2, x, y2 - r, r)
+                    ctx.lineTo(x, y + r)
+                    ctx.arcTo(x, y, x + r, y, r)
+                    ctx.closePath()
+                }
+
+                function barContactForFrameY(frameY) {
+                    const barWidth = root.topBarPanelStageWidth(width)
+                    const barHeight = root.topBarPanelHeight(height)
+                    const barX = Math.round((width - barWidth) / 2)
+                    const barY = root.topBarPanelTopMargin(height)
+                    const barRadius = barHeight / 2
+                    const centerY = barY + barRadius
+                    const dy = Math.max(-barRadius, Math.min(barRadius, frameY - centerY))
+                    const horizontal = Math.sqrt(Math.max(0, barRadius * barRadius - dy * dy))
+
+                    return {
+                        left: Math.round(barX + barRadius - horizontal),
+                        right: Math.round(barX + barWidth - barRadius + horizontal)
+                    }
+                }
+
+                function strokeFrameOutline(ctx, x, y, w, h, radius, leftGap, rightGap) {
+                    const r = Math.min(radius, Math.max(0, w / 2), Math.max(0, h / 2))
+                    const x2 = x + w
+                    const y2 = y + h
+                    const leftBreak = Math.max(x + r, Math.min(x2 - r, leftGap))
+                    const rightBreak = Math.max(x + r, Math.min(x2 - r, rightGap))
+
+                    ctx.beginPath()
+                    ctx.moveTo(x + r, y)
+                    ctx.lineTo(leftBreak, y)
+
+                    ctx.moveTo(rightBreak, y)
+                    ctx.lineTo(x2 - r, y)
+                    ctx.arcTo(x2, y, x2, y + r, r)
+                    ctx.lineTo(x2, y2 - r)
+                    ctx.arcTo(x2, y2, x2 - r, y2, r)
+                    ctx.lineTo(x + r, y2)
+                    ctx.arcTo(x, y2, x, y2 - r, r)
+                    ctx.lineTo(x, y + r)
+                    ctx.arcTo(x, y, x + r, y, r)
+                    ctx.stroke()
+                }
+
+                function paintCorner(ctx, corner, fx, fy, fw, fh, radius) {
+                    const x2 = fx + fw
+                    const y2 = fy + fh
+                    ctx.beginPath()
+
+                    if (corner === "topLeft") {
+                        ctx.moveTo(fx, fy)
+                        ctx.lineTo(fx + radius, fy)
+                        ctx.arc(fx + radius, fy + radius, radius, -Math.PI / 2, Math.PI, true)
+                        ctx.lineTo(fx, fy)
+                    } else if (corner === "topRight") {
+                        ctx.moveTo(x2, fy)
+                        ctx.lineTo(x2 - radius, fy)
+                        ctx.arc(x2 - radius, fy + radius, radius, -Math.PI / 2, 0, false)
+                        ctx.lineTo(x2, fy)
+                    } else if (corner === "bottomRight") {
+                        ctx.moveTo(x2, y2)
+                        ctx.lineTo(x2, y2 - radius)
+                        ctx.arc(x2 - radius, y2 - radius, radius, 0, Math.PI / 2, false)
+                        ctx.lineTo(x2, y2)
+                    } else if (corner === "bottomLeft") {
+                        ctx.moveTo(fx, y2)
+                        ctx.lineTo(fx + radius, y2)
+                        ctx.arc(fx + radius, y2 - radius, radius, Math.PI / 2, Math.PI, false)
+                        ctx.lineTo(fx, y2)
+                    }
+
+                    ctx.closePath()
+                    ctx.fill()
+                }
+
+                function frameOpeningPath(ctx, x, y, w, h, radius, barX, barY, barWidth, barHeight) {
+                    const r = Math.min(radius, Math.max(0, w / 2), Math.max(0, h / 2))
+                    const x2 = x + w
+                    const y2 = y + h
+                    const barPad = Math.round(Math.max(18, Math.min(34, barHeight * 0.56)))
+                    const notchLeft = Math.max(x + r, Math.round(barX - barPad))
+                    const notchRight = Math.min(x2 - r, Math.round(barX + barWidth + barPad))
+                    const saddleLeft = Math.max(x + r, Math.round(barX + barHeight * 0.54))
+                    const saddleRight = Math.min(x2 - r, Math.round(barX + barWidth - barHeight * 0.54))
+                    const saddleY = Math.min(y2 - r, Math.max(y, Math.round(barY + barHeight + 7)))
+                    const hasSaddle = notchRight > notchLeft + barHeight * 2 && saddleRight > saddleLeft && saddleY > y + 4
+
+                    ctx.beginPath()
+                    ctx.moveTo(x + r, y)
+
+                    if (hasSaddle) {
+                        ctx.lineTo(notchLeft, y)
+                        ctx.bezierCurveTo(
+                            notchLeft + barPad * 0.72, y,
+                            saddleLeft - barPad * 0.94, saddleY,
+                            saddleLeft, saddleY
+                        )
+                        ctx.lineTo(saddleRight, saddleY)
+                        ctx.bezierCurveTo(
+                            saddleRight + barPad * 0.94, saddleY,
+                            notchRight - barPad * 0.72, y,
+                            notchRight, y
+                        )
+                    }
+
+                    ctx.lineTo(x2 - r, y)
+                    ctx.arcTo(x2, y, x2, y + r, r)
+                    ctx.lineTo(x2, y2 - r)
+                    ctx.arcTo(x2, y2, x2 - r, y2, r)
+                    ctx.lineTo(x + r, y2)
+                    ctx.arcTo(x, y2, x, y2 - r, r)
+                    ctx.lineTo(x, y + r)
+                    ctx.arcTo(x, y, x + r, y, r)
+                    ctx.closePath()
+                }
+
+                function topBarVisualizerRawValue(index) {
+                    if (!root.topBarCavaValues || root.topBarCavaValues.length <= 0)
+                        return 0
+
+                    const value = Number(root.topBarCavaValues[Math.max(0, Math.min(index, root.topBarCavaValues.length - 1))])
+                    return Math.max(0, Math.min(1, isNaN(value) ? 0 : value))
+                }
+
+                function topBarVisualizerSmooth(t) {
+                    const v = Math.max(0, Math.min(1, t))
+                    return v * v * (3 - 2 * v)
+                }
+
+                function topBarVisualizerBaseYAt(xPos, frameTop, barX, barWidth, barHeight) {
+                    const barPad = Math.round(Math.max(18, Math.min(34, barHeight * 0.56)))
+                    const notchLeft = Math.round(barX - barPad)
+                    const notchRight = Math.round(barX + barWidth + barPad)
+                    const saddleLeft = Math.round(barX + barHeight * 0.54)
+                    const saddleRight = Math.round(barX + barWidth - barHeight * 0.54)
+                    const saddleY = Math.round(root.topBarPanelTopMargin(height) + barHeight + 7)
+
+                    if (xPos < notchLeft || xPos > notchRight)
+                        return frameTop
+                    if (xPos < saddleLeft) {
+                        const t = topBarVisualizerSmooth((xPos - notchLeft) / Math.max(1, saddleLeft - notchLeft))
+                        return frameTop + (saddleY - frameTop) * t
+                    }
+                    if (xPos <= saddleRight)
+                        return saddleY
+
+                    const t = topBarVisualizerSmooth((xPos - saddleRight) / Math.max(1, notchRight - saddleRight))
+                    return saddleY + (frameTop - saddleY) * t
+                }
+
+                function continueTopBarVisualizerPath(ctx, points) {
+                    if (points.length < 2)
+                        return
+
+                    ctx.moveTo(points[0].x, points[0].y)
+                    for (let i = 1; i < points.length; i += 1) {
+                        const previous = points[i - 1]
+                        const current = points[i]
+                        ctx.quadraticCurveTo(previous.x, previous.y, (previous.x + current.x) / 2, (previous.y + current.y) / 2)
+                    }
+                    const last = points[points.length - 1]
+                    ctx.lineTo(last.x, last.y)
+                }
+
+                function paintIntegratedTopBarVisualizer(ctx, fx, fy, fw, fh, radius, barX, barY, barWidth, barHeight) {
+                    if (!root.topBarFrameVisualizerMounted || !root.topBarCavaValues || root.topBarCavaValues.length <= 0)
+                        return
+
+                    const count = Math.max(32, root.topBarCavaValues.length * 2)
+                    const railLeft = Math.max(fx + radius, fx + 2)
+                    const railRight = Math.min(fx + fw - radius, fx + fw - 2)
+                    const baseDrop = Math.max(2, Math.min(6, 1 + veloraTheme.visualizerStrength * 7))
+                    const waveHeight = Math.max(16, Math.min(34, root.sideVisualizerWaveWidth * veloraTheme.visualizerStrength))
+                    const accent = veloraTheme.themeId === "pywal16" ? veloraTheme.sidebarBorderGlow : veloraTheme.activeText
+                    const boundaryPoints = []
+                    var peak = 0
+
+                    if (railRight <= railLeft)
+                        return
+
+                    for (let i = 0; i < count; i += 1) {
+                        const unit = i / Math.max(1, count - 1)
+                        const xPos = railLeft + (railRight - railLeft) * unit
+                        const scaled = unit * Math.max(1, root.topBarCavaValues.length - 1)
+                        const leftIndex = Math.max(0, Math.min(root.topBarCavaValues.length - 1, Math.floor(scaled)))
+                        const rightIndex = Math.max(leftIndex, Math.min(root.topBarCavaValues.length - 1, Math.ceil(scaled)))
+                        const mix = scaled - leftIndex
+                        const baseY = topBarVisualizerBaseYAt(xPos, fy, barX, barWidth, barHeight)
+                        const lifted = topBarVisualizerRawValue(leftIndex) * (1 - mix) + topBarVisualizerRawValue(rightIndex) * mix
+                        const edgeFade = Math.min(1, i / 5, (count - 1 - i) / 5)
+                        const available = Math.max(10, height - baseY - baseDrop - 2)
+                        const maxAmp = Math.min(available, waveHeight)
+                        const amp = Math.min(maxAmp, Math.pow(lifted, 0.82) * maxAmp) * edgeFade
+                        const pulse = 0.78 + Math.abs(Math.sin(i * 0.70)) * 0.22
+
+                        peak = Math.max(peak, lifted)
+                        boundaryPoints.push({ x: xPos, y: Math.min(height - 2, baseY + baseDrop + amp * pulse) })
+                    }
+
+                    ctx.save()
+                    ctx.lineCap = "round"
+                    ctx.lineJoin = "round"
+
+                    function visualizerFillPath() {
+                        ctx.beginPath()
+                        ctx.moveTo(railLeft, 0)
+                        ctx.lineTo(railRight, 0)
+                        ctx.lineTo(boundaryPoints[boundaryPoints.length - 1].x, boundaryPoints[boundaryPoints.length - 1].y)
+                        for (let j = boundaryPoints.length - 1; j >= 0; j -= 1)
+                            ctx.lineTo(boundaryPoints[j].x, boundaryPoints[j].y)
+                        ctx.lineTo(railLeft, 0)
+                        ctx.closePath()
+                    }
+
+                    var fill = root.topBarFrameMatteColor()
+                    if (veloraTheme.visualizerGradientEnabled) {
+                        fill = ctx.createLinearGradient(railLeft, 0, railRight, 0)
+                        fill.addColorStop(0.0, root.topBarFrameMatteColor())
+                        fill.addColorStop(0.50, veloraTheme.alpha(accent, Math.min(0.18, 0.055 + peak * 0.15)))
+                        fill.addColorStop(1.0, root.topBarFrameMatteColor())
+                    }
+
+                    ctx.globalCompositeOperation = "destination-out"
+                    ctx.fillStyle = Qt.rgba(0, 0, 0, 1)
+                    visualizerFillPath()
+                    ctx.fill()
+                    ctx.globalCompositeOperation = "source-over"
+
+                    ctx.fillStyle = fill
+                    visualizerFillPath()
+                    ctx.fill()
+
+                    if (veloraTheme.topBarFrameLineEnabled) {
+                        ctx.strokeStyle = root.topBarFrameBorderColor()
+                        ctx.lineWidth = 1
+                        ctx.beginPath()
+                        continueTopBarVisualizerPath(ctx, boundaryPoints)
+                        ctx.stroke()
+
+                        ctx.strokeStyle = root.topBarFrameInnerLineColor()
+                        ctx.lineWidth = 0.75
+                        ctx.beginPath()
+                        continueTopBarVisualizerPath(ctx, boundaryPoints)
+                        ctx.stroke()
+                    }
+
+                    ctx.restore()
+                }
+
+                function paintTopMatte(ctx, x, y, w, h, radius, barX, barY, barWidth, barHeight) {
+                    const r = Math.min(radius, Math.max(0, w / 2), Math.max(0, h / 2))
+                    const x2 = x + w
+                    const barPad = Math.round(Math.max(18, Math.min(34, barHeight * 0.56)))
+                    const notchLeft = Math.max(x + r, Math.round(barX - barPad))
+                    const notchRight = Math.min(x2 - r, Math.round(barX + barWidth + barPad))
+                    const saddleLeft = Math.max(x + r, Math.round(barX + barHeight * 0.54))
+                    const saddleRight = Math.min(x2 - r, Math.round(barX + barWidth - barHeight * 0.54))
+                    const saddleY = Math.max(y, Math.round(barY + barHeight + 7))
+                    const hasSaddle = notchRight > notchLeft + barHeight * 2 && saddleRight > saddleLeft && saddleY > y + 4
+
+                    ctx.beginPath()
+                    ctx.moveTo(0, 0)
+                    ctx.lineTo(width, 0)
+                    ctx.lineTo(width, y)
+                    ctx.lineTo(x2 - r, y)
+
+                    if (hasSaddle) {
+                        ctx.lineTo(notchRight, y)
+                        ctx.bezierCurveTo(
+                            notchRight - barPad * 0.72, y,
+                            saddleRight + barPad * 0.94, saddleY,
+                            saddleRight, saddleY
+                        )
+                        ctx.lineTo(saddleLeft, saddleY)
+                        ctx.bezierCurveTo(
+                            saddleLeft - barPad * 0.94, saddleY,
+                            notchLeft + barPad * 0.72, y,
+                            notchLeft, y
+                        )
+                    }
+
+                    ctx.lineTo(x + r, y)
+                    ctx.lineTo(0, y)
+                    ctx.closePath()
+                    ctx.fill()
+                }
+
+                onPaint: {
+                    const ctx = getContext("2d")
+                    const frameMargin = root.topBarFrameMargin(width)
+                    const fx = frameMargin
+                    const fy = root.topBarFrameTop(height)
+                    const fw = Math.max(0, width - frameMargin * 2)
+                    const fh = Math.max(0, height - fy - root.topBarFrameBottomInset(height))
+                    const radius = Math.min(root.topBarFrameRadius(height), Math.max(0, fw / 2), Math.max(0, fh / 2))
+                    const barWidth = root.topBarPanelStageWidth(width)
+                    const barHeight = root.topBarPanelHeight(height)
+                    const barX = Math.round((width - barWidth) / 2)
+                    const barY = root.topBarPanelTopMargin(height)
+
+                    ctx.clearRect(0, 0, width, height)
+                    if (!root.topBarFrameVisualsMounted || fw <= 0 || fh <= 0)
+                        return
+
+                    ctx.save()
+                    ctx.fillStyle = root.topBarFrameMatteColor()
+                    paintTopMatte(ctx, fx, fy, fw, fh, radius, barX, barY, barWidth, barHeight)
+                    ctx.fillRect(0, fy + fh, width, Math.max(0, height - fy - fh))
+                    ctx.fillRect(0, fy, fx, fh)
+                    ctx.fillRect(fx + fw, fy, Math.max(0, width - fx - fw), fh)
+                    paintCorner(ctx, "topLeft", fx, fy, fw, fh, radius)
+                    paintCorner(ctx, "topRight", fx, fy, fw, fh, radius)
+                    paintCorner(ctx, "bottomRight", fx, fy, fw, fh, radius)
+                    paintCorner(ctx, "bottomLeft", fx, fy, fw, fh, radius)
+
+                    if (veloraTheme.topBarFrameLineEnabled) {
+                        ctx.strokeStyle = root.topBarFrameBorderColor()
+                        ctx.lineWidth = 1
+                        ctx.lineCap = "round"
+                        ctx.lineJoin = "round"
+                        frameOpeningPath(ctx, fx + 0.5, fy + 0.5, Math.max(0, fw - 1), Math.max(0, fh - 1), Math.max(0, radius - 0.5), barX, barY, barWidth, barHeight)
+                        ctx.stroke()
+
+                        ctx.strokeStyle = root.topBarFrameInnerLineColor()
+                        frameOpeningPath(ctx, fx + 1.5, fy + 1.5, Math.max(0, fw - 3), Math.max(0, fh - 3), Math.max(0, radius - 1.5), barX, barY, barWidth, barHeight)
+                        ctx.stroke()
+                    }
+                    paintIntegratedTopBarVisualizer(ctx, fx, fy, fw, fh, radius, barX, barY, barWidth, barHeight)
+                    ctx.restore()
+                }
+
+                Component.onCompleted: requestPaint()
+                onWidthChanged: requestPaint()
+                onHeightChanged: requestPaint()
+            }
+
+            Connections {
+                target: veloraTheme
+                function onSurfaceSidebarChanged() { topBarFrameCanvas.requestPaint() }
+                function onSidebarOpacityChanged() { topBarFrameCanvas.requestPaint() }
+                function onFrameBlurEnabledChanged() { topBarFrameCanvas.requestPaint() }
+                function onThemeModeChanged() { topBarFrameCanvas.requestPaint() }
+                function onThemeIdChanged() { topBarFrameCanvas.requestPaint() }
+                function onSidebarBorderGlowChanged() { topBarFrameCanvas.requestPaint() }
+                function onBorderSoftChanged() { topBarFrameCanvas.requestPaint() }
+                function onVisualizerStrengthChanged() { topBarFrameCanvas.requestPaint() }
+                function onVisualizerGradientEnabledChanged() { topBarFrameCanvas.requestPaint() }
+                function onTopBarFrameLineEnabledChanged() { topBarFrameCanvas.requestPaint() }
+            }
+
+            Connections {
+                target: root
+                function onLayoutSwitchOpacityChanged() { topBarFrameCanvas.requestPaint() }
+                function onTopBarFrameVisualizerMountedChanged() { topBarFrameCanvas.requestPaint() }
+                function onTopBarCavaValuesChanged() {
+                    if (root.topBarFrameVisualizerMounted)
+                        topBarFrameCanvas.requestPaint()
+                }
+            }
+
+            Canvas {
+                id: topBarUnderVisualizerCanvas
+
+                readonly property bool activeForPaint: root.topBarCenterVisualizerMounted && visible && width > 0 && height > 0
+                readonly property int sampleCount: Math.max(48, Math.min(92, Math.round(width / 18)))
+                readonly property bool pixelMode: veloraTheme.visualizerMode === "pixels"
+                readonly property int barHeight: root.topBarPanelHeight(parent.height)
+                readonly property int barWidth: root.topBarPanelStageWidth(parent.width)
+                readonly property int topClearance: Math.round(root.topBarPanelTopMargin(parent.height) + barHeight - 1)
+                readonly property int frameMargin: root.topBarFrameMargin(parent.width)
+                readonly property int visualizerWidth: Math.round(Math.min(parent.width - frameMargin * 2 - 28, barWidth))
+                readonly property int visualizerHeight: Math.round(Math.min(84, Math.max(54, barHeight * 1.22)))
+
+                x: Math.round((parent.width - width) / 2)
+                y: topClearance
+                width: Math.max(0, visualizerWidth)
+                height: visualizerHeight
+                visible: root.topBarCenterVisualizerMounted
+                opacity: root.layoutSwitchOpacity
+                antialiasing: true
+                clip: true
+                z: 2
+
+                function requestVisualizerPaint(force) {
+                    if (!activeForPaint) {
+                        topBarUnderVisualizerPaintTimer.stop()
+                        if (force)
+                            requestPaint()
+                        return
+                    }
+
+                    if (force) {
+                        topBarUnderVisualizerPaintTimer.stop()
+                        requestPaint()
+                        return
+                    }
+
+                    if (!topBarUnderVisualizerPaintTimer.running)
+                        topBarUnderVisualizerPaintTimer.restart()
+                }
+
+                function accentColor() {
+                    if (veloraTheme.themeId === "pywal16")
+                        return veloraTheme.sidebarBorderGlow
+                    return veloraTheme.activeText
+                }
+
+                function cavaValue(unit) {
+                    const values = root.topBarCavaValues || []
+                    if (values.length <= 0)
+                        return 0
+
+                    const normalized = Math.max(0, Math.min(1, unit))
+                    const scaled = normalized * Math.max(1, values.length - 1)
+                    const left = Math.max(0, Math.min(values.length - 1, Math.floor(scaled)))
+                    const right = Math.max(left, Math.min(values.length - 1, Math.ceil(scaled)))
+                    const mix = scaled - left
+                    const leftValue = Number(values[left])
+                    const rightValue = Number(values[right])
+                    const value = (isNaN(leftValue) ? 0 : leftValue) * (1 - mix) + (isNaN(rightValue) ? 0 : rightValue) * mix
+
+                    return Math.max(0, Math.min(1, value))
+                }
+
+                function roundedBar(ctx, x, y, w, h, r) {
+                    const radius = Math.min(r, w / 2, h / 2)
+                    const x2 = x + w
+                    const y2 = y + h
+
+                    ctx.beginPath()
+                    ctx.moveTo(x + radius, y)
+                    ctx.lineTo(x2 - radius, y)
+                    ctx.arcTo(x2, y, x2, y + radius, radius)
+                    ctx.lineTo(x2, y2 - radius)
+                    ctx.arcTo(x2, y2, x2 - radius, y2, radius)
+                    ctx.lineTo(x + radius, y2)
+                    ctx.arcTo(x, y2, x, y2 - radius, radius)
+                    ctx.lineTo(x, y + radius)
+                    ctx.arcTo(x, y, x + radius, y, radius)
+                    ctx.closePath()
+                }
+
+                function drawBars(ctx, peak) {
+                    const slots = sampleCount
+                    const slotWidth = width / Math.max(1, slots)
+                    const barWidth = Math.max(4, Math.min(16, slotWidth * 0.48))
+                    const maxHeight = Math.max(24, height * Math.min(0.96, 0.58 + veloraTheme.visualizerStrength * 0.38))
+                    const accent = accentColor()
+
+                    ctx.save()
+
+                    for (let slot = 0; slot < slots; slot += 1) {
+                        const unit = slots <= 1 ? 0 : slot / (slots - 1)
+                        const value = cavaValue(unit)
+                        const edgeFade = Math.min(1, slot / 5, (slots - 1 - slot) / 5)
+                        const barHeight = Math.max(0, Math.pow(value, 0.72) * maxHeight * Math.max(0.28, veloraTheme.visualizerStrength) * edgeFade)
+
+                        if (barHeight < 1)
+                            continue
+
+                        const alpha = Math.min(0.52, 0.12 + value * 0.44) * edgeFade
+                        const xPos = Math.round(slot * slotWidth + (slotWidth - barWidth) / 2)
+                        const yPos = 0
+
+                        ctx.fillStyle = veloraTheme.alpha(accent, alpha)
+                        roundedBar(ctx, xPos, yPos, Math.round(barWidth), Math.max(1, Math.round(barHeight)), Math.max(2, barWidth * 0.42))
+                        ctx.fill()
+                    }
+
+                    ctx.restore()
+                }
+
+                function smoothWavePath(ctx, points) {
+                    if (points.length < 2)
+                        return
+
+                    ctx.lineTo(points[points.length - 1].x, points[points.length - 1].y)
+                    for (let i = points.length - 2; i >= 0; i -= 1) {
+                        const previous = points[i + 1]
+                        const current = points[i]
+                        ctx.quadraticCurveTo(previous.x, previous.y, (previous.x + current.x) / 2, (previous.y + current.y) / 2)
+                    }
+                    ctx.lineTo(points[0].x, points[0].y)
+                }
+
+                function drawIntegratedWave(ctx, peak) {
+                    const accent = accentColor()
+                    const points = []
+                    const edgeInset = 0
+                    const drawWidth = Math.max(1, width - edgeInset * 2)
+                    const baseDrop = Math.max(6, Math.min(12, height * 0.14))
+                    const maxAmp = Math.max(18, height - baseDrop - 8)
+
+                    for (let slot = 0; slot < sampleCount; slot += 1) {
+                        const unit = sampleCount <= 1 ? 0 : slot / (sampleCount - 1)
+                        const value = cavaValue(unit)
+                        const edgeFade = Math.max(0.34, Math.min(1, slot / 7, (sampleCount - 1 - slot) / 7))
+                        const pulse = 0.88 + Math.sin(slot * 0.57) * 0.08
+                        const force = Math.max(0.74, Math.min(1.10, veloraTheme.visualizerStrength * 1.08))
+                        const yPos = Math.min(height - 2, baseDrop + Math.pow(value, 0.62) * maxAmp * force * edgeFade * pulse)
+
+                        points.push({
+                            x: edgeInset + unit * drawWidth,
+                            y: yPos
+                        })
+                    }
+
+                    ctx.save()
+                    ctx.lineCap = "round"
+                    ctx.lineJoin = "round"
+
+                    var fill = root.topBarRailMaterialColor()
+                    if (veloraTheme.visualizerGradientEnabled) {
+                        fill = ctx.createLinearGradient(0, 0, width, 0)
+                        fill.addColorStop(0.0, root.topBarRailMaterialColor())
+                        fill.addColorStop(0.50, veloraTheme.alpha(accent, Math.min(0.20, 0.07 + peak * 0.18)))
+                        fill.addColorStop(1.0, root.topBarRailMaterialColor())
+                    }
+
+                    ctx.fillStyle = fill
+                    ctx.beginPath()
+                    ctx.moveTo(edgeInset, 0)
+                    ctx.lineTo(width - edgeInset, 0)
+                    smoothWavePath(ctx, points)
+                    ctx.lineTo(edgeInset, 0)
+                    ctx.closePath()
+                    ctx.fill()
+
+                    if (peak >= 0.030) {
+                        ctx.strokeStyle = veloraTheme.alpha(accent, Math.min(0.58, 0.20 + peak * 0.52))
+                        ctx.lineWidth = 1.1
+                        ctx.beginPath()
+                        ctx.moveTo(points[0].x, points[0].y)
+                        for (let i = 1; i < points.length; i += 1) {
+                            const previous = points[i - 1]
+                            const current = points[i]
+                            ctx.quadraticCurveTo(previous.x, previous.y, (previous.x + current.x) / 2, (previous.y + current.y) / 2)
+                        }
+                        ctx.lineTo(points[points.length - 1].x, points[points.length - 1].y)
+                        ctx.stroke()
+                    }
+
+                    ctx.restore()
+                }
+
+                function drawPixelBars(ctx, peak) {
+                    const cell = Math.max(3, Math.min(12, Math.round(veloraTheme.visualizerPixelSize)))
+                    const gap = Math.max(1, Math.round(cell * 0.30))
+                    const slots = Math.max(24, Math.min(96, Math.floor((width + gap) / (cell + gap * 2))))
+                    const maxRows = Math.max(1, Math.floor((height * 0.96 + gap) / (cell + gap)))
+                    const accent = accentColor()
+
+                    for (let slot = 0; slot < slots; slot += 1) {
+                        const unit = slots <= 1 ? 0 : slot / (slots - 1)
+                        const value = cavaValue(unit)
+                        const edgeFade = Math.min(1, slot / 5, (slots - 1 - slot) / 5)
+                        const activeRows = peak >= 0.025
+                            ? Math.min(maxRows, Math.max(1, Math.ceil(Math.pow(value, 0.72) * maxRows * Math.max(0.28, veloraTheme.visualizerStrength) * edgeFade)))
+                            : 0
+                        const xPos = Math.round(slot * (width / Math.max(1, slots)) + (width / Math.max(1, slots) - cell) / 2)
+
+                        for (let row = 0; row < activeRows; row += 1) {
+                            const rowFade = 1 - row / Math.max(1, maxRows) * 0.34
+                            const alpha = Math.min(0.54, 0.12 + value * 0.44) * edgeFade * rowFade
+                            const yPos = row * (cell + gap)
+
+                            if (yPos + cell > height)
+                                continue
+
+                            ctx.fillStyle = veloraTheme.alpha(accent, alpha)
+                            ctx.fillRect(xPos, Math.round(yPos), cell, cell)
+                        }
+                    }
+                }
+
+                onPaint: {
+                    const ctx = getContext("2d")
+                    var peak = 0
+
+                    ctx.clearRect(0, 0, width, height)
+                    if (!activeForPaint)
+                        return
+
+                    for (let slot = 0; slot < sampleCount; slot += 1)
+                        peak = Math.max(peak, cavaValue(sampleCount <= 1 ? 0 : slot / (sampleCount - 1)))
+
+                    if (peak < 0.015)
+                        return
+
+                    if (pixelMode)
+                        drawPixelBars(ctx, peak)
+                    else
+                        drawIntegratedWave(ctx, peak)
+                }
+
+                Component.onCompleted: requestVisualizerPaint(true)
+                onWidthChanged: requestVisualizerPaint(true)
+                onHeightChanged: requestVisualizerPaint(true)
+                onActiveForPaintChanged: requestVisualizerPaint(true)
+                onPixelModeChanged: requestVisualizerPaint(true)
+
+                Timer {
+                    id: topBarUnderVisualizerPaintTimer
+
+                    interval: 16
+                    repeat: false
+                    onTriggered: {
+                        if (topBarUnderVisualizerCanvas.activeForPaint)
+                            topBarUnderVisualizerCanvas.requestPaint()
+                    }
+                }
+
+                Connections {
+                    target: root
+                    function onTopBarCavaValuesChanged() {
+                        if (root.topBarCenterVisualizerMounted)
+                            topBarUnderVisualizerCanvas.requestVisualizerPaint(false)
+                    }
+                    function onTopBarCenterVisualizerMountedChanged() { topBarUnderVisualizerCanvas.requestVisualizerPaint(true) }
+                    function onLayoutSwitchOpacityChanged() { topBarUnderVisualizerCanvas.requestVisualizerPaint(true) }
+                }
+
+                Connections {
+                    target: veloraTheme
+                    function onActiveTextChanged() { topBarUnderVisualizerCanvas.requestVisualizerPaint(true) }
+                    function onThemeModeChanged() { topBarUnderVisualizerCanvas.requestVisualizerPaint(true) }
+                    function onThemeIdChanged() { topBarUnderVisualizerCanvas.requestVisualizerPaint(true) }
+                    function onSidebarBorderGlowChanged() { topBarUnderVisualizerCanvas.requestVisualizerPaint(true) }
+                    function onVisualizerStrengthChanged() { topBarUnderVisualizerCanvas.requestVisualizerPaint(true) }
+                    function onVisualizerModeChanged() { topBarUnderVisualizerCanvas.requestVisualizerPaint(true) }
+                    function onVisualizerPixelSizeChanged() { topBarUnderVisualizerCanvas.requestVisualizerPaint(true) }
+                    function onVisualizerGradientEnabledChanged() { topBarUnderVisualizerCanvas.requestVisualizerPaint(true) }
+                }
+            }
+        }
+    }
+
+    Variants {
         model: veloraTheme.topBarEnabled && !root.shellSuppressedByFullscreen ? Quickshell.screens : []
 
         PanelWindow {
@@ -2273,15 +4615,92 @@ ShellRoot {
             required property var modelData
             readonly property int panelWidth: modelData.width > 0 ? modelData.width : 1920
             readonly property int panelHeight: modelData.height > 0 ? modelData.height : 1200
-            readonly property int topMargin: Math.round(Math.min(24, Math.max(20, panelHeight * 0.020)))
-            readonly property int barHeight: Math.round(Math.min(88, Math.max(72, panelHeight * 0.073)))
-            readonly property int stageWidth: Math.round(Math.min(1265, Math.max(1043, panelWidth * 0.658)))
+            readonly property int topMargin: root.topBarPanelTopMargin(panelHeight)
+            readonly property int barHeight: root.topBarPanelHeight(panelHeight)
+            readonly property int stageWidth: root.topBarPanelStageWidth(panelWidth)
             readonly property int popupWidth: root.topBarQuickPopupPanelVisible ? root.quickPopupWidthForScreen(root.visibleQuickPopupType, panelWidth) : 0
             readonly property int popupHeight: root.topBarQuickPopupPanelVisible ? root.quickPopupHeightForScreen(root.visibleQuickPopupType, panelHeight) : 0
             readonly property int popupGap: 12
             readonly property int popupY: topBar.y + topBar.height + popupGap
             readonly property real popupAnchorX: root.topBarPopupCenterX > 0 ? root.topBarPopupCenterX : root.mainAreaX(panelWidth) + root.mainAreaWidth(panelWidth) / 2
             readonly property int popupX: Math.round(Math.max(root.mainAreaX(panelWidth) + 12, Math.min(root.mainAreaX(panelWidth) + root.mainAreaWidth(panelWidth) - popupWidth - 12, popupAnchorX - popupWidth / 2)))
+            property var topBarCavaValues: []
+            property int topBarCavaSettledFrames: 0
+            property int topBarCavaSkippedFrames: 0
+            readonly property int topBarCavaBandCount: 28
+            readonly property real topBarCavaSettledDelta: 0.010
+            readonly property int topBarCavaSettleFrameThreshold: 6
+            readonly property int topBarCavaMaxSkippedFrames: 14
+            readonly property bool topBarCavaWanted: root.topBarCenterVisualizerMounted && width > 0 && height > 0
+            readonly property string topBarCavaScript: Quickshell.shellDir + "/scripts/velora-cava"
+
+            function syncTopBarCavaProcess() {
+                if (topBarCavaWanted) {
+                    if (!topBarCavaProcess.running)
+                        topBarCavaProcess.running = true
+                    return
+                }
+
+                topBarCavaRestartTimer.stop()
+                if (topBarCavaProcess.running)
+                    topBarCavaProcess.running = false
+                topBarCavaValues = []
+                root.topBarCavaValues = []
+                topBarCavaSettledFrames = 0
+                topBarCavaSkippedFrames = 0
+            }
+
+            function parseTopBarCavaLine(data) {
+                var text = String(data || "")
+                text = text.replace(/\x1b\][^\x07]*\x07/g, "")
+                const parts = text.split(";")
+                var next = []
+
+                for (var i = 0; i < parts.length; ++i) {
+                    const raw = parts[i].trim()
+                    if (raw.length <= 0)
+                        continue
+
+                    const parsed = parseInt(raw)
+                    if (!isNaN(parsed))
+                        next.push(Math.max(0, Math.min(1, parsed / 1000)))
+                }
+
+                if (next.length <= 0)
+                    return
+
+                while (next.length > topBarCavaBandCount)
+                    next.shift()
+
+                while (next.length < topBarCavaBandCount)
+                    next.push(0.06)
+
+                const previous = topBarCavaValues || []
+                if (previous.length === next.length) {
+                    var maxDelta = 0
+                    for (var j = 0; j < next.length; ++j)
+                        maxDelta = Math.max(maxDelta, Math.abs(Number(previous[j]) - next[j]))
+
+                    if (maxDelta < topBarCavaSettledDelta) {
+                        topBarCavaSettledFrames += 1
+                        if (topBarCavaSettledFrames >= topBarCavaSettleFrameThreshold
+                                && topBarCavaSkippedFrames < topBarCavaMaxSkippedFrames) {
+                            topBarCavaSkippedFrames += 1
+                            return
+                        }
+                    } else {
+                        topBarCavaSettledFrames = 0
+                    }
+                } else {
+                    topBarCavaSettledFrames = 0
+                }
+
+                topBarCavaSkippedFrames = 0
+                topBarCavaValues = next
+                root.topBarCavaValues = next
+            }
+
+            onTopBarCavaWantedChanged: syncTopBarCavaProcess()
 
             screen: modelData
             color: "transparent"
@@ -2303,6 +4722,11 @@ ShellRoot {
 
             mask: Region {
                 Region {
+                    item: topBarVisualizerMask
+                    radius: Math.round(topBarVisualizerMask.height / 2)
+                }
+
+                Region {
                     item: topBar.maskItem
                     radius: 16
                 }
@@ -2318,10 +4742,299 @@ ShellRoot {
                 }
             }
 
+            Item {
+                id: topBarVisualizerMask
+
+                x: 0
+                y: 0
+                width: 0
+                height: 0
+            }
+
+            Process {
+                id: topBarCavaProcess
+
+                running: false
+                command: [topBarPanel.topBarCavaScript, String(topBarPanel.topBarCavaBandCount)]
+
+                stdout: SplitParser {
+                    onRead: function(data) {
+                        topBarPanel.parseTopBarCavaLine(data)
+                    }
+                }
+
+                onExited: {
+                    running = false
+                    if (topBarPanel.topBarCavaWanted)
+                        topBarCavaRestartTimer.restart()
+                }
+            }
+
+            Timer {
+                id: topBarCavaRestartTimer
+
+                interval: 1600
+                repeat: false
+                onTriggered: {
+                    if (topBarPanel.topBarCavaWanted && !topBarCavaProcess.running)
+                        topBarCavaProcess.running = true
+                }
+            }
+
+            Canvas {
+                id: topBarVisibleVisualizer
+
+                x: 0
+                y: 0
+                width: parent.width
+                height: topBarVisualizerMask.height
+                antialiasing: true
+                visible: false
+                z: 1
+
+                readonly property int bandCount: topBarPanel.topBarCavaBandCount
+                readonly property bool pixelMode: veloraTheme.visualizerMode === "pixels"
+                readonly property int railLeft: Math.max(8, root.topBarFrameMargin(width) + root.topBarFrameRadius(topBarPanel.panelHeight) + 18)
+                readonly property int railRight: Math.min(width - 8, width - railLeft)
+                readonly property int frameTop: root.topBarFrameTop(topBarPanel.panelHeight)
+                readonly property int barX: Math.round((topBarPanel.panelWidth - topBarPanel.stageWidth) / 2)
+                readonly property real baseDrop: Math.max(5, Math.min(8, 3 + veloraTheme.visualizerStrength * 9))
+                readonly property real waveHeight: Math.max(16, Math.min(34, root.sideVisualizerWaveWidth * veloraTheme.visualizerStrength))
+
+                function requestWaveformPaint(force) {
+                    if (!root.topBarFrameVisualizerMounted) {
+                        topBarWaveformPaintTimer.stop()
+                        if (force)
+                            requestPaint()
+                        return
+                    }
+
+                    if (force) {
+                        topBarWaveformPaintTimer.stop()
+                        requestPaint()
+                        return
+                    }
+
+                    if (!topBarWaveformPaintTimer.running)
+                        topBarWaveformPaintTimer.restart()
+                }
+
+                function rawValue(index) {
+                    if (!topBarPanel.topBarCavaValues || topBarPanel.topBarCavaValues.length <= 0)
+                        return 0
+
+                    const count = topBarPanel.topBarCavaValues.length
+                    const value = Number(topBarPanel.topBarCavaValues[Math.max(0, Math.min(count - 1, index))])
+                    return Math.max(0, Math.min(1, isNaN(value) ? 0 : value))
+                }
+
+                function smooth(t) {
+                    const v = Math.max(0, Math.min(1, t))
+                    return v * v * (3 - 2 * v)
+                }
+
+                function smoothPath(ctx, points) {
+                    if (points.length < 2)
+                        return
+
+                    ctx.moveTo(points[0].x, points[0].y)
+                    for (let i = 1; i < points.length; i += 1) {
+                        const previous = points[i - 1]
+                        const current = points[i]
+                        ctx.quadraticCurveTo(previous.x, previous.y, (previous.x + current.x) / 2, (previous.y + current.y) / 2)
+                    }
+                    const last = points[points.length - 1]
+                    ctx.lineTo(last.x, last.y)
+                }
+
+                function baseYAt(xPos, frameTop, barX, barWidth, barHeight) {
+                    const barPad = Math.round(Math.max(18, Math.min(34, barHeight * 0.56)))
+                    const notchLeft = Math.round(barX - barPad)
+                    const notchRight = Math.round(barX + barWidth + barPad)
+                    const saddleLeft = Math.round(barX + barHeight * 0.54)
+                    const saddleRight = Math.round(barX + barWidth - barHeight * 0.54)
+                    const saddleY = Math.round(topBarPanel.topMargin + topBarPanel.barHeight + 7)
+
+                    if (xPos < notchLeft || xPos > notchRight)
+                        return frameTop
+                    if (xPos < saddleLeft) {
+                        const t = smooth((xPos - notchLeft) / Math.max(1, saddleLeft - notchLeft))
+                        return frameTop + (saddleY - frameTop) * t
+                    }
+                    if (xPos <= saddleRight)
+                        return saddleY
+
+                    const t = smooth((xPos - saddleRight) / Math.max(1, notchRight - saddleRight))
+                    return saddleY + (frameTop - saddleY) * t
+                }
+
+                function pointAt(index) {
+                    const count = Math.max(2, bandCount)
+                    const unit = index / Math.max(1, count - 1)
+                    const xPos = railLeft + (railRight - railLeft) * unit
+                    const baseY = baseYAt(xPos, frameTop, barX, topBarPanel.stageWidth, topBarPanel.barHeight)
+                    const lifted = rawValue(index)
+                    const edgeFade = Math.min(1, index / 5, (count - 1 - index) / 5)
+                    const available = Math.max(10, height - baseY - baseDrop - 2)
+                    const maxAmp = Math.min(available, waveHeight)
+                    const amp = Math.min(maxAmp, Math.pow(lifted, 0.82) * maxAmp) * edgeFade
+                    const pulse = 0.78 + Math.abs(Math.sin(index * 0.70)) * 0.22
+
+                    return {
+                        x: xPos,
+                        y: Math.min(height - 2, baseY + baseDrop + amp * pulse)
+                    }
+                }
+
+                function basePointAt(index) {
+                    const count = Math.max(2, bandCount)
+                    const unit = index / Math.max(1, count - 1)
+                    const xPos = railLeft + (railRight - railLeft) * unit
+
+                    return {
+                        x: xPos,
+                        y: baseYAt(xPos, frameTop, barX, topBarPanel.stageWidth, topBarPanel.barHeight) + 1
+                    }
+                }
+
+                function moldedGlassPath(ctx, base, wave) {
+                    if (base.length <= 0 || wave.length <= 0)
+                        return
+
+                    smoothPath(ctx, base)
+                    for (let i = wave.length - 1; i >= 0; i -= 1)
+                        ctx.lineTo(wave[i].x, wave[i].y)
+                    ctx.closePath()
+                }
+
+                function drawPixelRail(ctx, peak) {
+                    const cell = Math.max(3, Math.min(12, Math.round(veloraTheme.visualizerPixelSize)))
+                    const gap = Math.max(1, Math.round(cell * 0.30))
+                    const count = Math.max(2, bandCount)
+                    const rows = Math.max(1, Math.floor((Math.min(34, Math.max(cell, height - frameTop - baseDrop - 3)) + gap) / (cell + gap)))
+                    const activeBase = veloraTheme.themeId === "pywal16" ? veloraTheme.sidebarBorderGlow : veloraTheme.activeText
+
+                    for (let slot = 0; slot < count; slot += 1) {
+                        const value = rawValue(slot)
+                        const activeRows = peak >= 0.025
+                            ? Math.min(rows, Math.max(1, Math.ceil(Math.pow(value, 0.72) * rows * Math.max(0.25, veloraTheme.visualizerStrength))))
+                            : 0
+                        const base = pointAt(slot)
+                        const x = Math.round(base.x - cell / 2)
+
+                        for (let row = 0; row < activeRows; row += 1) {
+                            const y = base.y + row * (cell + gap)
+                            if (y + cell > height - 1)
+                                continue
+
+                            const rowFade = 1 - row / Math.max(1, rows) * 0.30
+                            const alpha = Math.min(0.62, 0.18 + value * 0.50) * rowFade
+                            ctx.fillStyle = veloraTheme.alpha(activeBase, alpha)
+                            ctx.fillRect(Math.round(x), Math.round(y), cell, cell)
+                        }
+                    }
+                }
+
+                onPaint: {
+                    const ctx = getContext("2d")
+                    const accent = veloraTheme.themeId === "pywal16" ? veloraTheme.sidebarBorderGlow : veloraTheme.activeText
+                    const count = Math.max(2, bandCount)
+                    const basePoints = []
+                    const points = []
+                    var peak = 0
+
+                    ctx.clearRect(0, 0, width, height)
+                    if (!root.topBarFrameVisualizerMounted || railRight <= railLeft || width <= 0 || height <= 0)
+                        return
+
+                    for (let i = 0; i < count; i += 1) {
+                        peak = Math.max(peak, rawValue(i))
+                        basePoints.push(basePointAt(i))
+                        points.push(pointAt(i))
+                    }
+
+                    ctx.save()
+                    ctx.lineCap = "round"
+                    ctx.lineJoin = "round"
+
+                    if (pixelMode) {
+                        drawPixelRail(ctx, peak)
+                        ctx.restore()
+                        return
+                    }
+
+                    var fill = root.topBarRailMaterialColor()
+                    if (veloraTheme.visualizerGradientEnabled) {
+                        fill = ctx.createLinearGradient(railLeft, 0, railRight, 0)
+                        fill.addColorStop(0.0, root.topBarRailMaterialColor())
+                        fill.addColorStop(0.50, veloraTheme.alpha(accent, Math.min(0.13, 0.035 + peak * 0.12)))
+                        fill.addColorStop(1.0, root.topBarRailMaterialColor())
+                    }
+
+                    ctx.fillStyle = fill
+                    ctx.beginPath()
+                    moldedGlassPath(ctx, basePoints, points)
+                    ctx.fill()
+
+                    if (peak >= 0.045) {
+                        const waveAlpha = Math.min(0.22, 0.08 + peak * 0.24)
+                        ctx.strokeStyle = veloraTheme.alpha(root.sidebarPanelBorderColor(), veloraTheme.themeId === "pywal16" ? waveAlpha : Math.min(0.42, waveAlpha + 0.08))
+                        ctx.lineWidth = 0.75
+                        ctx.beginPath()
+                        smoothPath(ctx, points)
+                        ctx.stroke()
+                    }
+
+                    ctx.restore()
+                }
+
+                Component.onCompleted: requestWaveformPaint(true)
+                onWidthChanged: requestWaveformPaint(true)
+                onHeightChanged: requestWaveformPaint(true)
+                onPixelModeChanged: requestWaveformPaint(true)
+
+                Timer {
+                    id: topBarWaveformPaintTimer
+
+                    interval: 16
+                    repeat: false
+                    onTriggered: {
+                        if (root.topBarFrameVisualizerMounted)
+                            topBarVisibleVisualizer.requestPaint()
+                    }
+                }
+
+                Connections {
+                    target: topBarPanel
+                    function onTopBarCavaValuesChanged() {
+                        if (root.topBarFrameVisualizerMounted)
+                            topBarVisibleVisualizer.requestWaveformPaint(false)
+                    }
+                }
+
+                Connections {
+                    target: veloraTheme
+                    function onActiveTextChanged() { topBarVisibleVisualizer.requestWaveformPaint(true) }
+                    function onThemeModeChanged() { topBarVisibleVisualizer.requestWaveformPaint(true) }
+                    function onThemeIdChanged() { topBarVisibleVisualizer.requestWaveformPaint(true) }
+                    function onSidebarBorderGlowChanged() { topBarVisibleVisualizer.requestWaveformPaint(true) }
+                    function onVisualizerStrengthChanged() { topBarVisibleVisualizer.requestWaveformPaint(true) }
+                    function onVisualizerModeChanged() { topBarVisibleVisualizer.requestWaveformPaint(true) }
+                    function onVisualizerPixelSizeChanged() { topBarVisibleVisualizer.requestWaveformPaint(true) }
+                    function onVisualizerGradientEnabledChanged() { topBarVisibleVisualizer.requestWaveformPaint(true) }
+                }
+
+                Connections {
+                    target: root
+                    function onTopBarFrameVisualizerMountedChanged() { topBarVisibleVisualizer.requestWaveformPaint(true) }
+                }
+            }
+
             VeloraTopBar {
                 id: topBar
 
                 theme: veloraTheme
+                z: 2
                 activePopupType: root.activeQuickPopupType
                 notificationCountOverride: root.notificationHistoryCount
                 width: topBarPanel.stageWidth
@@ -4311,20 +7024,24 @@ ShellRoot {
             required property var modelData
             readonly property int panelWidth: modelData.width > 0 ? modelData.width : 1920
             readonly property int panelHeight: modelData.height > 0 ? modelData.height : 1200
-            readonly property bool geminiTopConversationExpanded: inlineGeminiTopPanel.item && inlineGeminiTopPanel.item.conversationActive
+            readonly property bool geminiTopSearchMode: root.geminiTopMode === "search"
+            readonly property bool geminiTopConversationExpanded: !geminiTopSearchMode && inlineGeminiTopPanel.item && inlineGeminiTopPanel.item.conversationActive
             readonly property bool geminiTopNotificationAttached: root.geminiTopWindowOpen && root.notificationToastMounted
             readonly property int geminiTopOpenY: Math.max(root.desktopFrameMargin + 18, 30)
             readonly property int geminiTopTargetWidth: Math.round(Math.min(780, Math.max(700, panelWidth * 0.385)))
             readonly property int geminiTopCompactHeight: Math.round(Math.min(176, Math.max(150, panelHeight * 0.138)))
             readonly property int geminiTopNotificationHeight: Math.round(Math.min(292, Math.max(246, geminiTopCompactHeight + 92)))
             readonly property int geminiTopExpandedHeight: Math.round(Math.min(560, Math.max(420, panelHeight * 0.50)))
-            readonly property int geminiTopTargetHeight: geminiTopConversationExpanded
-                ? geminiTopExpandedHeight
-                : (geminiTopNotificationAttached ? geminiTopNotificationHeight : geminiTopCompactHeight)
+            readonly property int geminiTopSearchHeight: Math.round(Math.min(410, Math.max(380, panelHeight * 0.32)))
+            readonly property int geminiTopTargetHeight: geminiTopSearchMode
+                ? geminiTopSearchHeight
+                : (geminiTopConversationExpanded
+                    ? geminiTopExpandedHeight
+                    : (geminiTopNotificationAttached ? geminiTopNotificationHeight : geminiTopCompactHeight))
             readonly property int geminiTopTargetX: Math.round((panelWidth - geminiTopTargetWidth) / 2)
             readonly property int geminiTopTargetY: root.geminiTopOpen ? geminiTopOpenY : -geminiTopTargetHeight - 18
             readonly property int geminiTopCornerRadius: 24
-            readonly property bool wantsDrawerKeyboard: root.focusMode || root.quickPopupType === "search" || root.quickPopupType === "agenda" || root.quickPopupType === "weatherPanel" || root.settingsPanelOpen || root.wallpaperSelectorOpen || root.topWallpaperKeyboardFocus || root.geminiTopKeyboardFocus || root.leftMenuInteractiveFocus
+            readonly property bool wantsDrawerKeyboard: root.focusMode || root.quickPopupType === "search" || root.quickPopupType === "agenda" || root.quickPopupType === "weatherPanel" || root.settingsPanelOpen || root.wallpaperSelectorOpen || root.topWallpaperKeyboardFocus || (!root.topBarLayout && root.geminiTopKeyboardFocus) || root.leftMenuInteractiveFocus
 
             screen: modelData
             color: "transparent"
@@ -4335,7 +7052,20 @@ ShellRoot {
 
             WlrLayershell.layer: WlrLayer.Overlay
             WlrLayershell.namespace: "velora-shell-drawers"
-            WlrLayershell.keyboardFocus: wantsDrawerKeyboard ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
+            WlrLayershell.keyboardFocus: root.geminiTopKeyboardFocus
+                ? WlrKeyboardFocus.OnDemand
+                : (wantsDrawerKeyboard ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None)
+
+            HyprlandFocusGrab {
+                id: geminiTopFocusGrab
+
+                active: !root.topBarLayout && root.geminiTopOpen && root.geminiTopKeyboardFocus
+                windows: [panel]
+                onCleared: {
+                    if (root.geminiTopOpen && root.geminiTopKeyboardFocus)
+                        root.closeGeminiTop()
+                }
+            }
 
             mask: Region {
                 intersection: Intersection.Combine
@@ -4353,6 +7083,11 @@ ShellRoot {
                 Region {
                     item: inlineGeminiTopInputMask
                     radius: panel.geminiTopCornerRadius
+                }
+
+                Region {
+                    item: inlineTopSearchOutsideInputMask
+                    radius: 0
                 }
 
                 Region {
@@ -4649,6 +7384,8 @@ ShellRoot {
                 }
 
                 function paintGeminiTopSurface(ctx) {
+                    if (root.topBarLayout)
+                        return
                     if (!root.geminiTopWindowOpen && inlineGeminiTopFrame.opacity <= 0.001)
                         return
                     if (inlineGeminiTopFrame.width <= 0 || inlineGeminiTopFrame.height <= 0 || inlineGeminiTopFrame.opacity <= 0.001)
@@ -4758,6 +7495,26 @@ ShellRoot {
                     ctx.restore()
                 }
 
+                function paintSettingsFrameSurface(ctx) {
+                    if (!root.settingsPanelPanelVisible || !inlineSettingsLoader.active)
+                        return
+
+                    const reveal = Math.max(0, Math.min(1, inlineSettingsLoader.revealProgress))
+                    if (reveal <= 0.001)
+                        return
+
+                    paintFrameAttachedSurface(
+                        ctx,
+                        Math.round(inlineSettingsLoader.x),
+                        Math.round(inlineSettingsLoader.y),
+                        Math.round(inlineSettingsLoader.width),
+                        Math.round(inlineSettingsLoader.height),
+                        inlineSettingsLoader.cornerRadius,
+                        "left",
+                        reveal
+                    )
+                }
+
                 function paintLeftMenuFrameSurfaces(ctx) {
                     if (!root.sideBarLayoutEnabled || root.shellSuppressedByFullscreen)
                         return
@@ -4827,6 +7584,7 @@ ShellRoot {
 
                     paintFrameOutline(ctx, fx, fy, fw, fh, radius)
                     paintGeminiTopSurface(ctx)
+                    paintSettingsFrameSurface(ctx)
                     paintLeftMenuFrameSurfaces(ctx)
                     ctx.restore()
 
@@ -4856,6 +7614,8 @@ ShellRoot {
 
             Connections {
                 target: root
+                function onSettingsPanelOpenChanged() { if (root.frameVisualsMounted) unifiedFrameCanvas.requestPaint() }
+                function onSettingsPanelWindowOpenChanged() { if (root.frameVisualsMounted) unifiedFrameCanvas.requestPaint() }
                 function onNotificationToastMountedChanged() { if (root.frameVisualsMounted) unifiedFrameCanvas.requestPaint() }
                 function onNotificationToastVisibleChanged() { if (root.frameVisualsMounted) unifiedFrameCanvas.requestPaint() }
                 function onNotificationToastSerialChanged() { if (root.frameVisualsMounted) unifiedFrameCanvas.requestPaint() }
@@ -4876,17 +7636,36 @@ ShellRoot {
                 function onTopWallpaperFrameRevealChanged() { if (root.frameVisualsMounted) unifiedFrameCanvas.requestPaint() }
             }
 
+            Rectangle {
+                id: inlineTopSearchBackdrop
+
+                anchors.fill: parent
+                visible: !root.topBarLayout && root.geminiTopWindowOpen && panel.geminiTopSearchMode
+                color: veloraTheme.alpha(veloraTheme.surfaceBase, veloraTheme.themeMode === "dark" ? 0.16 : 0.11)
+                opacity: !root.topBarLayout && root.geminiTopOpen && panel.geminiTopSearchMode ? 1 : 0
+                z: -2
+
+                Behavior on opacity {
+                    enabled: veloraTheme.motionEnabled
+                    NumberAnimation {
+                        duration: root.geminiTopOpen && panel.geminiTopSearchMode ? 5000 : root.quickPopupLineCloseDuration
+                        easing.type: root.geminiTopOpen && panel.geminiTopSearchMode ? Easing.InOutSine : veloraTheme.motionEaseExit
+                    }
+                }
+            }
+
             Item {
                 id: inlineGeminiTopTriggerMask
 
                 x: Math.round(root.mainAreaX(panel.panelWidth))
                 y: 0
-                width: Math.round(root.mainAreaWidth(panel.panelWidth))
-                height: root.geminiTopWindowOpen ? Math.max(12, panel.geminiTopOpenY + 2) : Math.max(12, root.desktopFrameMargin + 2)
+                width: root.topBarLayout ? 0 : Math.round(root.mainAreaWidth(panel.panelWidth))
+                height: root.topBarLayout ? 0 : (root.geminiTopWindowOpen ? Math.max(12, panel.geminiTopOpenY + 2) : Math.max(12, root.desktopFrameMargin + 2))
                 z: 35
 
                 MouseArea {
                     anchors.fill: parent
+                    enabled: !root.topBarLayout
                     hoverEnabled: true
                     acceptedButtons: Qt.LeftButton
                     onEntered: {
@@ -4901,9 +7680,23 @@ ShellRoot {
             }
 
             Item {
+                id: inlineTopSearchOutsideInputMask
+
+                width: !root.topBarLayout && root.geminiTopOpen && panel.geminiTopSearchMode ? parent.width : 0
+                height: !root.topBarLayout && root.geminiTopOpen && panel.geminiTopSearchMode ? parent.height : 0
+                z: 25
+
+                MouseArea {
+                    anchors.fill: parent
+                    acceptedButtons: Qt.LeftButton
+                    onClicked: root.closeGeminiTop()
+                }
+            }
+
+            Item {
                 id: inlineGeminiTopFrame
 
-                readonly property bool mounted: root.geminiTopWindowOpen
+                readonly property bool mounted: !root.topBarLayout && root.geminiTopWindowOpen
                 readonly property int surfaceY: root.geminiTopWindowOpen && y >= root.desktopFrameMargin
                     ? root.desktopFrameMargin
                     : Math.round(y)
@@ -4946,8 +7739,8 @@ ShellRoot {
 
                 x: inlineGeminiTopFrame.x
                 y: inlineGeminiTopFrame.surfaceY
-                width: root.geminiTopWindowOpen ? inlineGeminiTopFrame.width : 0
-                height: root.geminiTopWindowOpen ? inlineGeminiTopFrame.surfaceHeight : 0
+                width: !root.topBarLayout && root.geminiTopWindowOpen ? inlineGeminiTopFrame.width : 0
+                height: !root.topBarLayout && root.geminiTopWindowOpen ? inlineGeminiTopFrame.surfaceHeight : 0
                 z: 27
             }
 
@@ -4958,26 +7751,57 @@ ShellRoot {
                 y: inlineGeminiTopFrame.y
                 width: inlineGeminiTopFrame.width
                 height: inlineGeminiTopFrame.height
-                active: root.geminiTopWindowOpen
+                active: !root.topBarLayout && root.geminiTopWindowOpen
                 visible: active
                 opacity: inlineGeminiTopFrame.opacity
                 z: 32
 
-                sourceComponent: Component {
-                    VeloraGeminiTopPanel {
-                        theme: veloraTheme
-                        open: root.geminiTopOpen
-                        autoFocus: root.geminiTopKeyboardFocus
-                        embeddedInFrame: true
-                        panelGlass: "transparent"
-                        panelLine: "transparent"
-                        focusRequest: root.geminiTopFocusRequest
-                        geminiScript: Quickshell.shellDir + "/scripts/velora-gemini-ask"
-                        onActivated: root.engageGeminiTop()
-                        onCloseRequested: root.closeGeminiTop()
-                        onPointerInsideChanged: function(inside) {
-                            root.setGeminiTopPanelHovering(inside)
-                        }
+                sourceComponent: panel.geminiTopSearchMode ? inlineTopSearchComponent : inlineTopGeminiComponent
+
+                onLoaded: {
+                    if (panel.geminiTopSearchMode && item && item.requestSearchFocus)
+                        item.requestSearchFocus()
+                }
+            }
+
+            Component {
+                id: inlineTopGeminiComponent
+
+                VeloraGeminiTopPanel {
+                    theme: veloraTheme
+                    open: root.geminiTopOpen
+                    autoFocus: root.geminiTopKeyboardFocus
+                    embeddedInFrame: true
+                    panelGlass: "transparent"
+                    panelLine: "transparent"
+                    focusRequest: root.geminiTopFocusRequest
+                    geminiScript: Quickshell.shellDir + "/scripts/velora-gemini-ask"
+                    onActivated: root.engageGeminiTop()
+                    onCloseRequested: root.closeGeminiTop()
+                    onPointerInsideChanged: function(inside) {
+                        root.setGeminiTopPanelHovering(inside)
+                    }
+                }
+            }
+
+            Component {
+                id: inlineTopSearchComponent
+
+                VeloraSidePopup {
+                    theme: veloraTheme
+                    popupType: "search"
+                    open: root.geminiTopOpen
+                    interactiveFocus: root.geminiTopKeyboardFocus
+                    externalSurface: true
+                    attachSide: "left"
+                    notificationsModelOverride: notificationHistoryModel
+                    onCloseRequested: root.closeGeminiTop()
+                    onPopupRequested: function(type) {
+                        root.closeGeminiTop()
+                        root.openAdaptiveBarPopup(type, root.defaultQuickPopupCenterY(type))
+                    }
+                    onPointerInsideChanged: function(inside) {
+                        root.setGeminiTopPanelHovering(inside)
                     }
                 }
             }
@@ -6486,7 +9310,8 @@ ShellRoot {
                 focusMode: root.focusMode
                 focusIndex: root.focusIndex
                 focusTarget: root.focusTarget
-                visualizerActive: root.audioVisualizerMounted
+                visualizerActive: root.sideVisualizerMounted || root.screenVisualizerMounted
+                cavaForceActive: false
                 shellDrawsPanelSurface: root.sideBarLayoutEnabled && root.frameVisualsMounted
                 activePopupType: root.wallpaperSelectorOpen ? "theme" : root.quickPopupType
                 notificationCountOverride: root.notificationHistoryCount
@@ -6963,7 +9788,8 @@ ShellRoot {
                     height: inlineSettingsLoader.height
                     radius: inlineSettingsLoader.cornerRadius
                     revealProgress: inlineSettingsLoader.revealProgress
-                    visible: root.settingsPanelPanelVisible
+                    flattenAttachedEdge: true
+                    visible: root.settingsPanelPanelVisible && !root.frameVisualsMounted
                 }
 
                 Loader {
@@ -6975,13 +9801,18 @@ ShellRoot {
                     active: root.settingsPanelPanelVisible || root.settingsPanelPreloadEnabled
                     asynchronous: true
                     z: 5
-                    width: Math.round(Math.min(root.quickPopupWidth("settings"), root.mainAreaWidth(parent.width) - 56))
-                    height: Math.round(Math.min(root.quickPopupHeight("settings"), parent.height - root.frameVisualInset * 2 - 72))
-                    x: Math.round(root.mainAreaX(parent.width) + (root.mainAreaWidth(parent.width) - width) / 2)
-                    y: Math.round(root.frameVisualInset + (parent.height - root.frameVisualInset * 2 - height) / 2)
+                    width: Math.round(Math.min(404, root.mainAreaWidth(parent.width) - 48))
+                    height: Math.round(parent.height - root.frameVisualInset * 2 - 30)
+                    x: Math.round(root.mainAreaX(parent.width))
+                    y: Math.round(root.frameVisualInset + 12)
                     visible: root.settingsPanelPanelVisible
 
                     onActiveChanged: if (!active) root.settingsPanelHovering = false
+                    onXChanged: if (root.frameVisualsMounted) unifiedFrameCanvas.requestPaint()
+                    onYChanged: if (root.frameVisualsMounted) unifiedFrameCanvas.requestPaint()
+                    onWidthChanged: if (root.frameVisualsMounted) unifiedFrameCanvas.requestPaint()
+                    onHeightChanged: if (root.frameVisualsMounted) unifiedFrameCanvas.requestPaint()
+                    onRevealProgressChanged: if (root.frameVisualsMounted) unifiedFrameCanvas.requestPaint()
 
                     sourceComponent: Component {
                         VeloraSettingsPanel {
@@ -6994,6 +9825,7 @@ ShellRoot {
                             visible: root.settingsPanelPanelVisible
                             focus: root.settingsPanelOpen
                             onCloseRequested: root.settingsPanelOpen = false
+                            onLyricsMaskEditorRequested: root.openLyricsMaskEditor()
 
                             HoverHandler {
                                 margin: 24

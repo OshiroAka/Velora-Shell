@@ -1,0 +1,698 @@
+#!/usr/bin/env python3
+import hashlib
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+import urllib.parse
+import urllib.request
+
+
+CACHE_ROOT = os.path.join(os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache")), "velora-shell", "lyrics")
+API_BASE = "https://lrclib.net/api/get"
+SEARCH_BASE = "https://lrclib.net/api/search"
+USER_AGENT = "VeloraShell/1.0 (lyrics overlay)"
+DEFAULT_POSITION_LEAD_SECONDS = 0.46
+LINE_LOOKAHEAD_SECONDS = 0.04
+EXACT_REQUEST_TIMEOUT_SECONDS = 2.8
+SEARCH_REQUEST_TIMEOUT_SECONDS = 7.0
+FETCH_DEADLINE_SECONDS = 14.0
+DEFAULT_LEAD_EPSILON_SECONDS = 0.025
+
+
+def clean(value):
+    return " ".join(str(value or "").replace("|", " ").split())
+
+
+def run_text(args):
+    try:
+        return subprocess.check_output(args, stderr=subprocess.DEVNULL, text=True).strip()
+    except Exception:
+        return ""
+
+
+def pick_player():
+    raw = run_text(["playerctl", "-l"])
+    players = [line.strip() for line in raw.splitlines() if line.strip()]
+    if not players:
+        return ""
+
+    playing = []
+    for player in players:
+        status = run_text(["playerctl", "-p", player, "status"])
+        if status == "Playing":
+            playing.append(player)
+
+    candidates = playing or players
+    for player in candidates:
+        if "spotify" in player.lower():
+            return player
+    return candidates[0]
+
+
+def player_meta(player):
+    if not player:
+        return {}
+
+    batch = run_text([
+        "playerctl",
+        "-p",
+        player,
+        "metadata",
+        "--format",
+        "{{title}}\n{{artist}}\n{{album}}\n{{mpris:length}}\n{{position}}\n{{status}}",
+    ])
+    parts = batch.splitlines()
+    while len(parts) < 6:
+        parts.append("")
+
+    title = clean(parts[0])
+    artist = clean(parts[1])
+    album = clean(parts[2])
+    length_raw = parts[3]
+    position_raw = parts[4]
+    status = clean(parts[5])
+
+    try:
+        duration = int(round(float(length_raw) / 1000000.0))
+    except Exception:
+        duration = 0
+    try:
+        position = max(0.0, float(position_raw))
+        if position > 10000:
+            position = position / 1000000.0
+    except Exception:
+        try:
+            position = max(0.0, float(run_text(["playerctl", "-p", player, "position"])))
+        except Exception:
+            position = 0.0
+
+    if not status:
+        status = clean(run_text(["playerctl", "-p", player, "status"]))
+
+    return {
+        "player": player,
+        "title": title,
+        "artist": artist,
+        "album": album,
+        "duration": duration,
+        "position": position,
+        "status": status,
+    }
+
+
+def cache_key(meta):
+    base = "\0".join([
+        meta.get("title", "").lower(),
+        meta.get("artist", "").lower(),
+        meta.get("album", "").lower(),
+        str(meta.get("duration", 0)),
+    ])
+    return hashlib.sha1(base.encode("utf-8")).hexdigest()
+
+
+def cache_path(meta):
+    return os.path.join(CACHE_ROOT, cache_key(meta) + ".json")
+
+
+def load_cache(meta):
+    path = cache_path(meta)
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            cached = json.load(handle)
+    except Exception:
+        return None
+    data = cached.get("data", {})
+    if not data.get("ok") and data.get("reason") == "fetch-failed":
+        created = int(cached.get("createdAt") or 0)
+        if int(time.time()) - created > 5:
+            return None
+    if data.get("ok") and data.get("source") == "lrclib-search" and not data.get("matchTitle"):
+        return None
+    return cached
+
+
+def write_cache(meta, data):
+    os.makedirs(CACHE_ROOT, exist_ok=True)
+    path = cache_path(meta)
+    tmp = path + ".tmp"
+    payload = {
+        "createdAt": int(time.time()),
+        "title": meta.get("title", ""),
+        "artist": meta.get("artist", ""),
+        "album": meta.get("album", ""),
+        "duration": meta.get("duration", 0),
+        "data": data,
+    }
+    with open(tmp, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, ensure_ascii=False)
+    os.replace(tmp, path)
+
+
+def fetch_lrclib(meta):
+    if not meta.get("title") or not meta.get("artist"):
+        return {"ok": False, "reason": "missing-metadata"}
+
+    started_at = time.monotonic()
+
+    def request_json(url, timeout_cap=SEARCH_REQUEST_TIMEOUT_SECONDS):
+        remaining = FETCH_DEADLINE_SECONDS - (time.monotonic() - started_at)
+        if remaining <= 0.5:
+            raise TimeoutError("lyrics fetch deadline exceeded")
+        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=max(1.0, min(timeout_cap, remaining))) as response:
+            raw = response.read().decode("utf-8", "replace")
+            return json.loads(raw)
+
+    def compact_title(title):
+        value = str(title or "")
+        value = re.sub(r"\s*[\(\[]\s*(feat\.?|ft\.?|featuring|with)\b[^\)\]]*[\)\]]", "", value, flags=re.I)
+        value = re.sub(r"\s*(?:feat\.?|ft\.?|featuring)\s+.+$", "", value, flags=re.I)
+        value = re.sub(r"\s*[-–—]\s*(demo|remaster(?:ed)?(?:\s*\d{4})?|radio edit|single version|album version|sped up|slowed|nightcore|slowed\s*\+?\s*reverb|reverb|remix|edit|mix)\s*$", "", value, flags=re.I)
+        value = re.sub(r"\s*\((demo|remaster(?:ed)?(?:\s*\d{4})?|radio edit|single version|album version|sped up|slowed|nightcore|slowed\s*\+?\s*reverb|reverb|remix|edit|mix)\)\s*$", "", value, flags=re.I)
+        return clean(value)
+
+    def normalize_match(value):
+        return re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
+
+    def title_tokens(value):
+        ignored = {
+            "feat", "featuring", "ft", "with", "remix", "remastered", "remaster",
+            "version", "radio", "edit", "single", "album", "sped", "slowed",
+            "reverb", "nightcore", "explicit", "clean", "original", "mix"
+        }
+        tokens = re.findall(r"[a-z0-9]+", compact_title(value).lower())
+        return [token for token in tokens if token not in ignored]
+
+    def title_overlap_score(query_title, candidate_title):
+        query_tokens = set(title_tokens(query_title))
+        candidate_tokens = set(title_tokens(candidate_title))
+        if not query_tokens or not candidate_tokens:
+            return 0.0, 0.0, 0
+        overlap = len(query_tokens & candidate_tokens)
+        return overlap / len(query_tokens), overlap / len(candidate_tokens), overlap
+
+    def pack(data, source, score=None):
+        payload = {
+            "ok": True,
+            "source": source,
+            "syncedLyrics": data.get("syncedLyrics") or "",
+            "plainLyrics": data.get("plainLyrics") or "",
+            "instrumental": bool(data.get("instrumental")),
+        }
+        if source == "lrclib-search":
+            payload.update({
+                "matchTitle": data.get("trackName") or "",
+                "matchArtist": data.get("artistName") or "",
+                "matchAlbum": data.get("albumName") or "",
+                "matchDuration": data.get("duration") or 0,
+                "matchScore": score if score is not None else 0,
+            })
+        return payload
+
+    params = {
+        "track_name": meta["title"],
+        "artist_name": meta["artist"],
+    }
+    if meta.get("album"):
+        params["album_name"] = meta["album"]
+    if meta.get("duration", 0) > 0:
+        params["duration"] = str(int(meta["duration"]))
+
+    url = API_BASE + "?" + urllib.parse.urlencode(params)
+    best_error = ""
+    exact_fallback = None
+    try:
+        data = request_json(url, EXACT_REQUEST_TIMEOUT_SECONDS)
+        exact_fallback = pack(data, "lrclib")
+        if exact_fallback.get("syncedLyrics"):
+            return exact_fallback
+    except Exception as exc:
+        best_error = str(exc)
+        pass
+
+    titles = []
+    for candidate in [meta["title"], compact_title(meta["title"])]:
+        if candidate and candidate not in titles:
+            titles.append(candidate)
+
+    def search_candidates(results, source, title):
+        if not isinstance(results, list):
+            return None
+
+        title_key = normalize_match(compact_title(title))
+        artist_key = normalize_match(meta["artist"])
+        album_key = normalize_match(meta.get("album", ""))
+        scored = []
+
+        for item in results:
+            if not isinstance(item, dict):
+                continue
+
+            score = 0
+            item_track_name = item.get("trackName", "")
+            item_title = normalize_match(compact_title(item_track_name))
+            item_artist = normalize_match(item.get("artistName", ""))
+            item_album = normalize_match(item.get("albumName", ""))
+            has_artist = artist_key and (artist_key in item_artist or item_artist in artist_key)
+            has_album = album_key and (album_key in item_album or item_album in album_key)
+            duration_delta = None
+            query_coverage, item_coverage, overlap_count = title_overlap_score(title, item_track_name)
+            exact_title_match = item_title == title_key
+            strong_title_match = exact_title_match or (
+                overlap_count > 0
+                and query_coverage >= 0.70
+                and item_coverage >= 0.55
+            )
+            weak_title_match = overlap_count >= 2 and query_coverage >= 0.50 and item_coverage >= 0.35
+
+            if item.get("syncedLyrics"):
+                score += 100
+            elif item.get("plainLyrics"):
+                score += 35
+
+            if exact_title_match:
+                score += 36
+            elif strong_title_match:
+                score += 22
+            elif weak_title_match:
+                score += 8
+
+            if has_artist:
+                score += 18
+            if has_album:
+                score += 16
+
+            if meta.get("duration", 0) > 0 and item.get("duration"):
+                try:
+                    duration_delta = abs(float(item.get("duration")) - float(meta["duration"]))
+                    if duration_delta <= 3:
+                        score += 12
+                    elif duration_delta <= 10:
+                        score += 5
+                except Exception:
+                    pass
+
+            close_duration = duration_delta is not None and duration_delta <= 4
+            acceptable_exact = strong_title_match and (has_artist or has_album or close_duration)
+            acceptable_variant = weak_title_match and has_artist and (has_album or close_duration)
+            if not acceptable_exact and not acceptable_variant:
+                continue
+
+            scored.append((score, item))
+
+        scored.sort(key=lambda pair: pair[0], reverse=True)
+        if scored and scored[0][0] > 0:
+            return pack(scored[0][1], source, scored[0][0])
+        return None
+
+    search_succeeded = False
+    search_requests = []
+    seen_search_keys = set()
+
+    for query in [
+        f"{meta.get('title', '')} {meta.get('artist', '')}",
+        f"{compact_title(meta.get('title', ''))} {meta.get('artist', '')}",
+        f"{meta.get('album', '')} {meta.get('artist', '')}",
+        f"{meta.get('artist', '')} {meta.get('album', '')}",
+    ]:
+        query = clean(query)
+        if not query:
+            continue
+        params = {"q": query}
+        key = json.dumps(params, sort_keys=True)
+        if key not in seen_search_keys:
+            seen_search_keys.add(key)
+            search_requests.append((params, meta.get("title", ""), "lrclib-search"))
+
+    for title in titles:
+        params = {
+            "track_name": title,
+            "artist_name": meta["artist"],
+        }
+        key = json.dumps(params, sort_keys=True)
+        if key not in seen_search_keys:
+            seen_search_keys.add(key)
+            search_requests.append((params, title, "lrclib-search"))
+
+    for search_params, title, source in search_requests:
+        search_url = SEARCH_BASE + "?" + urllib.parse.urlencode(search_params)
+        try:
+            results = request_json(search_url)
+        except Exception as exc:
+            best_error = str(exc)
+            if isinstance(exc, TimeoutError):
+                break
+            continue
+
+        search_succeeded = True
+        found = search_candidates(results, source, title)
+        if found:
+            if found.get("syncedLyrics") or exact_fallback is None:
+                return found
+
+    if exact_fallback is not None:
+        return exact_fallback
+
+    if search_succeeded:
+        return {"ok": False, "reason": "no-lyrics"}
+    return {"ok": False, "reason": "fetch-failed", "error": best_error}
+
+
+LRC_RE = re.compile(r"\[(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?\]\s*(.*)")
+WORD_TIME_RE = re.compile(r"<(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?>")
+
+
+def timestamp_seconds(minutes, seconds, fraction):
+    frac = fraction or "0"
+    return int(minutes) * 60 + int(seconds) + int(frac.ljust(3, "0")[:3]) / 1000.0
+
+
+def parse_word_times(text):
+    matches = list(WORD_TIME_RE.finditer(str(text or "")))
+    if not matches:
+        return []
+
+    timed_words = []
+    for index, match in enumerate(matches):
+        start = match.end()
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        segment_words = split_words(text[start:end])
+        if not segment_words:
+            continue
+        base_time = timestamp_seconds(match.group(1), match.group(2), match.group(3))
+        next_time = None
+        if index + 1 < len(matches):
+            next_match = matches[index + 1]
+            next_time = timestamp_seconds(next_match.group(1), next_match.group(2), next_match.group(3))
+        step = max(0.08, ((next_time - base_time) / len(segment_words)) if next_time else 0.18)
+        for word_index, word in enumerate(segment_words):
+            timed_words.append({"word": word, "time": base_time + step * word_index})
+    return timed_words
+
+
+def parse_lrc(text):
+    lines = []
+    for raw in str(text or "").splitlines():
+        match = LRC_RE.match(raw.strip())
+        if not match:
+            continue
+        line_time = timestamp_seconds(match.group(1), match.group(2), match.group(3))
+        body = match.group(4)
+        word_times = parse_word_times(body)
+        line = clean(WORD_TIME_RE.sub(" ", body))
+        if not line:
+            continue
+        lines.append({"time": line_time, "text": line, "wordTimes": word_times})
+    lines.sort(key=lambda item: item["time"])
+    return lines
+
+
+def parse_plain_lyrics(text, duration):
+    entries = []
+    for raw in str(text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        line = clean(raw)
+        if not line:
+            if entries:
+                entries[-1]["gap"] += 0.85
+            continue
+
+        words = split_words(line)
+        if not words:
+            continue
+
+        weight = max(1.0, 0.48 + sum(word_weight(word) for word in words) * 0.34)
+        entries.append({"text": line, "weight": weight, "gap": 0.0})
+
+    if not entries:
+        return []
+
+    duration = max(0.0, float(duration or 0))
+    start_time = min(2.5, max(0.35, duration * 0.015)) if duration > 0 else 0.5
+    end_margin = min(5.0, max(1.2, duration * 0.03)) if duration > 0 else 2.5
+    total_weight = sum(item["weight"] + item["gap"] for item in entries)
+    available = max(total_weight * 1.15, duration - start_time - end_margin) if duration > 0 else total_weight * 1.65
+    scale = max(0.55, available / max(1.0, total_weight))
+
+    lines = []
+    current_time = start_time
+    for item in entries:
+        lines.append({"time": current_time, "text": item["text"], "wordTimes": [], "plainEstimated": True})
+        current_time += (item["weight"] + item["gap"]) * scale
+    return lines
+
+
+def current_line(lines, position):
+    if not lines:
+        return None, None
+
+    current = None
+    next_line = None
+    for index, line in enumerate(lines):
+        if line["time"] <= position + LINE_LOOKAHEAD_SECONDS:
+            current = line
+            next_line = lines[index + 1] if index + 1 < len(lines) else None
+        else:
+            if current is None:
+                next_line = line
+            break
+    return current, next_line
+
+
+def split_words(text):
+    return [part for part in re.split(r"\s+", clean(text)) if part]
+
+
+def word_weight(word):
+    clean_word = re.sub(r"[^0-9A-Za-zÀ-ÖØ-öø-ÿ]+", "", str(word or ""))
+    length = len(clean_word)
+    weight = max(0.55, min(2.35, 0.42 + length / 6.0))
+    if re.search(r"[,;:]$", str(word or "")):
+        weight += 0.16
+    if re.search(r"[.!?)]$", str(word or "")):
+        weight += 0.24
+    return weight
+
+
+def estimated_speech_span(words, available_span):
+    weights = [word_weight(word) for word in words]
+    estimate = max(0.72, min(6.2, sum(weights) * 0.42))
+    if available_span <= 0:
+        return estimate
+    if available_span <= estimate * 1.35:
+        return max(0.5, available_span)
+    return estimate
+
+
+def active_word_index(words, current, next_time, render_position):
+    timed_words = current.get("wordTimes") or []
+    if len(timed_words) >= len(words):
+        active = 0
+        for index, item in enumerate(timed_words[:len(words)]):
+            if item.get("time", 0) <= render_position + 0.015:
+                active = index
+            else:
+                break
+        first_time = timed_words[0].get("time", current["time"])
+        last_time = timed_words[min(len(words), len(timed_words)) - 1].get("time", first_time)
+        return max(0, min(len(words) - 1, active)), max(0.5, last_time - first_time), "timed"
+
+    available_span = max(0.0, next_time - current["time"])
+    speech_span = estimated_speech_span(words, available_span)
+    elapsed = render_position - current["time"]
+    if elapsed <= 0:
+        return 0, speech_span, "estimated"
+    if elapsed >= speech_span:
+        return len(words) - 1, speech_span, "estimated"
+
+    weights = [word_weight(word) for word in words]
+    target = (elapsed / speech_span) * sum(weights)
+    cumulative = 0.0
+    for index, weight in enumerate(weights):
+        cumulative += weight
+        if target <= cumulative:
+            return index, speech_span, "estimated"
+    return len(words) - 1, speech_span, "estimated"
+
+
+def line_hold_tail(speech_span, next_time, current_time, timing_mode):
+    available_span = max(0.0, float(next_time or 0) - float(current_time or 0))
+    if timing_mode == "timed":
+        return 0.95
+    if available_span <= speech_span + 1.2:
+        return 0.0
+    return max(0.75, min(2.2, available_span * 0.12))
+
+
+def emit(payload):
+    print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+
+
+def lead_from_args(args):
+    lead = DEFAULT_POSITION_LEAD_SECONDS
+    for index, arg in enumerate(args):
+        if arg == "--lead" and index + 1 < len(args):
+            try:
+                lead = float(args[index + 1])
+            except Exception:
+                pass
+        elif arg.startswith("--lead="):
+            try:
+                lead = float(arg.split("=", 1)[1])
+            except Exception:
+                pass
+    return max(-3.0, min(3.0, lead))
+
+
+def status(args=None):
+    args = args or []
+    position_lead = lead_from_args(args)
+    player = pick_player()
+    meta = player_meta(player)
+    if not player or not meta.get("title"):
+        emit({"ok": False, "reason": "no-player", "words": []})
+        return 0
+
+    cached = load_cache(meta)
+    if cached is None:
+        data = fetch_lrclib(meta)
+        write_cache(meta, data)
+    else:
+        data = cached.get("data", {})
+
+    if not data.get("ok"):
+        emit({
+            "ok": False,
+            "reason": data.get("reason", "no-lyrics"),
+            "error": data.get("error", ""),
+            "title": meta.get("title", ""),
+            "artist": meta.get("artist", ""),
+            "player": player,
+            "position": meta.get("position", 0),
+            "duration": meta.get("duration", 0),
+            "words": [],
+        })
+        return 0
+
+    lines = parse_lrc(data.get("syncedLyrics", ""))
+    timing_source = "synced"
+    if not lines and data.get("plainLyrics"):
+        lines = parse_plain_lyrics(data.get("plainLyrics", ""), meta.get("duration", 0))
+        timing_source = "plain-estimated"
+
+    if not lines:
+        emit({
+            "ok": False,
+            "reason": "no-lyrics",
+            "title": meta.get("title", ""),
+            "artist": meta.get("artist", ""),
+            "player": player,
+            "position": meta.get("position", 0),
+            "duration": meta.get("duration", 0),
+            "words": [],
+        })
+        return 0
+
+    effective_lead = position_lead
+    if timing_source != "synced" and abs(position_lead - DEFAULT_POSITION_LEAD_SECONDS) <= DEFAULT_LEAD_EPSILON_SECONDS:
+        effective_lead = 0.0
+    render_position = max(0.0, meta.get("position", 0) + effective_lead)
+    current, next_line = current_line(lines, render_position)
+
+    if current is None:
+        emit({
+            "ok": False,
+            "reason": "waiting-for-line",
+            "title": meta.get("title", ""),
+            "artist": meta.get("artist", ""),
+            "player": player,
+            "position": meta.get("position", 0),
+            "duration": meta.get("duration", 0),
+            "words": [],
+        })
+        return 0
+
+    words = split_words(current["text"])
+    if not words:
+        emit({"ok": False, "reason": "empty-line", "words": []})
+        return 0
+
+    next_time = next_line["time"] if next_line else max(current["time"] + 4.0, meta.get("duration", 0))
+    active_index, speech_span, timing_mode = active_word_index(words, current, next_time, render_position)
+    speech_end_time = current["time"] + speech_span
+    hold_tail = line_hold_tail(speech_span, next_time, current["time"], timing_mode)
+    if timing_source == "synced" and hold_tail > 0 and render_position > speech_end_time + hold_tail:
+        emit({
+            "ok": False,
+            "reason": "between-lines",
+            "source": data.get("source", "lrclib"),
+            "title": meta.get("title", ""),
+            "artist": meta.get("artist", ""),
+            "player": player,
+            "position": meta.get("position", 0),
+            "renderPosition": render_position,
+            "duration": meta.get("duration", 0),
+            "lineTime": current["time"],
+            "nextLineTime": next_time,
+            "speechEndTime": speech_end_time,
+            "timingMode": timing_mode,
+            "latencyLead": effective_lead,
+            "requestedLatencyLead": position_lead,
+            "words": [],
+        })
+        return 0
+
+    emit({
+        "ok": True,
+        "source": data.get("source", "lrclib") if timing_source == "synced" else (data.get("source", "lrclib") + "-plain"),
+        "matchTitle": data.get("matchTitle", ""),
+        "matchArtist": data.get("matchArtist", ""),
+        "matchAlbum": data.get("matchAlbum", ""),
+        "matchDuration": data.get("matchDuration", 0),
+        "matchScore": data.get("matchScore", 0),
+        "hasSyncedLyrics": bool(data.get("syncedLyrics")),
+        "hasPlainLyrics": bool(data.get("plainLyrics")),
+        "title": meta.get("title", ""),
+        "artist": meta.get("artist", ""),
+        "player": player,
+        "status": meta.get("status", ""),
+        "position": meta.get("position", 0),
+        "renderPosition": render_position,
+        "duration": meta.get("duration", 0),
+        "line": current["text"],
+        "words": words,
+        "activeIndex": active_index,
+        "lineTime": current["time"],
+        "nextLineTime": next_time,
+        "speechEndTime": speech_end_time,
+        "timingMode": timing_mode if timing_source == "synced" else "plain-estimated",
+        "latencyLead": effective_lead,
+        "requestedLatencyLead": position_lead,
+    })
+    return 0
+
+
+def main():
+    command = sys.argv[1] if len(sys.argv) > 1 else "status"
+    if command == "status":
+        return status(sys.argv[2:])
+    if command == "clear-cache":
+        if os.path.isdir(CACHE_ROOT):
+            for name in os.listdir(CACHE_ROOT):
+                if name.endswith(".json"):
+                    try:
+                        os.unlink(os.path.join(CACHE_ROOT, name))
+                    except Exception:
+                        pass
+        emit({"ok": True, "cleared": True})
+        return 0
+    print("usage: velora-lyrics-state status|clear-cache", file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

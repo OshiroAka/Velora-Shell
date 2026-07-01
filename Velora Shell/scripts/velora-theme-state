@@ -16,12 +16,20 @@ visualizer_pixel_size_file="${state_dir}/visualizer-pixel-size"
 visualizer_gradient_file="${state_dir}/visualizer-gradient"
 screen_visualizer_file="${state_dir}/screen-visualizer"
 topbar_file="${state_dir}/topbar"
+topbar_frame_line_file="${state_dir}/topbar-frame-line"
 popup_attach_file="${state_dir}/popup-attach"
 popup_bubbles_file="${state_dir}/popup-bubbles"
 wallpaper_transition_file="${state_dir}/wallpaper-transition"
+lyrics_file="${state_dir}/lyrics"
+lyrics_cinematic_file="${state_dir}/lyrics-cinematic"
+lyrics_mask_file="${state_dir}/lyrics-mask"
+lyrics_blocks_file="${state_dir}/lyrics-blocks"
+lyrics_transform_file="${state_dir}/lyrics-transform"
+lyrics_material_file="${state_dir}/lyrics-material"
 bar_labels_file="${state_dir}/bar-labels"
 bar_blur_file="${state_dir}/bar-blur"
 frame_blur_file="${state_dir}/frame-blur"
+bar_appearance_file="${state_dir}/bar-appearance"
 profile_image_file="${state_dir}/profile-image"
 command="${1:-get}"
 
@@ -95,6 +103,118 @@ normalize_wallpaper_transition() {
   esac
 }
 
+normalize_lyrics_color_mode() {
+  case "${1:-pywal}" in
+    palette|wallpaper|dynamic|colors)
+      printf 'palette\n'
+      ;;
+    manual|custom|color)
+      printf 'manual\n'
+      ;;
+    *)
+      printf 'pywal\n'
+      ;;
+  esac
+}
+
+normalize_lyrics_layout() {
+  case "${1:-vertical}" in
+    simple|single|plain)
+      printf 'simple\n'
+      ;;
+    cascade|stack|centered)
+      printf '%s\n' "$1"
+      ;;
+    two|twolyrics|two-lyrics|split|double|duo)
+      printf 'two\n'
+      ;;
+    four|fourlyrics|four-lyrics|quad)
+      printf 'four\n'
+      ;;
+    *)
+      printf 'vertical\n'
+      ;;
+  esac
+}
+
+normalize_lyrics_animation() {
+  case "${1:-instant}" in
+    fade|slide)
+      printf '%s\n' "$1"
+      ;;
+    *)
+      printf 'instant\n'
+      ;;
+  esac
+}
+
+normalize_lyrics_reveal() {
+  case "${1:-progressive}" in
+    line|full|complete|all)
+      printf 'line\n'
+      ;;
+    current|word|active)
+      printf 'current\n'
+      ;;
+    *)
+      printf 'progressive\n'
+      ;;
+  esac
+}
+
+normalize_lyrics_material_mode() {
+  case "${1:-off}" in
+    off|none|disable|disabled)
+      printf 'off\n'
+      ;;
+    cloud|fog|mist|soft)
+      printf 'cloud\n'
+      ;;
+    glass|frost|frosted)
+      printf 'glass\n'
+      ;;
+    metal|silver|chrome)
+      printf 'metal\n'
+      ;;
+    sky|ambient|atmosphere)
+      printf 'sky\n'
+      ;;
+    *)
+      printf 'off\n'
+      ;;
+  esac
+}
+
+normalize_hex_color() {
+  local value="${1:-#f5f7ff}"
+  value="${value//$'\n'/}"
+  value="${value//$'\r'/}"
+  value="${value//$'\t'/}"
+  value="${value// /}"
+  [[ "$value" != \#* ]] && value="#$value"
+  if [[ "$value" =~ ^#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$ ]]; then
+    printf '%s\n' "$value"
+  else
+    printf '#f5f7ff\n'
+  fi
+}
+
+sanitize_json_array() {
+  local value="${1:-[]}"
+  value="${value//$'\n'/}"
+  value="${value//$'\r'/}"
+  value="${value//$'\t'/}"
+  if ((${#value} > 180000)); then
+    printf '[]\n'
+    return
+  fi
+  if [[ "$value" == \[*\] ]]; then
+    printf '%s\n' "$value"
+  else
+    printf '[]\n'
+  fi
+}
+
 clamp_decimal() {
   local value="${1:-}"
   local fallback="${2:-0}"
@@ -103,7 +223,7 @@ clamp_decimal() {
 
   awk -v value="$value" -v fallback="$fallback" -v min="$min" -v max="$max" '
     BEGIN {
-      if (value !~ /^[0-9]+([.][0-9]+)?$/)
+      if (value !~ /^-?[0-9]+([.][0-9]+)?$/)
         value = fallback
       value += 0
       if (value < min)
@@ -113,6 +233,77 @@ clamp_decimal() {
       printf "%.2f\n", value
     }
   '
+}
+
+read_lyrics_mask_settings() {
+  local config="off|56.00|[]"
+  local enabled
+  local brush_size
+  local mask_data
+
+  [[ -s "$lyrics_mask_file" ]] && config="$(cat "$lyrics_mask_file")"
+  IFS='|' read -r enabled brush_size mask_data <<< "$config"
+  enabled="$(normalize_on_off "${enabled:-off}")"
+  brush_size="$(clamp_decimal "${brush_size:-56}" "56" "6" "180")"
+  mask_data="$(sanitize_json_array "${mask_data:-[]}")"
+  printf '%s|%s|%s\n' "$enabled" "$brush_size" "$mask_data"
+}
+
+read_lyrics_blocks_settings() {
+  local config="8.00|58.00|72.00|58.00|[]"
+  local -a parts
+  local pos3_x
+  local pos3_y
+  local pos4_x
+  local pos4_y
+  local styles
+
+  [[ -s "$lyrics_blocks_file" ]] && config="$(cat "$lyrics_blocks_file")"
+  IFS='|' read -r -a parts <<< "$config"
+  pos3_x="$(clamp_decimal "${parts[0]:-8}" "8" "0" "100")"
+  pos3_y="$(clamp_decimal "${parts[1]:-58}" "58" "0" "100")"
+  pos4_x="$(clamp_decimal "${parts[2]:-72}" "72" "0" "100")"
+  pos4_y="$(clamp_decimal "${parts[3]:-58}" "58" "0" "100")"
+  styles="$(sanitize_json_array "${parts[*]:4}")"
+  printf '%s|%s|%s|%s|%s\n' "$pos3_x" "$pos3_y" "$pos4_x" "$pos4_y" "$styles"
+}
+
+read_lyrics_transform_settings() {
+  local config="1.00|0.00|0.00|0.00"
+  local scale
+  local rotation
+  local tilt_x
+  local tilt_y
+
+  [[ -s "$lyrics_transform_file" ]] && config="$(cat "$lyrics_transform_file")"
+  IFS='|' read -r scale rotation tilt_x tilt_y <<< "$config"
+  scale="$(clamp_decimal "${scale:-1}" "1" "0.35" "2.50")"
+  rotation="$(clamp_decimal "${rotation:-0}" "0" "-60" "60")"
+  tilt_x="$(clamp_decimal "${tilt_x:-0}" "0" "-70" "70")"
+  tilt_y="$(clamp_decimal "${tilt_y:-0}" "0" "-70" "70")"
+  printf '%s|%s|%s|%s\n' "$scale" "$rotation" "$tilt_x" "$tilt_y"
+}
+
+read_lyrics_material_settings() {
+  local config="off|0.55|off|0.45|off|0.35|0.00"
+  local mode
+  local intensity
+  local depth_enabled
+  local depth_intensity
+  local fog_enabled
+  local fog_intensity
+  local mask_feather
+
+  [[ -s "$lyrics_material_file" ]] && config="$(cat "$lyrics_material_file")"
+  IFS='|' read -r mode intensity depth_enabled depth_intensity fog_enabled fog_intensity mask_feather <<< "$config"
+  mode="$(normalize_lyrics_material_mode "${mode:-off}")"
+  intensity="$(clamp_decimal "${intensity:-0.55}" "0.55" "0" "1.00")"
+  depth_enabled="$(normalize_on_off "${depth_enabled:-off}")"
+  depth_intensity="$(clamp_decimal "${depth_intensity:-0.45}" "0.45" "0" "1.00")"
+  fog_enabled="$(normalize_on_off "${fog_enabled:-off}")"
+  fog_intensity="$(clamp_decimal "${fog_intensity:-0.35}" "0.35" "0" "1.00")"
+  mask_feather="$(clamp_decimal "${mask_feather:-0}" "0" "0" "80")"
+  printf '%s|%s|%s|%s|%s|%s|%s\n' "$mode" "$intensity" "$depth_enabled" "$depth_intensity" "$fog_enabled" "$fog_intensity" "$mask_feather"
 }
 
 read_wallpaper_transition() {
@@ -127,6 +318,101 @@ read_wallpaper_transition() {
   duration="$(clamp_decimal "${duration:-1.00}" "1.00" "0.15" "3.00")"
   delay="$(clamp_decimal "${delay:-0.12}" "0.12" "0" "0.80")"
   printf '%s|%s|%s\n' "$transition" "$duration" "$delay"
+}
+
+read_bar_appearance() {
+  local config="48.00|0.80|16.00|off|16.00"
+  local icon_size
+  local icon_opacity
+  local icon_spacing
+  local auto_hide
+  local corner_radius
+
+  [[ -s "$bar_appearance_file" ]] && config="$(cat "$bar_appearance_file")"
+  IFS='|' read -r icon_size icon_opacity icon_spacing auto_hide corner_radius <<< "$config"
+  icon_size="$(clamp_decimal "${icon_size:-48}" "48" "32" "56")"
+  icon_opacity="$(clamp_decimal "${icon_opacity:-0.80}" "0.80" "0.30" "1.00")"
+  icon_spacing="$(clamp_decimal "${icon_spacing:-16}" "16" "8" "24")"
+  auto_hide="$(normalize_on_off "${auto_hide:-off}")"
+  corner_radius="$(clamp_decimal "${corner_radius:-16}" "16" "0" "30")"
+  printf '%s|%s|%s|%s|%s\n' "$icon_size" "$icon_opacity" "$icon_spacing" "$auto_hide" "$corner_radius"
+}
+
+read_lyrics_settings() {
+  local config="off|18.00|44.00|pywal|#f5f7ff|86.00|0.86|8.00|on|on|vertical|instant|on|progressive|74.00|18.00|460.00|on|5.00|glow|on|0.45"
+  local -a parts
+  local enabled
+  local pos_x
+  local pos_y
+  local color_mode
+  local manual_color
+  local font_size
+  local opacity
+  local spacing
+  local shadow
+  local uppercase
+  local layout
+  local animation
+  local active_word
+  local reveal_mode
+  local pos2_x
+  local pos2_y
+  local sync_offset
+  local float_enabled
+  local float_intensity
+  local glow_enabled
+  local glow_intensity
+
+  [[ -s "$lyrics_file" ]] && config="$(cat "$lyrics_file")"
+  IFS='|' read -r -a parts <<< "$config"
+  enabled="${parts[0]:-off}"
+  pos_x="${parts[1]:-18}"
+  pos_y="${parts[2]:-44}"
+  color_mode="${parts[3]:-pywal}"
+  manual_color="${parts[4]:-#f5f7ff}"
+  font_size="${parts[5]:-86}"
+  opacity="${parts[6]:-0.86}"
+  spacing="${parts[7]:-8}"
+  shadow="${parts[8]:-on}"
+  uppercase="${parts[9]:-on}"
+  layout="${parts[10]:-vertical}"
+  animation="${parts[11]:-instant}"
+  active_word="${parts[12]:-on}"
+  reveal_mode="${parts[13]:-progressive}"
+  pos2_x="${parts[14]:-74}"
+  pos2_y="${parts[15]:-18}"
+  sync_offset="${parts[16]:-460}"
+  float_enabled="${parts[17]:-on}"
+  float_intensity="${parts[18]:-5}"
+  if [[ "${parts[19]:-}" == "glow" ]]; then
+    glow_enabled="${parts[20]:-on}"
+    glow_intensity="${parts[21]:-0.45}"
+  else
+    glow_enabled="on"
+    glow_intensity="0.45"
+  fi
+  enabled="$(normalize_on_off "${enabled:-off}")"
+  pos_x="$(clamp_decimal "${pos_x:-18}" "18" "0" "100")"
+  pos_y="$(clamp_decimal "${pos_y:-44}" "44" "0" "100")"
+  color_mode="$(normalize_lyrics_color_mode "${color_mode:-pywal}")"
+  manual_color="$(normalize_hex_color "${manual_color:-#f5f7ff}")"
+  font_size="$(clamp_decimal "${font_size:-86}" "86" "24" "180")"
+  opacity="$(clamp_decimal "${opacity:-0.86}" "0.86" "0.15" "1.00")"
+  spacing="$(clamp_decimal "${spacing:-8}" "8" "0" "48")"
+  shadow="$(normalize_on_off "${shadow:-on}")"
+  uppercase="$(normalize_on_off "${uppercase:-on}")"
+  layout="$(normalize_lyrics_layout "${layout:-vertical}")"
+  animation="$(normalize_lyrics_animation "${animation:-instant}")"
+  active_word="$(normalize_on_off "${active_word:-on}")"
+  reveal_mode="$(normalize_lyrics_reveal "${reveal_mode:-progressive}")"
+  pos2_x="$(clamp_decimal "${pos2_x:-74}" "74" "0" "100")"
+  pos2_y="$(clamp_decimal "${pos2_y:-18}" "18" "0" "100")"
+  sync_offset="$(clamp_decimal "${sync_offset:-460}" "460" "-3000" "3000")"
+  float_enabled="$(normalize_on_off "${float_enabled:-on}")"
+  float_intensity="$(clamp_decimal "${float_intensity:-5}" "5" "0" "24")"
+  glow_enabled="$(normalize_on_off "${glow_enabled:-on}")"
+  glow_intensity="$(clamp_decimal "${glow_intensity:-0.45}" "0.45" "0" "1.00")"
+  printf '%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|glow|%s|%s\n' "$enabled" "$pos_x" "$pos_y" "$color_mode" "$manual_color" "$font_size" "$opacity" "$spacing" "$shadow" "$uppercase" "$layout" "$animation" "$active_word" "$reveal_mode" "$pos2_x" "$pos2_y" "$sync_offset" "$float_enabled" "$float_intensity" "$glow_enabled" "$glow_intensity"
 }
 
 case "$command" in
@@ -152,13 +438,21 @@ case "$command" in
     visualizer_gradient="on"
     screen_visualizer="off"
     topbar="off"
+    topbar_frame_line="on"
     popup_attach="on"
     popup_bubbles="matched"
     bar_labels="on"
     bar_blur="on"
     frame_blur="on"
+    bar_appearance="$(read_bar_appearance)"
     profile_image=""
     wallpaper_transition="$(read_wallpaper_transition)"
+    lyrics="$(read_lyrics_settings)"
+    lyrics_cinematic="on"
+    lyrics_mask="$(read_lyrics_mask_settings)"
+    lyrics_blocks="$(read_lyrics_blocks_settings)"
+    lyrics_transform="$(read_lyrics_transform_settings)"
+    lyrics_material="$(read_lyrics_material_settings)"
 
     [[ -s "$state_file" ]] && theme="$(cat "$state_file")"
     [[ -s "$opacity_file" ]] && opacity="$(cat "$opacity_file")"
@@ -174,12 +468,14 @@ case "$command" in
     [[ -s "$visualizer_gradient_file" ]] && visualizer_gradient="$(normalize_on_off "$(cat "$visualizer_gradient_file")")"
     [[ -s "$screen_visualizer_file" ]] && screen_visualizer="$(normalize_on_off "$(cat "$screen_visualizer_file")")"
     [[ -s "$topbar_file" ]] && topbar="$(cat "$topbar_file")"
+    [[ -s "$topbar_frame_line_file" ]] && topbar_frame_line="$(normalize_on_off "$(cat "$topbar_frame_line_file")")"
     [[ -s "$popup_attach_file" ]] && popup_attach="$(normalize_on_off "$(cat "$popup_attach_file")")"
     [[ -s "$popup_bubbles_file" ]] && popup_bubbles="$(normalize_popup_bubbles "$(cat "$popup_bubbles_file")")"
     [[ -s "$bar_labels_file" ]] && bar_labels="$(normalize_on_off "$(cat "$bar_labels_file")")"
     [[ -s "$bar_blur_file" ]] && bar_blur="$(normalize_on_off "$(cat "$bar_blur_file")")"
     [[ -s "$frame_blur_file" ]] && frame_blur="$(normalize_on_off "$(cat "$frame_blur_file")")"
     [[ -s "$profile_image_file" ]] && profile_image="$(cat "$profile_image_file")"
+    [[ -s "$lyrics_cinematic_file" ]] && lyrics_cinematic="$(normalize_on_off "$(cat "$lyrics_cinematic_file")")"
 
     printf 'theme|%s\n' "$theme"
     printf 'opacity|%s\n' "$opacity"
@@ -195,13 +491,21 @@ case "$command" in
     printf 'visualizerGradient|%s\n' "$visualizer_gradient"
     printf 'screenVisualizer|%s\n' "$screen_visualizer"
     printf 'topBar|%s\n' "$topbar"
+    printf 'topBarFrameLine|%s\n' "$topbar_frame_line"
     printf 'popupAttach|%s\n' "$popup_attach"
     printf 'popupBubbles|%s\n' "$popup_bubbles"
     printf 'barLabels|%s\n' "$bar_labels"
     printf 'barBlur|%s\n' "$bar_blur"
     printf 'frameBlur|%s\n' "$frame_blur"
+    printf 'barAppearance|%s\n' "$bar_appearance"
     printf 'profileImage|%s\n' "$profile_image"
     printf 'wallpaperTransition|%s\n' "$wallpaper_transition"
+    printf 'lyrics|%s\n' "$lyrics"
+    printf 'lyricsCinematic|%s\n' "$lyrics_cinematic"
+    printf 'lyricsMask|%s\n' "$lyrics_mask"
+    printf 'lyricsBlocks|%s\n' "$lyrics_blocks"
+    printf 'lyricsTransform|%s\n' "$lyrics_transform"
+    printf 'lyricsMaterial|%s\n' "$lyrics_material"
     ;;
   set)
     theme="${2:-default}"
@@ -646,6 +950,30 @@ case "$command" in
         ;;
     esac
     ;;
+  bar-appearance)
+    subcommand="${2:-get}"
+    case "$subcommand" in
+      get)
+        read_bar_appearance
+        ;;
+      set)
+        icon_size="$(clamp_decimal "${3:-48}" "48" "32" "56")"
+        icon_opacity="$(clamp_decimal "${4:-0.80}" "0.80" "0.30" "1.00")"
+        icon_spacing="$(clamp_decimal "${5:-16}" "16" "8" "24")"
+        auto_hide="$(normalize_on_off "${6:-off}")"
+        corner_radius="$(clamp_decimal "${7:-16}" "16" "0" "30")"
+        mkdir -p "$state_dir"
+        printf '%s|%s|%s|%s|%s\n' "$icon_size" "$icon_opacity" "$icon_spacing" "$auto_hide" "$corner_radius" > "$bar_appearance_file"
+        ;;
+      reset)
+        rm -f "$bar_appearance_file"
+        ;;
+      *)
+        printf 'usage: %s bar-appearance get|set|reset [icon_size icon_opacity icon_spacing auto_hide corner_radius]\n' "$0" >&2
+        exit 2
+        ;;
+    esac
+    ;;
   profile-image)
     subcommand="${2:-get}"
     case "$subcommand" in
@@ -699,6 +1027,194 @@ case "$command" in
         ;;
     esac
     ;;
+  topbar-frame-line)
+    subcommand="${2:-get}"
+    case "$subcommand" in
+      get)
+        if [[ -s "$topbar_frame_line_file" ]]; then
+          normalize_on_off "$(cat "$topbar_frame_line_file")"
+        else
+          printf 'on\n'
+        fi
+        ;;
+      set)
+        enabled="$(normalize_on_off "${3:-on}")"
+        mkdir -p "$state_dir"
+        printf '%s\n' "$enabled" > "$topbar_frame_line_file"
+        ;;
+      reset)
+        rm -f "$topbar_frame_line_file"
+        ;;
+      *)
+        printf 'usage: %s topbar-frame-line get|set|reset [on|off]\n' "$0" >&2
+        exit 2
+        ;;
+    esac
+    ;;
+  lyrics)
+    subcommand="${2:-get}"
+    case "$subcommand" in
+      get)
+        read_lyrics_settings
+        ;;
+      set)
+        enabled="$(normalize_on_off "${3:-off}")"
+        pos_x="$(clamp_decimal "${4:-18}" "18" "0" "100")"
+        pos_y="$(clamp_decimal "${5:-44}" "44" "0" "100")"
+        color_mode="$(normalize_lyrics_color_mode "${6:-pywal}")"
+        manual_color="$(normalize_hex_color "${7:-#f5f7ff}")"
+        font_size="$(clamp_decimal "${8:-86}" "86" "24" "180")"
+        opacity="$(clamp_decimal "${9:-0.86}" "0.86" "0.15" "1.00")"
+        spacing="$(clamp_decimal "${10:-8}" "8" "0" "48")"
+        shadow="$(normalize_on_off "${11:-on}")"
+        uppercase="$(normalize_on_off "${12:-on}")"
+        layout="$(normalize_lyrics_layout "${13:-vertical}")"
+        animation="$(normalize_lyrics_animation "${14:-instant}")"
+        active_word="$(normalize_on_off "${15:-on}")"
+        reveal_mode="$(normalize_lyrics_reveal "${16:-progressive}")"
+        pos2_x="$(clamp_decimal "${17:-74}" "74" "0" "100")"
+        pos2_y="$(clamp_decimal "${18:-18}" "18" "0" "100")"
+        sync_offset="$(clamp_decimal "${19:-460}" "460" "-3000" "3000")"
+        float_enabled="$(normalize_on_off "${20:-on}")"
+        float_intensity="$(clamp_decimal "${21:-5}" "5" "0" "24")"
+        if [[ "${22:-}" == "glow" ]]; then
+          glow_enabled="$(normalize_on_off "${23:-on}")"
+          glow_intensity="$(clamp_decimal "${24:-0.45}" "0.45" "0" "1.00")"
+        else
+          glow_enabled="$(normalize_on_off "${22:-on}")"
+          glow_intensity="$(clamp_decimal "${23:-0.45}" "0.45" "0" "1.00")"
+        fi
+        mkdir -p "$state_dir"
+        printf '%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|glow|%s|%s\n' "$enabled" "$pos_x" "$pos_y" "$color_mode" "$manual_color" "$font_size" "$opacity" "$spacing" "$shadow" "$uppercase" "$layout" "$animation" "$active_word" "$reveal_mode" "$pos2_x" "$pos2_y" "$sync_offset" "$float_enabled" "$float_intensity" "$glow_enabled" "$glow_intensity" > "$lyrics_file"
+        ;;
+      reset)
+        rm -f "$lyrics_file"
+        ;;
+      *)
+        printf 'usage: %s lyrics get|set|reset [enabled x y pywal|palette|manual color font_size opacity spacing shadow uppercase layout animation active_word reveal_mode x2 y2 sync_ms(-3000..3000) float_enabled float_px glow_enabled glow_strength]\n' "$0" >&2
+        exit 2
+        ;;
+    esac
+    ;;
+  lyrics-cinematic)
+    subcommand="${2:-get}"
+    case "$subcommand" in
+      get)
+        if [[ -s "$lyrics_cinematic_file" ]]; then
+          normalize_on_off "$(cat "$lyrics_cinematic_file")"
+        else
+          printf 'on\n'
+        fi
+        ;;
+      set)
+        enabled="$(normalize_on_off "${3:-on}")"
+        mkdir -p "$state_dir"
+        printf '%s\n' "$enabled" > "$lyrics_cinematic_file"
+        ;;
+      reset)
+        rm -f "$lyrics_cinematic_file"
+        ;;
+      *)
+        printf 'usage: %s lyrics-cinematic get|set|reset [on|off]\n' "$0" >&2
+        exit 2
+        ;;
+    esac
+    ;;
+  lyrics-blocks)
+    subcommand="${2:-get}"
+    case "$subcommand" in
+      get)
+        read_lyrics_blocks_settings
+        ;;
+      set)
+        pos3_x="$(clamp_decimal "${3:-8}" "8" "0" "100")"
+        pos3_y="$(clamp_decimal "${4:-58}" "58" "0" "100")"
+        pos4_x="$(clamp_decimal "${5:-72}" "72" "0" "100")"
+        pos4_y="$(clamp_decimal "${6:-58}" "58" "0" "100")"
+        styles="$(sanitize_json_array "${7:-[]}")"
+        mkdir -p "$state_dir"
+        printf '%s|%s|%s|%s|%s\n' "$pos3_x" "$pos3_y" "$pos4_x" "$pos4_y" "$styles" > "$lyrics_blocks_file"
+        ;;
+      reset)
+        rm -f "$lyrics_blocks_file"
+        ;;
+      *)
+        printf 'usage: %s lyrics-blocks get|set|reset [x3 y3 x4 y4 styles_json]\n' "$0" >&2
+        exit 2
+        ;;
+    esac
+    ;;
+  lyrics-mask)
+    subcommand="${2:-get}"
+    case "$subcommand" in
+      get)
+        read_lyrics_mask_settings
+        ;;
+      set)
+        enabled="$(normalize_on_off "${3:-off}")"
+        brush_size="$(clamp_decimal "${4:-56}" "56" "6" "180")"
+        mask_data="$(sanitize_json_array "${5:-[]}")"
+        mkdir -p "$state_dir"
+        printf '%s|%s|%s\n' "$enabled" "$brush_size" "$mask_data" > "$lyrics_mask_file"
+        ;;
+      reset)
+        rm -f "$lyrics_mask_file"
+        ;;
+      *)
+        printf 'usage: %s lyrics-mask get|set|reset [on|off brush_px json_strokes]\n' "$0" >&2
+        exit 2
+        ;;
+    esac
+    ;;
+  lyrics-transform)
+    subcommand="${2:-get}"
+    case "$subcommand" in
+      get)
+        read_lyrics_transform_settings
+        ;;
+      set)
+        scale="$(clamp_decimal "${3:-1}" "1" "0.35" "2.50")"
+        rotation="$(clamp_decimal "${4:-0}" "0" "-60" "60")"
+        tilt_x="$(clamp_decimal "${5:-0}" "0" "-70" "70")"
+        tilt_y="$(clamp_decimal "${6:-0}" "0" "-70" "70")"
+        mkdir -p "$state_dir"
+        printf '%s|%s|%s|%s\n' "$scale" "$rotation" "$tilt_x" "$tilt_y" > "$lyrics_transform_file"
+        ;;
+      reset)
+        rm -f "$lyrics_transform_file"
+        ;;
+      *)
+        printf 'usage: %s lyrics-transform get|set|reset [scale rotation tilt_x tilt_y]\n' "$0" >&2
+        exit 2
+        ;;
+    esac
+    ;;
+  lyrics-material)
+    subcommand="${2:-get}"
+    case "$subcommand" in
+      get)
+        read_lyrics_material_settings
+        ;;
+      set)
+        mode="$(normalize_lyrics_material_mode "${3:-off}")"
+        intensity="$(clamp_decimal "${4:-0.55}" "0.55" "0" "1.00")"
+        depth_enabled="$(normalize_on_off "${5:-off}")"
+        depth_intensity="$(clamp_decimal "${6:-0.45}" "0.45" "0" "1.00")"
+        fog_enabled="$(normalize_on_off "${7:-off}")"
+        fog_intensity="$(clamp_decimal "${8:-0.35}" "0.35" "0" "1.00")"
+        mask_feather="$(clamp_decimal "${9:-0}" "0" "0" "80")"
+        mkdir -p "$state_dir"
+        printf '%s|%s|%s|%s|%s|%s|%s\n' "$mode" "$intensity" "$depth_enabled" "$depth_intensity" "$fog_enabled" "$fog_intensity" "$mask_feather" > "$lyrics_material_file"
+        ;;
+      reset)
+        rm -f "$lyrics_material_file"
+        ;;
+      *)
+        printf 'usage: %s lyrics-material get|set|reset [off|cloud|glass|metal|sky intensity depth_on depth_strength fog_on fog_strength mask_feather]\n' "$0" >&2
+        exit 2
+        ;;
+    esac
+    ;;
   wallpaper-transition)
     subcommand="${2:-get}"
     case "$subcommand" in
@@ -722,7 +1238,7 @@ case "$command" in
     esac
     ;;
   *)
-    printf 'usage: %s get|dump|set [theme] | opacity get|set|reset [sidebar popup card] | bar-opacity get|set|reset [opacity] | glow get|set|reset [general sidebar_border popup_border icon text] | border get|set|reset [adapt|manual hue] | layout get|set|reset [left|right] [0|1] | language get|set|reset [ja|en|pt-BR] | font get|set|reset [noto|adwaita|cantarell|dejavu|liberation|fantasque] | visualizer get|set|reset [strength] | visualizer-mode get|set|reset [wave|pixels] | visualizer-pixel-size get|set|reset [3-12] | visualizer-gradient get|set|reset [on|off] | popup-attach get|set|reset [on|off] | popup-bubbles get|set|reset [solid|matched] | bar-labels get|set|reset [on|off] | bar-blur get|set|reset [on|off] | frame-blur get|set|reset [on|off] | profile-image get|set|reset [path] | topbar get|set|reset [on|off] | wallpaper-transition get|set|reset [transition duration delay]\n' "$0" >&2
+    printf 'usage: %s get|dump|set [theme] | opacity get|set|reset [sidebar popup card] | bar-opacity get|set|reset [opacity] | glow get|set|reset [general sidebar_border popup_border icon text] | border get|set|reset [adapt|manual hue] | layout get|set|reset [left|right] [0|1] | language get|set|reset [ja|en|pt-BR] | font get|set|reset [noto|adwaita|cantarell|dejavu|liberation|fantasque] | visualizer get|set|reset [strength] | visualizer-mode get|set|reset [wave|pixels] | visualizer-pixel-size get|set|reset [3-12] | visualizer-gradient get|set|reset [on|off] | popup-attach get|set|reset [on|off] | popup-bubbles get|set|reset [solid|matched] | bar-labels get|set|reset [on|off] | bar-blur get|set|reset [on|off] | frame-blur get|set|reset [on|off] | bar-appearance get|set|reset [icon_size icon_opacity icon_spacing auto_hide corner_radius] | profile-image get|set|reset [path] | topbar get|set|reset [on|off] | topbar-frame-line get|set|reset [on|off] | lyrics get|set|reset [settings] | lyrics-cinematic get|set|reset [on|off] | lyrics-material get|set|reset [settings] | wallpaper-transition get|set|reset [transition duration delay]\n' "$0" >&2
     exit 2
     ;;
 esac

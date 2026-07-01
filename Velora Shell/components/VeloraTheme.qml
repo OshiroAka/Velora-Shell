@@ -54,11 +54,17 @@ QtObject {
     property string barPosition: "left"
     property bool desktopFrameEnabled: true
     property bool topBarEnabled: false
+    property bool topBarFrameLineEnabled: true
     property bool popupAttachedToBar: true
     property bool popupBubblesSolid: false
     property bool barLabelsVisible: true
     property bool barBlurEnabled: true
     property bool frameBlurEnabled: true
+    property real barIconSize: 48
+    property real barIconOpacity: 0.80
+    property real barIconSpacing: 16
+    property bool barAutoHideEnabled: false
+    property real barCornerRadius: 16
     property string profileImagePath: ""
     property string language: "pt-BR"
     property string fontFamilyId: "noto"
@@ -80,6 +86,54 @@ QtObject {
     property real visualizerPixelSize: 7
     property bool visualizerGradientEnabled: true
     property bool screenVisualizerEnabled: false
+    property bool lyricsEnabled: false
+    property real lyricsPositionX: 18
+    property real lyricsPositionY: 44
+    property real lyricsSecondPositionX: 74
+    property real lyricsSecondPositionY: 18
+    property real lyricsThirdPositionX: 8
+    property real lyricsThirdPositionY: 58
+    property real lyricsFourthPositionX: 72
+    property real lyricsFourthPositionY: 58
+    property string lyricsColorMode: "pywal"
+    property string lyricsManualColor: "#f5f7ff"
+    property color lyricsPywalColor: "#e8a6c8"
+    property var lyricsPalette: ["#e8a6c8", "#c894f2", "#a8d8ff"]
+    property real lyricsFontSize: 86
+    property real lyricsOpacity: 0.86
+    property real lyricsWordSpacing: 8
+    property bool lyricsShadowEnabled: true
+    property bool lyricsUppercase: true
+    property string lyricsLayoutMode: "vertical"
+    property string lyricsAnimationMode: "instant"
+    property bool lyricsActiveWordEnabled: true
+    property string lyricsRevealMode: "progressive"
+    property real lyricsSyncOffsetMs: 460
+    property bool lyricsFloatEnabled: true
+    property real lyricsFloatIntensity: 5
+    property bool lyricsGlowEnabled: true
+    property real lyricsGlowIntensity: 0.45
+    property bool lyricsCinematicEnabled: true
+    property real lyricsScale: 1
+    property real lyricsRotation: 0
+    property real lyricsTiltX: 0
+    property real lyricsTiltY: 0
+    property string lyricsMaterialMode: "off"
+    property real lyricsMaterialIntensity: 0.55
+    property bool lyricsDepthEnabled: false
+    property real lyricsDepthIntensity: 0.45
+    property bool lyricsFogEnabled: false
+    property real lyricsFogIntensity: 0.35
+    property real lyricsMaskFeather: 0
+    property bool lyricsMaskEnabled: false
+    property real lyricsMaskBrushSize: 56
+    property string lyricsMaskData: "[]"
+    property var lyricsMaskStrokes: []
+    property bool lyricsMaskHasStrokes: false
+    property int lyricsMaskRevision: 0
+    property string lyricsBlockStyleData: "[]"
+    property var lyricsBlockStyles: []
+    property int lyricsBlockStyleRevision: 0
 
     property color surfaceBase: Qt.rgba(255 / 255, 250 / 255, 254 / 255, 0.86)
     property color surfaceSidebar: Qt.rgba(255 / 255, 247 / 255, 253 / 255, 0.88)
@@ -152,6 +206,7 @@ QtObject {
     Behavior on accentPrimary { enabled: root.paletteBehaviorEnabled; ColorAnimation { duration: root.paletteTransitionDuration; easing.type: Easing.OutCubic } }
     Behavior on accentSecondary { enabled: root.paletteBehaviorEnabled; ColorAnimation { duration: root.paletteTransitionDuration; easing.type: Easing.OutCubic } }
     Behavior on accentTertiary { enabled: root.paletteBehaviorEnabled; ColorAnimation { duration: root.paletteTransitionDuration; easing.type: Easing.OutCubic } }
+    Behavior on lyricsPywalColor { enabled: root.paletteBehaviorEnabled; ColorAnimation { duration: root.paletteTransitionDuration; easing.type: Easing.OutCubic } }
     Behavior on borderSoft { enabled: root.paletteBehaviorEnabled; ColorAnimation { duration: root.paletteTransitionDuration; easing.type: Easing.OutCubic } }
     Behavior on borderActive { enabled: root.paletteBehaviorEnabled; ColorAnimation { duration: root.paletteTransitionDuration; easing.type: Easing.OutCubic } }
     Behavior on borderGlow { enabled: root.paletteBehaviorEnabled; ColorAnimation { duration: root.paletteTransitionDuration; easing.type: Easing.OutCubic } }
@@ -310,6 +365,279 @@ QtObject {
         if (isNaN(n))
             return visualizerPixelSize
         return Math.max(3, Math.min(12, n))
+    }
+
+    function clampLyricsPercent(value, fallback) {
+        const n = Number(value)
+        if (isNaN(n))
+            return fallback
+        return Math.max(0, Math.min(100, n))
+    }
+
+    function clampLyricsFontSize(value) {
+        const n = Number(value)
+        if (isNaN(n))
+            return lyricsFontSize
+        return Math.max(24, Math.min(180, n))
+    }
+
+    function clampLyricsOpacity(value) {
+        const n = Number(value)
+        if (isNaN(n))
+            return lyricsOpacity
+        return Math.max(0.15, Math.min(1.0, n))
+    }
+
+    function clampLyricsWordSpacing(value) {
+        const n = Number(value)
+        if (isNaN(n))
+            return lyricsWordSpacing
+        return Math.max(0, Math.min(48, n))
+    }
+
+    function clampLyricsSyncOffset(value) {
+        const n = Number(value)
+        if (isNaN(n))
+            return lyricsSyncOffsetMs
+        return Math.max(-3000, Math.min(3000, n))
+    }
+
+    function clampLyricsFloatIntensity(value) {
+        const n = Number(value)
+        if (isNaN(n))
+            return lyricsFloatIntensity
+        return Math.max(0, Math.min(24, n))
+    }
+
+    function clampLyricsGlowIntensity(value) {
+        const n = Number(value)
+        if (isNaN(n))
+            return lyricsGlowIntensity
+        return Math.max(0, Math.min(1, n))
+    }
+
+    function clampLyricsScale(value) {
+        const n = Number(value)
+        if (isNaN(n))
+            return lyricsScale
+        return Math.max(0.35, Math.min(2.50, n))
+    }
+
+    function clampLyricsRotation(value) {
+        const n = Number(value)
+        if (isNaN(n))
+            return lyricsRotation
+        return Math.max(-60, Math.min(60, n))
+    }
+
+    function clampLyricsTransformAngle(value, fallback) {
+        const n = Number(value)
+        if (isNaN(n))
+            return fallback
+        return Math.max(-70, Math.min(70, n))
+    }
+
+    function clampLyricsMaskBrushSize(value) {
+        const n = Number(value)
+        if (isNaN(n))
+            return lyricsMaskBrushSize
+        return Math.max(6, Math.min(180, n))
+    }
+
+    function clampLyricsMaterialIntensity(value, fallback) {
+        const n = Number(value)
+        if (isNaN(n))
+            return fallback
+        return Math.max(0, Math.min(1, n))
+    }
+
+    function clampLyricsMaskFeather(value) {
+        const n = Number(value)
+        if (isNaN(n))
+            return lyricsMaskFeather
+        return Math.max(0, Math.min(80, n))
+    }
+
+    function sanitizedLyricsMaskPayload(value) {
+        const maxStrokes = 14
+        const maxPointsPerStroke = 140
+        let raw = value
+        if (raw === undefined || raw === null || raw === "")
+            raw = []
+        let parsed = []
+        try {
+            parsed = typeof raw === "string" ? JSON.parse(raw) : raw
+        } catch (e) {
+            parsed = []
+        }
+        if (!Array.isArray(parsed))
+            parsed = []
+
+        const result = []
+        const firstStroke = Math.max(0, parsed.length - maxStrokes)
+        for (let i = firstStroke; i < parsed.length; i += 1) {
+            const stroke = parsed[i] || {}
+            const sourcePoints = Array.isArray(stroke.points) ? stroke.points : []
+            const points = []
+            const step = Math.max(1, Math.ceil(sourcePoints.length / maxPointsPerStroke))
+            for (let p = 0; p < sourcePoints.length; p += step) {
+                const point = sourcePoints[p] || {}
+                const px = Array.isArray(point) ? point[0] : point.x
+                const py = Array.isArray(point) ? point[1] : point.y
+                const x = Math.max(0, Math.min(1, Number(px)))
+                const y = Math.max(0, Math.min(1, Number(py)))
+                if (!isNaN(x) && !isNaN(y))
+                    points.push({ x: x, y: y })
+            }
+            if (sourcePoints.length > 1 && points.length > 0) {
+                const point = sourcePoints[sourcePoints.length - 1] || {}
+                const px = Array.isArray(point) ? point[0] : point.x
+                const py = Array.isArray(point) ? point[1] : point.y
+                const x = Math.max(0, Math.min(1, Number(px)))
+                const y = Math.max(0, Math.min(1, Number(py)))
+                const previous = points[points.length - 1]
+                if (!isNaN(x) && !isNaN(y) && (Math.abs(previous.x - x) > 0.000001 || Math.abs(previous.y - y) > 0.000001))
+                    points.push({ x: x, y: y })
+            }
+            if (points.length > 1)
+                result.push({ brush: clampLyricsMaskBrushSize(stroke.brush), points: points })
+        }
+
+        return JSON.stringify(result)
+    }
+
+    function sanitizedLyricsBlockStylePayload(value) {
+        let parsed = []
+        try {
+            parsed = typeof value === "string" ? JSON.parse(value || "[]") : value
+        } catch (e) {
+            parsed = []
+        }
+        if (!Array.isArray(parsed))
+            parsed = []
+
+        const result = []
+        for (let i = 0; i < Math.min(4, parsed.length); i += 1) {
+            const item = parsed[i] || {}
+            result.push({
+                colorMode: normalizeLyricsBlockColorMode(item.colorMode),
+                manualColor: normalizeLyricsManualColor(item.manualColor || lyricsManualColor),
+                glowMode: normalizeLyricsBlockGlowMode(item.glowMode),
+                glowIntensity: clampLyricsGlowIntensity(item.glowIntensity === undefined ? lyricsGlowIntensity : item.glowIntensity)
+            })
+        }
+        return JSON.stringify(result)
+    }
+
+    function lyricsBlockStyle(blockIndex) {
+        const index = Math.max(0, Math.min(3, Number(blockIndex) || 0))
+        const style = Array.isArray(lyricsBlockStyles) && lyricsBlockStyles.length > index ? lyricsBlockStyles[index] : null
+        return style && typeof style === "object" ? style : ({})
+    }
+
+    function lyricsBlockColorMode(blockIndex) {
+        return normalizeLyricsBlockColorMode(lyricsBlockStyle(blockIndex).colorMode)
+    }
+
+    function lyricsBlockManualColor(blockIndex) {
+        return normalizeLyricsManualColor(lyricsBlockStyle(blockIndex).manualColor || lyricsManualColor)
+    }
+
+    function lyricsBlockGlowMode(blockIndex) {
+        return normalizeLyricsBlockGlowMode(lyricsBlockStyle(blockIndex).glowMode)
+    }
+
+    function lyricsBlockGlowEnabled(blockIndex) {
+        const mode = lyricsBlockGlowMode(blockIndex)
+        if (mode === "on")
+            return true
+        if (mode === "off")
+            return false
+        return lyricsGlowEnabled
+    }
+
+    function lyricsBlockGlowIntensity(blockIndex) {
+        const value = Number(lyricsBlockStyle(blockIndex).glowIntensity)
+        return isNaN(value) ? lyricsGlowIntensity : Math.max(0, Math.min(1, value))
+    }
+
+    function normalizeLyricsColorMode(value) {
+        const mode = String(value || "pywal").toLowerCase()
+        if (mode === "palette" || mode === "wallpaper" || mode === "dynamic" || mode === "colors")
+            return "palette"
+        return mode === "manual" || mode === "custom" || mode === "color" ? "manual" : "pywal"
+    }
+
+    function normalizeLyricsLayoutMode(value) {
+        const mode = String(value || "vertical").toLowerCase()
+        if (mode === "simple" || mode === "single" || mode === "plain")
+            return "simple"
+        if (mode === "cascade" || mode === "stack" || mode === "centered")
+            return mode
+        if (mode === "two" || mode === "twolyrics" || mode === "two-lyrics" || mode === "split" || mode === "double" || mode === "duo")
+            return "two"
+        if (mode === "four" || mode === "fourlyrics" || mode === "four-lyrics" || mode === "quad")
+            return "four"
+        return "vertical"
+    }
+
+    function normalizeLyricsBlockColorMode(value) {
+        const mode = String(value || "inherit").toLowerCase()
+        if (mode === "pywal" || mode === "palette" || mode === "manual")
+            return mode
+        return "inherit"
+    }
+
+    function normalizeLyricsBlockGlowMode(value) {
+        const mode = String(value || "inherit").toLowerCase()
+        if (mode === "on" || mode === "off")
+            return mode
+        return "inherit"
+    }
+
+    function normalizeLyricsMaterialMode(value) {
+        const mode = String(value || "off").toLowerCase()
+        if (mode === "cloud" || mode === "fog" || mode === "mist" || mode === "soft")
+            return "cloud"
+        if (mode === "glass" || mode === "frost" || mode === "frosted")
+            return "glass"
+        if (mode === "metal" || mode === "silver" || mode === "chrome")
+            return "metal"
+        if (mode === "sky" || mode === "ambient" || mode === "atmosphere")
+            return "sky"
+        return "off"
+    }
+
+    function normalizeLyricsAnimationMode(value) {
+        const mode = String(value || "instant").toLowerCase()
+        if (mode === "fade" || mode === "slide")
+            return mode
+        return "instant"
+    }
+
+    function normalizeLyricsRevealMode(value) {
+        const mode = String(value || "progressive").toLowerCase()
+        if (mode === "line" || mode === "full" || mode === "complete" || mode === "all")
+            return "line"
+        if (mode === "current" || mode === "word" || mode === "active")
+            return "current"
+        return "progressive"
+    }
+
+    function normalizeLyricsManualColor(value) {
+        let next = String(value || "#f5f7ff").replace(/\s+/g, "")
+        if (next.charAt(0) !== "#")
+            next = "#" + next
+        return /^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(next) ? next : "#f5f7ff"
+    }
+
+    function colorListFromData(values, fallback) {
+        const result = []
+        if (Array.isArray(values)) {
+            for (let i = 0; i < values.length; i += 1)
+                result.push(fromCss(values[i], fallback))
+        }
+        return result.length > 0 ? result : [fallback]
     }
 
     function popupBubbleSolidAlpha() {
@@ -588,6 +916,8 @@ QtObject {
             accentPrimary: fromCss(data.accentPrimary, accentPrimary),
             accentSecondary: fromCss(data.accentSecondary, accentSecondary),
             accentTertiary: fromCss(data.accentTertiary, accentTertiary),
+            lyricsPywalColor: fromCss(data.lyricsColor, accentPrimary),
+            lyricsPalette: colorListFromData(data.lyricsPalette, fromCss(data.lyricsColor, accentPrimary)),
             borderSoft: fromCss(data.borderSoft, borderSoft),
             borderActive: fromCss(data.borderActive, borderActive),
             borderGlow: fromCss(data.borderGlow, borderGlow),
@@ -648,6 +978,8 @@ QtObject {
         accentPrimary = palette.accentPrimary
         accentSecondary = palette.accentSecondary
         accentTertiary = palette.accentTertiary
+        lyricsPywalColor = palette.lyricsPywalColor
+        lyricsPalette = palette.lyricsPalette
         borderActive = palette.borderActive
         borderGlow = palette.borderGlow
         popupBorderGlow = palette.popupBorderGlow
@@ -754,6 +1086,8 @@ QtObject {
         accentPrimary = "#e8a6c8"
         accentSecondary = "#c894f2"
         accentTertiary = "#a8d8ff"
+        lyricsPywalColor = "#e8a6c8"
+        lyricsPalette = ["#e8a6c8", "#c894f2", "#a8d8ff"]
         borderSoft = Qt.rgba(1, 1, 1, 0.78)
         borderActive = Qt.rgba(232 / 255, 166 / 255, 200 / 255, 0.78)
         borderGlow = Qt.rgba(232 / 255, 166 / 255, 200 / 255, 0.18)
@@ -794,6 +1128,8 @@ QtObject {
         accentPrimary = "#e7a3c7"
         accentSecondary = "#b89cf2"
         accentTertiary = "#89c8ef"
+        lyricsPywalColor = "#e7a3c7"
+        lyricsPalette = ["#e7a3c7", "#b89cf2", "#89c8ef"]
         borderSoft = Qt.rgba(1, 1, 1, 0.18)
         borderActive = Qt.rgba(231 / 255, 163 / 255, 199 / 255, 0.66)
         borderGlow = Qt.rgba(137 / 255, 200 / 255, 239 / 255, 0.22)
@@ -834,6 +1170,8 @@ QtObject {
         accentPrimary = "#ef8cba"
         accentSecondary = "#f2b1cf"
         accentTertiary = "#a8d8ff"
+        lyricsPywalColor = "#ef8cba"
+        lyricsPalette = ["#ef8cba", "#f2b1cf", "#a8d8ff"]
         borderSoft = Qt.rgba(1, 1, 1, 0.70)
         borderActive = Qt.rgba(239 / 255, 140 / 255, 186 / 255, 0.74)
         borderGlow = Qt.rgba(239 / 255, 140 / 255, 186 / 255, 0.24)
@@ -874,6 +1212,8 @@ QtObject {
         accentPrimary = "#d8a4e6"
         accentSecondary = "#b994f2"
         accentTertiary = "#99d4ff"
+        lyricsPywalColor = "#d8a4e6"
+        lyricsPalette = ["#d8a4e6", "#b994f2", "#99d4ff"]
         borderSoft = Qt.rgba(1, 1, 1, 0.68)
         borderActive = Qt.rgba(185 / 255, 148 / 255, 242 / 255, 0.72)
         borderGlow = Qt.rgba(185 / 255, 148 / 255, 242 / 255, 0.24)
@@ -1062,6 +1402,231 @@ QtObject {
         }
     }
 
+    function applyLyricsSettings(enabled, posX, posY, colorMode, manualColor, fontSize, opacity, spacing, shadow, uppercase, layoutMode, animationMode, activeWord, revealMode, pos2X, pos2Y, syncOffsetMs, floatEnabled, floatIntensity, glowEnabled, glowIntensity, persist) {
+        lyricsEnabled = truthyEnabled(enabled)
+        lyricsPositionX = clampLyricsPercent(posX, lyricsPositionX)
+        lyricsPositionY = clampLyricsPercent(posY, lyricsPositionY)
+        lyricsSecondPositionX = clampLyricsPercent(pos2X, lyricsSecondPositionX)
+        lyricsSecondPositionY = clampLyricsPercent(pos2Y, lyricsSecondPositionY)
+        lyricsColorMode = normalizeLyricsColorMode(colorMode)
+        lyricsManualColor = normalizeLyricsManualColor(manualColor)
+        lyricsFontSize = clampLyricsFontSize(fontSize)
+        lyricsOpacity = clampLyricsOpacity(opacity)
+        lyricsWordSpacing = clampLyricsWordSpacing(spacing)
+        lyricsShadowEnabled = truthyEnabled(shadow)
+        lyricsUppercase = truthyEnabled(uppercase)
+        lyricsLayoutMode = normalizeLyricsLayoutMode(layoutMode)
+        lyricsAnimationMode = normalizeLyricsAnimationMode(animationMode)
+        lyricsActiveWordEnabled = truthyEnabled(activeWord)
+        lyricsRevealMode = normalizeLyricsRevealMode(revealMode)
+        lyricsSyncOffsetMs = clampLyricsSyncOffset(syncOffsetMs)
+        lyricsFloatEnabled = truthyEnabled(floatEnabled)
+        lyricsFloatIntensity = clampLyricsFloatIntensity(floatIntensity)
+        lyricsGlowEnabled = truthyEnabled(glowEnabled)
+        lyricsGlowIntensity = clampLyricsGlowIntensity(glowIntensity)
+        if (persist !== false)
+            saveLyricsSettings()
+    }
+
+    function resetLyricsSettings() {
+        applyLyricsSettings(false, 18, 44, "pywal", "#f5f7ff", 86, 0.86, 8, true, true, "vertical", "instant", true, "progressive", 74, 18, 460, true, 5, true, 0.45, true)
+    }
+
+    function saveLyricsSettings() {
+        const values = [
+            lyricsEnabled ? "on" : "off",
+            lyricsPositionX.toFixed(2),
+            lyricsPositionY.toFixed(2),
+            normalizeLyricsColorMode(lyricsColorMode),
+            normalizeLyricsManualColor(lyricsManualColor),
+            lyricsFontSize.toFixed(2),
+            lyricsOpacity.toFixed(2),
+            lyricsWordSpacing.toFixed(2),
+            lyricsShadowEnabled ? "on" : "off",
+            lyricsUppercase ? "on" : "off",
+            normalizeLyricsLayoutMode(lyricsLayoutMode),
+            normalizeLyricsAnimationMode(lyricsAnimationMode),
+            lyricsActiveWordEnabled ? "on" : "off",
+            normalizeLyricsRevealMode(lyricsRevealMode),
+            lyricsSecondPositionX.toFixed(2),
+            lyricsSecondPositionY.toFixed(2),
+            lyricsSyncOffsetMs.toFixed(2),
+            lyricsFloatEnabled ? "on" : "off",
+            lyricsFloatIntensity.toFixed(2),
+            "glow",
+            lyricsGlowEnabled ? "on" : "off",
+            lyricsGlowIntensity.toFixed(2)
+        ]
+        const payload = values.join("|")
+        if (lyricsSaveProc.running)
+            lyricsSaveProc.pending = payload
+        else {
+            lyricsSaveProc.command = [root.stateScript, "lyrics", "set"].concat(values)
+            lyricsSaveProc.running = true
+        }
+    }
+
+    function setLyricsCinematicEnabled(enabled, persist) {
+        lyricsCinematicEnabled = truthyEnabled(enabled)
+        if (persist !== false)
+            saveLyricsCinematicEnabled()
+    }
+
+    function saveLyricsCinematicEnabled() {
+        const enabled = lyricsCinematicEnabled ? "on" : "off"
+        if (lyricsCinematicSaveProc.running)
+            lyricsCinematicSaveProc.pending = enabled
+        else {
+            lyricsCinematicSaveProc.command = [root.stateScript, "lyrics-cinematic", "set", enabled]
+            lyricsCinematicSaveProc.running = true
+        }
+    }
+
+    function applyLyricsTransformSettings(scale, rotation, tiltX, tiltY, persist) {
+        lyricsScale = clampLyricsScale(scale)
+        lyricsRotation = clampLyricsRotation(rotation)
+        lyricsTiltX = clampLyricsTransformAngle(tiltX, lyricsTiltX)
+        lyricsTiltY = clampLyricsTransformAngle(tiltY, lyricsTiltY)
+        if (persist !== false)
+            saveLyricsTransformSettings()
+    }
+
+    function resetLyricsTransformSettings() {
+        applyLyricsTransformSettings(1, 0, 0, 0, true)
+    }
+
+    function saveLyricsTransformSettings() {
+        const values = [
+            lyricsScale.toFixed(2),
+            lyricsRotation.toFixed(2),
+            lyricsTiltX.toFixed(2),
+            lyricsTiltY.toFixed(2)
+        ]
+        const payload = values.join("|")
+        if (lyricsTransformSaveProc.running)
+            lyricsTransformSaveProc.pending = payload
+        else {
+            lyricsTransformSaveProc.command = [root.stateScript, "lyrics-transform", "set"].concat(values)
+            lyricsTransformSaveProc.running = true
+        }
+    }
+
+    function applyLyricsMaterialSettings(mode, intensity, depthEnabled, depthIntensity, fogEnabled, fogIntensity, maskFeather, persist) {
+        lyricsMaterialMode = normalizeLyricsMaterialMode(mode)
+        lyricsMaterialIntensity = clampLyricsMaterialIntensity(intensity, lyricsMaterialIntensity)
+        lyricsDepthEnabled = truthyEnabled(depthEnabled)
+        lyricsDepthIntensity = clampLyricsMaterialIntensity(depthIntensity, lyricsDepthIntensity)
+        lyricsFogEnabled = truthyEnabled(fogEnabled)
+        lyricsFogIntensity = clampLyricsMaterialIntensity(fogIntensity, lyricsFogIntensity)
+        lyricsMaskFeather = clampLyricsMaskFeather(maskFeather)
+        if (persist !== false)
+            saveLyricsMaterialSettings()
+    }
+
+    function resetLyricsMaterialSettings() {
+        applyLyricsMaterialSettings("off", 0.55, false, 0.45, false, 0.35, 0, true)
+    }
+
+    function saveLyricsMaterialSettings() {
+        const values = [
+            normalizeLyricsMaterialMode(lyricsMaterialMode),
+            lyricsMaterialIntensity.toFixed(2),
+            lyricsDepthEnabled ? "on" : "off",
+            lyricsDepthIntensity.toFixed(2),
+            lyricsFogEnabled ? "on" : "off",
+            lyricsFogIntensity.toFixed(2),
+            lyricsMaskFeather.toFixed(2)
+        ]
+        const payload = values.join("|")
+        if (lyricsMaterialSaveProc.running)
+            lyricsMaterialSaveProc.pending = payload
+        else {
+            lyricsMaterialSaveProc.command = [root.stateScript, "lyrics-material", "set"].concat(values)
+            lyricsMaterialSaveProc.running = true
+        }
+    }
+
+    function applyLyricsMaskSettings(enabled, brushSize, data, persist) {
+        lyricsMaskEnabled = truthyEnabled(enabled)
+        lyricsMaskBrushSize = clampLyricsMaskBrushSize(brushSize)
+        lyricsMaskData = sanitizedLyricsMaskPayload(data)
+        try {
+            lyricsMaskStrokes = JSON.parse(lyricsMaskData)
+        } catch (e) {
+            lyricsMaskStrokes = []
+        }
+        lyricsMaskHasStrokes = lyricsMaskStrokes.length > 0
+        lyricsMaskRevision += 1
+        if (persist !== false)
+            saveLyricsMaskSettings()
+    }
+
+    function clearLyricsMask(persist) {
+        applyLyricsMaskSettings(lyricsMaskEnabled, lyricsMaskBrushSize, "[]", persist)
+    }
+
+    function saveLyricsMaskSettings() {
+        const values = [
+            lyricsMaskEnabled ? "on" : "off",
+            lyricsMaskBrushSize.toFixed(2),
+            lyricsMaskData
+        ]
+        const payload = values.join("|")
+        if (lyricsMaskSaveProc.running)
+            lyricsMaskSaveProc.pending = payload
+        else {
+            lyricsMaskSaveProc.command = [root.stateScript, "lyrics-mask", "set"].concat(values)
+            lyricsMaskSaveProc.running = true
+        }
+    }
+
+    function applyLyricsBlocksSettings(pos3X, pos3Y, pos4X, pos4Y, styleData, persist) {
+        lyricsThirdPositionX = clampLyricsPercent(pos3X, lyricsThirdPositionX)
+        lyricsThirdPositionY = clampLyricsPercent(pos3Y, lyricsThirdPositionY)
+        lyricsFourthPositionX = clampLyricsPercent(pos4X, lyricsFourthPositionX)
+        lyricsFourthPositionY = clampLyricsPercent(pos4Y, lyricsFourthPositionY)
+        lyricsBlockStyleData = sanitizedLyricsBlockStylePayload(styleData)
+        try {
+            lyricsBlockStyles = JSON.parse(lyricsBlockStyleData)
+        } catch (e) {
+            lyricsBlockStyles = []
+        }
+        lyricsBlockStyleRevision += 1
+        if (persist !== false)
+            saveLyricsBlocksSettings()
+    }
+
+    function applyLyricsBlockStyle(blockIndex, colorMode, manualColor, glowMode, glowIntensity, persist) {
+        const index = Math.max(0, Math.min(3, Number(blockIndex) || 0))
+        const styles = Array.isArray(lyricsBlockStyles) ? lyricsBlockStyles.slice(0, 4) : []
+        while (styles.length <= index)
+            styles.push({})
+        styles[index] = {
+            colorMode: normalizeLyricsBlockColorMode(colorMode),
+            manualColor: normalizeLyricsManualColor(manualColor || lyricsManualColor),
+            glowMode: normalizeLyricsBlockGlowMode(glowMode),
+            glowIntensity: clampLyricsGlowIntensity(glowIntensity)
+        }
+        applyLyricsBlocksSettings(lyricsThirdPositionX, lyricsThirdPositionY, lyricsFourthPositionX, lyricsFourthPositionY, JSON.stringify(styles), persist)
+    }
+
+    function saveLyricsBlocksSettings() {
+        const values = [
+            lyricsThirdPositionX.toFixed(2),
+            lyricsThirdPositionY.toFixed(2),
+            lyricsFourthPositionX.toFixed(2),
+            lyricsFourthPositionY.toFixed(2),
+            lyricsBlockStyleData
+        ]
+        const payload = values.join("|")
+        if (lyricsBlocksSaveProc.running)
+            lyricsBlocksSaveProc.pending = payload
+        else {
+            lyricsBlocksSaveProc.command = [root.stateScript, "lyrics-blocks", "set"].concat(values)
+            lyricsBlocksSaveProc.running = true
+        }
+    }
+
     function setScreenVisualizerEnabled(enabled, persist) {
         screenVisualizerEnabled = truthyEnabled(enabled)
         if (persist !== false)
@@ -1101,6 +1666,22 @@ QtObject {
         else {
             topBarSaveProc.command = [root.stateScript, "topbar", "set", enabled]
             topBarSaveProc.running = true
+        }
+    }
+
+    function setTopBarFrameLineEnabled(enabled, persist) {
+        topBarFrameLineEnabled = truthyEnabled(enabled)
+        if (persist !== false)
+            saveTopBarFrameLineEnabled()
+    }
+
+    function saveTopBarFrameLineEnabled() {
+        const enabled = topBarFrameLineEnabled ? "on" : "off"
+        if (topBarFrameLineSaveProc.running)
+            topBarFrameLineSaveProc.pending = enabled
+        else {
+            topBarFrameLineSaveProc.command = [root.stateScript, "topbar-frame-line", "set", enabled]
+            topBarFrameLineSaveProc.running = true
         }
     }
 
@@ -1172,6 +1753,37 @@ QtObject {
         frameBlurEnabled = truthyEnabled(enabled)
         if (persist !== false)
             saveFrameBlurEnabled()
+    }
+
+    function applyBarAppearance(iconSize, iconOpacity, iconSpacing, autoHide, cornerRadius, persist) {
+        barIconSize = Math.max(32, Math.min(56, Number(iconSize) || 48))
+        barIconOpacity = Math.max(0.30, Math.min(1.00, Number(iconOpacity) || 0.80))
+        barIconSpacing = Math.max(8, Math.min(24, Number(iconSpacing) || 16))
+        barAutoHideEnabled = truthyEnabled(autoHide)
+        barCornerRadius = Math.max(0, Math.min(30, Number(cornerRadius) || 16))
+        if (persist !== false)
+            saveBarAppearance()
+    }
+
+    function saveBarAppearance() {
+        const values = [
+            barIconSize.toFixed(2),
+            barIconOpacity.toFixed(2),
+            barIconSpacing.toFixed(2),
+            barAutoHideEnabled ? "on" : "off",
+            barCornerRadius.toFixed(2)
+        ]
+        const payload = values.join("|")
+        if (barAppearanceSaveProc.running)
+            barAppearanceSaveProc.pending = payload
+        else {
+            barAppearanceSaveProc.command = [root.stateScript, "bar-appearance", "set"].concat(values)
+            barAppearanceSaveProc.running = true
+        }
+    }
+
+    function resetBarAppearance() {
+        applyBarAppearance(48, 0.80, 16, false, 16, true)
     }
 
     function saveFrameBlurEnabled() {
@@ -1392,8 +2004,90 @@ QtObject {
         if (key === "screenVisualizer")
             root.setScreenVisualizerEnabled(line !== "off" && line !== "0" && line !== "false", false)
 
+        if (key === "lyrics") {
+            const parts = line.split("|")
+            const hasLyricsGlow = parts.length > 21 && parts[19] === "glow"
+            root.applyLyricsSettings(
+                parts.length > 0 ? parts[0] : "off",
+                parts.length > 1 ? parts[1] : 18,
+                parts.length > 2 ? parts[2] : 44,
+                parts.length > 3 ? parts[3] : "pywal",
+                parts.length > 4 ? parts[4] : "#f5f7ff",
+                parts.length > 5 ? parts[5] : 86,
+                parts.length > 6 ? parts[6] : 0.86,
+                parts.length > 7 ? parts[7] : 8,
+                parts.length > 8 ? parts[8] : "on",
+                parts.length > 9 ? parts[9] : "on",
+                parts.length > 10 ? parts[10] : "vertical",
+                parts.length > 11 ? parts[11] : "instant",
+                parts.length > 12 ? parts[12] : "on",
+                parts.length > 13 ? parts[13] : "progressive",
+                parts.length > 14 ? parts[14] : 74,
+                parts.length > 15 ? parts[15] : 18,
+                parts.length > 16 ? parts[16] : 460,
+                parts.length > 17 ? parts[17] : "on",
+                parts.length > 18 ? parts[18] : 5,
+                hasLyricsGlow ? parts[20] : "on",
+                hasLyricsGlow ? parts[21] : 0.45,
+                false
+            )
+        }
+
+        if (key === "lyricsCinematic")
+            root.setLyricsCinematicEnabled(line !== "off" && line !== "0" && line !== "false", false)
+
+        if (key === "lyricsMask") {
+            const parts = line.split("|")
+            root.applyLyricsMaskSettings(
+                parts.length > 0 ? parts[0] : "off",
+                parts.length > 1 ? parts[1] : 56,
+                parts.length > 2 ? parts.slice(2).join("|") : "[]",
+                false
+            )
+        }
+
+        if (key === "lyricsBlocks") {
+            const parts = line.split("|")
+            root.applyLyricsBlocksSettings(
+                parts.length > 0 ? parts[0] : 8,
+                parts.length > 1 ? parts[1] : 58,
+                parts.length > 2 ? parts[2] : 72,
+                parts.length > 3 ? parts[3] : 58,
+                parts.length > 4 ? parts.slice(4).join("|") : "[]",
+                false
+            )
+        }
+
+        if (key === "lyricsTransform") {
+            const parts = line.split("|")
+            root.applyLyricsTransformSettings(
+                parts.length > 0 ? parts[0] : 1,
+                parts.length > 1 ? parts[1] : 0,
+                parts.length > 2 ? parts[2] : 0,
+                parts.length > 3 ? parts[3] : 0,
+                false
+            )
+        }
+
+        if (key === "lyricsMaterial") {
+            const parts = line.split("|")
+            root.applyLyricsMaterialSettings(
+                parts.length > 0 ? parts[0] : "off",
+                parts.length > 1 ? parts[1] : 0.55,
+                parts.length > 2 ? parts[2] : "off",
+                parts.length > 3 ? parts[3] : 0.45,
+                parts.length > 4 ? parts[4] : "off",
+                parts.length > 5 ? parts[5] : 0.35,
+                parts.length > 6 ? parts[6] : 0,
+                false
+            )
+        }
+
         if (key === "topBar")
             root.setTopBarEnabled(line === "on" || line === "1" || line === "true", false)
+
+        if (key === "topBarFrameLine")
+            root.setTopBarFrameLineEnabled(line !== "off" && line !== "0" && line !== "false", false)
 
         if (key === "popupAttach")
             root.setPopupAttachedToBar(line === "on" || line === "1" || line === "true", false)
@@ -1409,6 +2103,18 @@ QtObject {
 
         if (key === "frameBlur")
             root.setFrameBlurEnabled(line !== "off" && line !== "0" && line !== "false", false)
+
+        if (key === "barAppearance") {
+            const parts = line.split("|")
+            root.applyBarAppearance(
+                parts.length > 0 ? parts[0] : 48,
+                parts.length > 1 ? parts[1] : 0.80,
+                parts.length > 2 ? parts[2] : 16,
+                parts.length > 3 ? parts[3] : "off",
+                parts.length > 4 ? parts[4] : 16,
+                false
+            )
+        }
 
         if (key === "profileImage")
             root.setProfileImagePath(value, false)
@@ -1720,6 +2426,102 @@ QtObject {
         }
     }
 
+    property Process lyricsSaveProc: Process {
+        property string pending: ""
+
+        running: false
+        command: [root.stateScript, "lyrics", "set", "off", "18.00", "44.00", "pywal", "#f5f7ff", "86.00", "0.86", "8.00", "on", "on", "vertical", "instant", "on", "progressive", "74.00", "18.00", "460.00", "on", "5.00", "glow", "on", "0.45"]
+        onExited: {
+            running = false
+            if (pending.length > 0) {
+                const parts = pending.split("|")
+                pending = ""
+                command = [root.stateScript, "lyrics", "set"].concat(parts)
+                running = true
+            }
+        }
+    }
+
+    property Process lyricsCinematicSaveProc: Process {
+        property string pending: ""
+
+        running: false
+        command: [root.stateScript, "lyrics-cinematic", "set", "on"]
+        onExited: {
+            running = false
+            if (pending.length > 0) {
+                const next = pending
+                pending = ""
+                command = [root.stateScript, "lyrics-cinematic", "set", next]
+                running = true
+            }
+        }
+    }
+
+    property Process lyricsTransformSaveProc: Process {
+        property string pending: ""
+
+        running: false
+        command: [root.stateScript, "lyrics-transform", "set", "1.00", "0.00", "0.00", "0.00"]
+        onExited: {
+            running = false
+            if (pending.length > 0) {
+                const parts = pending.split("|")
+                pending = ""
+                command = [root.stateScript, "lyrics-transform", "set"].concat(parts)
+                running = true
+            }
+        }
+    }
+
+    property Process lyricsMaterialSaveProc: Process {
+        property string pending: ""
+
+        running: false
+        command: [root.stateScript, "lyrics-material", "set", "off", "0.55", "off", "0.45", "off", "0.35", "0.00"]
+        onExited: {
+            running = false
+            if (pending.length > 0) {
+                const parts = pending.split("|")
+                pending = ""
+                command = [root.stateScript, "lyrics-material", "set"].concat(parts)
+                running = true
+            }
+        }
+    }
+
+    property Process lyricsMaskSaveProc: Process {
+        property string pending: ""
+
+        running: false
+        command: [root.stateScript, "lyrics-mask", "set", "off", "56.00", "[]"]
+        onExited: {
+            running = false
+            if (pending.length > 0) {
+                const parts = pending.split("|")
+                pending = ""
+                command = [root.stateScript, "lyrics-mask", "set"].concat(parts)
+                running = true
+            }
+        }
+    }
+
+    property Process lyricsBlocksSaveProc: Process {
+        property string pending: ""
+
+        running: false
+        command: [root.stateScript, "lyrics-blocks", "set", "8.00", "58.00", "72.00", "58.00", "[]"]
+        onExited: {
+            running = false
+            if (pending.length > 0) {
+                const parts = pending.split("|")
+                pending = ""
+                command = [root.stateScript, "lyrics-blocks", "set"].concat(parts)
+                running = true
+            }
+        }
+    }
+
     property Process topBarSaveProc: Process {
         property string pending: ""
 
@@ -1731,6 +2533,22 @@ QtObject {
                 const next = pending
                 pending = ""
                 command = [root.stateScript, "topbar", "set", next]
+                running = true
+            }
+        }
+    }
+
+    property Process topBarFrameLineSaveProc: Process {
+        property string pending: ""
+
+        running: false
+        command: [root.stateScript, "topbar-frame-line", "set", "on"]
+        onExited: {
+            running = false
+            if (pending.length > 0) {
+                const next = pending
+                pending = ""
+                command = [root.stateScript, "topbar-frame-line", "set", next]
                 running = true
             }
         }
@@ -1811,6 +2629,22 @@ QtObject {
                 const next = pending
                 pending = ""
                 command = [root.stateScript, "frame-blur", "set", next]
+                running = true
+            }
+        }
+    }
+
+    property Process barAppearanceSaveProc: Process {
+        property string pending: ""
+
+        running: false
+        command: [root.stateScript, "bar-appearance", "set", "48.00", "0.80", "16.00", "off", "16.00"]
+        onExited: {
+            running = false
+            if (pending.length > 0) {
+                const parts = pending.split("|")
+                pending = ""
+                command = [root.stateScript, "bar-appearance", "set"].concat(parts)
                 running = true
             }
         }

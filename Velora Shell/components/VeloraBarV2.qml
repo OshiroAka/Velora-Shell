@@ -17,7 +17,7 @@ Item {
     readonly property bool rightDark: rightSoft && theme && theme.themeMode === "dark"
     readonly property bool softStyle: true
     readonly property bool darkSoft: softStyle && theme && theme.themeMode === "dark"
-    readonly property int cornerRadius: softStyle ? 24 : 20
+    readonly property int cornerRadius: theme ? Math.round(theme.barCornerRadius) : (softStyle ? 24 : 20)
     readonly property bool pywalStyle: theme && theme.themeId === "pywal16"
     readonly property bool neon: pywalStyle && theme.themeMode === "dark"
     readonly property color ink: theme ? theme.textPrimary : Qt.rgba(0.46, 0.37, 0.54, 0.82)
@@ -44,6 +44,9 @@ Item {
     property int notificationCountOverride: -1
     readonly property int notificationCount: notificationCountOverride >= 0 ? notificationCountOverride : Math.max(trackedNotificationValues().length, makoNotificationCount)
     readonly property real uiScale: softStyle ? Math.min(1.08, Math.max(1.0, height / 1080)) : Math.min(1.12, Math.max(1.0, height / 1032))
+    readonly property real configuredIconScale: theme ? Math.max(0.67, Math.min(1.17, theme.barIconSize / 48.0)) : 1.0
+    readonly property real configuredIconOpacity: theme ? theme.barIconOpacity : 0.80
+    readonly property real configuredIconGap: theme ? theme.barIconSpacing : 16
     readonly property int stretchGap: Math.round(Math.min(softStyle ? 10 : 14, Math.max(0, (height - (softStyle ? 1080 : 1032)) / 7)))
     property int makoNotificationCount: 0
     property int lastNotificationCount: 0
@@ -57,11 +60,14 @@ Item {
     property int focusIndex: 0
     property string focusTarget: "clock"
     property string activePopupType: ""
+    property bool autoHideHovering: false
+    readonly property bool autoHideRevealed: !theme || !theme.barAutoHideEnabled || autoHideHovering || focusMode || activePopupType.length > 0
     property real focusX: 0
     property real focusY: 0
     property real focusW: 42
     property real focusH: 34
     property bool visualizerActive: true
+    property bool cavaForceActive: false
     property bool shellDrawsPanelSurface: false
     property var cavaValues: []
     property int cavaSettledFrames: 0
@@ -70,7 +76,7 @@ Item {
     readonly property real cavaSettledDelta: 0.010
     readonly property int cavaSettleFrameThreshold: 6
     readonly property int cavaMaxSkippedFrames: 14
-    readonly property bool cavaWanted: visualizerActive && visible && width > 0 && height > 0
+    readonly property bool cavaWanted: visualizerActive && ((visible && width > 0 && height > 0) || cavaForceActive)
     readonly property string cavaScript: Quickshell.shellDir + "/scripts/velora-cava"
     readonly property string popupStatusScript: Quickshell.shellDir + "/scripts/velora-popup-status"
 
@@ -280,6 +286,7 @@ Item {
     }
 
     onCavaWantedChanged: syncCavaProcess()
+    onCavaForceActiveChanged: syncCavaProcess()
     onVisualizerActiveChanged: {
         if (!visualizerActive) {
             cavaValues = []
@@ -862,6 +869,7 @@ Item {
     ColumnLayout {
         id: contentLayer
         z: 10
+        opacity: root.autoHideRevealed ? 1 : 0
 
         anchors {
             fill: panelSurface
@@ -869,6 +877,13 @@ Item {
             rightMargin: root.softStyle ? 17 : 16
             topMargin: root.softStyle ? Math.round(20 * root.uiScale) : Math.round(18 * root.uiScale)
             bottomMargin: root.softStyle ? Math.round(18 * root.uiScale) : Math.round(14 * root.uiScale)
+        }
+
+        Behavior on opacity {
+            NumberAnimation {
+                duration: root.motionNormal
+                easing.type: Easing.OutCubic
+            }
         }
 
         spacing: 0
@@ -968,7 +983,7 @@ Item {
         ColumnLayout {
             Layout.alignment: Qt.AlignHCenter
             Layout.topMargin: Math.round(9 * root.uiScale)
-            spacing: Math.round(8 * root.uiScale)
+            spacing: Math.round(root.configuredIconGap * 0.5 * root.uiScale)
 
             AppButton {
                 id: slotFiles
@@ -1009,7 +1024,7 @@ Item {
         ColumnLayout {
             Layout.alignment: Qt.AlignHCenter
             Layout.topMargin: Math.round(9 * root.uiScale)
-            spacing: Math.round(9 * root.uiScale)
+            spacing: Math.round(root.configuredIconGap * 0.5 * root.uiScale)
 
             UtilityButton {
                 id: slotVolume
@@ -1101,6 +1116,12 @@ Item {
             Layout.preferredWidth: Math.round(48 * root.uiScale)
             Layout.preferredHeight: Math.round(48 * root.uiScale)
         }
+    }
+
+    HoverHandler {
+        id: autoHideHoverHandler
+        margin: 4
+        onHoveredChanged: root.autoHideHovering = hovered
     }
 
     MouseArea {
@@ -1432,10 +1453,11 @@ Item {
                 leftMargin: 4
             }
 
-            width: Math.round(24 * root.uiScale)
-            height: Math.round(24 * root.uiScale)
+            width: Math.round(24 * root.uiScale * root.configuredIconScale)
+            height: Math.round(24 * root.uiScale * root.configuredIconScale)
             iconName: row.iconName
             lineColor: row.selected ? (root.softStyle ? root.pink : root.lilac) : root.inkSoft
+            opacity: root.configuredIconOpacity
             layer.enabled: root.pywalStyle && (row.selected || row.hovered)
             layer.effect: DropShadow {
                 transparentBorder: true
@@ -1502,8 +1524,8 @@ Item {
         property string hoverPopupType: ""
 
         Layout.alignment: Qt.AlignHCenter
-        Layout.preferredWidth: Math.round(34 * root.uiScale)
-        Layout.preferredHeight: Math.round(34 * root.uiScale)
+        Layout.preferredWidth: Math.round(34 * root.uiScale * root.configuredIconScale)
+        Layout.preferredHeight: Math.round(34 * root.uiScale * root.configuredIconScale)
         radius: Math.round(8 * root.uiScale)
         color: selected ? root.alpha(root.pink, 0.30) : (hovered ? root.alpha(root.card, 0.84) : root.alpha(root.card, 0.58))
         border.width: 1
@@ -1527,18 +1549,19 @@ Item {
 
         Rectangle {
             anchors.centerIn: parent
-            width: Math.round(26 * root.uiScale)
-            height: Math.round(26 * root.uiScale)
+            width: Math.round(26 * root.uiScale * root.configuredIconScale)
+            height: Math.round(26 * root.uiScale * root.configuredIconScale)
             radius: Math.round(6 * root.uiScale)
             color: button.iconName === "terminal" ? root.alpha(root.ink, 0.88) : (button.iconName === "discord" ? root.alpha(root.lilac, 0.20) : root.alpha(root.card, 0.18))
         }
 
         VeloraIcon {
             anchors.centerIn: parent
-            width: Math.round(26 * root.uiScale)
-            height: Math.round(26 * root.uiScale)
+            width: Math.round(26 * root.uiScale * root.configuredIconScale)
+            height: Math.round(26 * root.uiScale * root.configuredIconScale)
             iconName: button.iconName
             lineColor: button.tint
+            opacity: root.configuredIconOpacity
         }
 
         MouseArea {
@@ -1581,8 +1604,8 @@ Item {
         signal triggered()
 
         Layout.alignment: Qt.AlignHCenter
-        Layout.preferredWidth: Math.round(32 * root.uiScale)
-        Layout.preferredHeight: Math.round(32 * root.uiScale)
+        Layout.preferredWidth: Math.round(32 * root.uiScale * root.configuredIconScale)
+        Layout.preferredHeight: Math.round(32 * root.uiScale * root.configuredIconScale)
 
         Rectangle {
             anchors.fill: parent
@@ -1602,10 +1625,11 @@ Item {
 
         VeloraIcon {
             anchors.centerIn: parent
-            width: Math.round(26 * root.uiScale)
-            height: Math.round(26 * root.uiScale)
+            width: Math.round(26 * root.uiScale * root.configuredIconScale)
+            height: Math.round(26 * root.uiScale * root.configuredIconScale)
             iconName: button.iconName
             lineColor: button.selected ? (root.softStyle ? root.pink : root.lilac) : root.inkSoft
+            opacity: root.configuredIconOpacity
             value: button.iconName === "battery" ? root.normalizedBatteryLevel() : Math.max(0.08, Math.min(1, root.volume / 100))
             rotation: button.iconRotation
             transformOrigin: Item.Center

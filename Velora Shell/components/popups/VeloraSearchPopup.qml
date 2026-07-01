@@ -398,7 +398,7 @@ Item {
             Layout.topMargin: 2
             visible: root.popup && root.popup.searchQuery.trim().length <= 0
             iconText: "☼"
-            title: "Sugestões"
+            title: "Mais usados"
             entryDelay: 245
         }
 
@@ -1339,20 +1339,18 @@ Item {
             spacing: 3
 
             Repeater {
-                model: [
-                    ["display", "Procure por arquivos grandes", "Encontre e gerencie arquivos que ocupam espaço", "large-files"],
-                    ["sun", "Gerenciar inicialização", "Veja os apps que iniciam com o sistema", "startup"],
-                    ["settings", "Verificar atualizações", "Mantenha seu sistema atualizado", "updates"]
-                ]
+                model: panel.popup ? panel.popup.frequentApps : []
 
                 SuggestionRow {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 42
                     popup: panel.popup
-                    iconName: modelData[0]
-                    title: modelData[1]
-                    subtitle: modelData[2]
-                    onClicked: root.triggerAction(modelData[3])
+                    iconName: panel.popup && panel.popup.searchEntryKind(modelData) === "settings"
+                        ? "settings"
+                        : (panel.popup && panel.popup.searchEntryKind(modelData) === "files" ? "folder" : "box")
+                    title: panel.popup ? panel.popup.textOf(modelData.name) : ""
+                    subtitle: panel.popup ? panel.popup.appUsageSubtitle(modelData) : ""
+                    onClicked: if (panel.popup) panel.popup.launchSearchEntry(modelData)
                 }
             }
         }

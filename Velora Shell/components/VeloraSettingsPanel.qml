@@ -93,6 +93,7 @@ Item {
     readonly property int motionEaseHover: theme ? theme.motionEaseHover : Easing.OutCubic
 
     signal closeRequested()
+    signal lyricsMaskEditorRequested()
 
     opacity: revealProgress
     scale: 0.992 + revealProgress * 0.008
@@ -438,6 +439,11 @@ Item {
     }
 
     function moveSelection(dir) {
+        if (compactSettingsView) {
+            compactSettingsView.activeTab = (compactSettingsView.activeTab + dir + compactSettingsView.tabs.length) % compactSettingsView.tabs.length
+            return
+        }
+
         if (root.activeNav === root.languageNavIndex()) {
             const options = root.languageOptions()
             if (options.length <= 0)
@@ -457,6 +463,11 @@ Item {
     }
 
     function applySelected() {
+        if (compactSettingsView) {
+            compactSettingsView.markApplied()
+            return
+        }
+
         if (root.activeNav !== root.wallpaperNavIndex())
             return
         if (applyWallpaper.running)
@@ -908,8 +919,12 @@ Item {
             }
         }
 
-        NewSettingsView {
+        VeloraCompactSettings {
+            id: compactSettingsView
+
             anchors.fill: parent
+            theme: root.theme
+            controller: root
         }
 
         Rectangle {
@@ -1029,7 +1044,18 @@ Item {
                     spacing: 10
 
                     LayoutPreviewButton {
-                        width: 104
+                        width: 96
+                        side: "top"
+                        label: root.tr("layoutTop")
+                        active: root.theme ? root.theme.topBarEnabled : false
+                        onClicked: {
+                            if (root.theme)
+                                root.theme.setTopBarEnabled(true)
+                        }
+                    }
+
+                    LayoutPreviewButton {
+                        width: 96
                         side: "left"
                         label: root.tr("layoutLeft")
                         active: root.theme ? !root.theme.topBarEnabled && root.theme.barPosition === "left" : true
@@ -1042,7 +1068,7 @@ Item {
                     }
 
                     LayoutPreviewButton {
-                        width: 104
+                        width: 96
                         side: "right"
                         label: root.tr("layoutRight")
                         active: root.theme ? !root.theme.topBarEnabled && root.theme.barPosition === "right" : false
@@ -1880,6 +1906,18 @@ Item {
                             RowLayout {
                                 Layout.fillWidth: true
                                 spacing: 10
+
+                                LayoutPreviewButton {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 66
+                                    side: "top"
+                                    label: root.tr("layoutTop")
+                                    active: root.theme ? root.theme.topBarEnabled : false
+                                    onClicked: {
+                                        if (root.theme)
+                                            root.theme.setTopBarEnabled(true)
+                                    }
+                                }
 
                                 LayoutPreviewButton {
                                     Layout.fillWidth: true
