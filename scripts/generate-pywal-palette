@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+palette_project_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+
+if [[ "$#" -lt 1 || "$#" -gt 3 ]]; then
+    printf 'usage: %s /absolute/path/to/image-or-video [dark|light] [preview]\n' "$0" >&2
+    exit 2
+fi
+
+source_path=$1
+palette_tone=${2:-dark}
+if [[ "$palette_tone" != "dark" && "$palette_tone" != "light" ]]; then
+    printf 'palette tone must be dark or light: %s\n' "$palette_tone" >&2
+    exit 2
+fi
+if [[ ! -f "$source_path" && ! -f "${3:-}" ]]; then
+    printf 'source image does not exist: %s\n' "$source_path" >&2
+    exit 3
+fi
+
+palette_cache_root=${XDG_CACHE_HOME:-"${HOME}/.cache"}/velora-shell/pywal
+mkdir -p "$palette_cache_root"
+palette_work=$(mktemp -d "$palette_cache_root/.extract.XXXXXX")
+trap 'rm -rf -- "$palette_work"' EXIT
+
+palette_input="$palette_work/frame.png"
+python3 "$palette_project_dir/scripts/prepare-palette-input" \
+    "$source_path" "$palette_input" "${3:-}"
+
+# Keep pywal entirely inside the Velora cache. These switches explicitly avoid
+# changing wallpaper, terminal sequences, TTY, GTK, Xresources or other apps.
+wal_tone_args=(--cols16 darken)
+if [[ "$palette_tone" == "light" ]]; then
+    wal_tone_args=(-l --cols16 lighten)
+fi
+PYWAL_CACHE_DIR="$palette_work" \
+    wal -n -q -s -t -e "${wal_tone_args[@]}" \
+        -i "$palette_input"
+
+palette_source=$(find "$palette_work/schemes" -maxdepth 1 -type f -name '*.json' -print -quit)
+if [[ -z "$palette_source" ]]; then
+    printf 'pywal did not produce a palette for: %s\n' "$source_path" >&2
+    exit 4
+fi
+
+palette_accents=$("$palette_project_dir/scripts/select-velora-accents" \
+    "$palette_input" "$palette_source")
+
+jq --arg wallpaper "$source_path" --arg tone "$palette_tone" \
+    --argjson velora "$palette_accents" \
+    '.wallpaper = $wallpaper | .tone = $tone | .velora = $velora' \
+    "$palette_source" > "$palette_work/colors.json.next"
+chmod 0644 "$palette_work/colors.json.next"
+mv -f -- "$palette_work/colors.json.next" "$palette_cache_root/colors.json"
+printf '%s\n' "$palette_cache_root/colors.json"

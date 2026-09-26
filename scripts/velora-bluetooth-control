@@ -1,0 +1,293 @@
+#!/usr/bin/env bash
+set -u
+
+cmd="${1:-status}"
+shift || true
+
+state_root="${XDG_STATE_HOME:-$HOME/.local/state}/velora-shell"
+icon_state_file="$state_root/bluetooth-device-icons.json"
+
+clean_field() {
+  printf '%s' "${1:-}" | tr '\n\r|' '   ' | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//'
+}
+
+fail() {
+  local action="${1:-unknown}"
+  shift || true
+  printf 'ERR|%s|%s\n' "$action" "$(clean_field "$*")"
+  exit 1
+}
+
+ok() {
+  local action="${1:-unknown}"
+  shift || true
+  printf 'OK|%s|%s\n' "$action" "$(clean_field "$*")"
+}
+
+require_bluetoothctl() {
+  command -v bluetoothctl >/dev/null 2>&1 || fail "$cmd" "bluetoothctl not found"
+}
+
+adapter_powered() {
+  bluetoothctl show 2>/dev/null | awk -F': ' '/Powered/ {print tolower($2); exit}'
+}
+
+device_info() {
+  local address="${1:-}"
+  [ -n "$address" ] || return 1
+  bluetoothctl info "$address" 2>/dev/null || return 1
+}
+
+info_value() {
+  local key="$1"
+  awk -F': ' -v wanted="$key" '$1 ~ wanted { print tolower($2); exit }'
+}
+
+device_connected() {
+  device_info "$1" | info_value "Connected" | grep -Fx yes >/dev/null 2>&1
+}
+
+device_paired() {
+  device_info "$1" | info_value "Paired" | grep -Fx yes >/dev/null 2>&1
+}
+
+device_trusted() {
+  device_info "$1" | info_value "Trusted" | grep -Fx yes >/dev/null 2>&1
+}
+
+icon_override() {
+  local address="${1:-}"
+  command -v python3 >/dev/null 2>&1 || return 0
+  python3 - "$icon_state_file" "$address" <<'PY' 2>/dev/null || true
+import json, pathlib, sys
+path = pathlib.Path(sys.argv[1])
+address = sys.argv[2].upper()
+try:
+    data = json.loads(path.read_text(encoding="utf-8"))
+except Exception:
+    data = {}
+print(str(data.get(address, "")))
+PY
+}
+
+write_icon_override() {
+  local address="${1:-}" icon_type="${2:-}"
+  mkdir -p "$state_root" 2>/dev/null || fail "icon-set" "failed to create state directory"
+  command -v python3 >/dev/null 2>&1 || fail "icon-set" "python3 not found"
+  python3 - "$icon_state_file" "$address" "$icon_type" <<'PY' || exit 1
+import json, os, pathlib, sys, tempfile
+path = pathlib.Path(sys.argv[1])
+address = sys.argv[2].upper()
+value = sys.argv[3]
+try:
+    data = json.loads(path.read_text(encoding="utf-8"))
+except Exception:
+    data = {}
+if value:
+    data[address] = value
+else:
+    data.pop(address, None)
+path.parent.mkdir(parents=True, exist_ok=True)
+fd, temp_name = tempfile.mkstemp(prefix=path.name + ".", dir=path.parent)
+try:
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        json.dump(data, handle, ensure_ascii=False, indent=2, sort_keys=True)
+        handle.write("\n")
+    os.replace(temp_name, path)
+finally:
+    if os.path.exists(temp_name):
+        os.unlink(temp_name)
+PY
+}
+
+auto_device_type() {
+  local info="${1:-}" name="${2:-}" haystack
+  haystack="$(printf '%s\n%s' "$info" "$name" | tr '[:upper:]' '[:lower:]')"
+  case "$haystack" in
+    *audio-headphones*|*headphone*|*headset*|*earbud*|*airpod*) printf 'headphones' ;;
+    *audio-speakers*|*loudspeaker*|*soundbar*|*speaker*|*caixa\ de\ som*) printf 'speaker' ;;
+    *input-gaming*|*gamepad*|*controller*|*joystick*|*wireless\ controller*) printf 'controller' ;;
+    *input-keyboard*|*keyboard*|*teclado*) printf 'keyboard' ;;
+    *input-mouse*|*mouse*|*trackball*) printf 'mouse' ;;
+    *phone*|*smartphone*|*celular*) printf 'phone' ;;
+    *computer*|*laptop*|*notebook*|*desktop*) printf 'laptop' ;;
+    *audio-card*|*audio-sink*) printf 'speaker' ;;
+    *) printf 'bluetooth' ;;
+  esac
+}
+
+device_type() {
+  local address="${1:-}" info="${2:-}" name="${3:-}" override
+  override="$(icon_override "$address")"
+  if [ -n "$override" ]; then
+    printf '%s' "$override"
+  else
+    auto_device_type "$info" "$name"
+  fi
+}
+
+set_device_icon() {
+  local address="${1:-}" icon_type="${2:-}"
+  [ -n "$address" ] || fail "icon-set" "missing device address"
+  case "$icon_type" in
+    auto|bluetooth|headphones|speaker|controller|phone|laptop|keyboard|mouse) ;;
+    *) fail "icon-set" "unsupported icon type" ;;
+  esac
+  if [ "$icon_type" = "auto" ]; then
+    write_icon_override "$address" ""
+  else
+    write_icon_override "$address" "$icon_type"
+  fi
+  ok "icon-set" "$address|$icon_type"
+}
+
+power_adapter() {
+  require_bluetoothctl
+  local value="${1:-}"
+  case "$value" in
+    on|off) ;;
+    *) fail "power" "expected on or off" ;;
+  esac
+  bluetoothctl power "$value" >/dev/null 2>&1 || fail "power" "failed to switch Bluetooth $value"
+  ok "power" "$value"
+}
+
+short_scan() {
+  timeout 3s bluetoothctl scan on >/dev/null 2>&1 || true
+}
+
+scan_devices() {
+  require_bluetoothctl
+  local seconds="${1:-10}"
+  case "$seconds" in
+    ''|*[!0-9]*) fail "scan" "duration must be an integer" ;;
+  esac
+  (( seconds < 2 )) && seconds=2
+  (( seconds > 30 )) && seconds=30
+  if [ "$(adapter_powered)" != "yes" ]; then
+    bluetoothctl power on >/dev/null 2>&1 || fail "scan" "failed to power adapter"
+  fi
+  bluetoothctl scan on >/dev/null 2>&1 || fail "scan" "failed to start discovery"
+  sleep "$seconds"
+  bluetoothctl scan off >/dev/null 2>&1 || true
+  ok "scan" "$seconds"
+}
+
+pair_device() {
+  require_bluetoothctl
+  local address="${1:-}"
+  [ -n "$address" ] || fail "pair" "missing device address"
+  if [ "$(adapter_powered)" != "yes" ]; then
+    bluetoothctl power on >/dev/null 2>&1 || fail "pair" "failed to power adapter"
+  fi
+  short_scan
+  bluetoothctl --timeout 35 --agent KeyboardDisplay pair "$address" \
+    || fail "pair" "pairing failed or confirmation timed out"
+  device_paired "$address" || fail "pair" "device did not report paired"
+  bluetoothctl trust "$address" >/dev/null 2>&1 || true
+  ok "pair" "$address"
+}
+
+pair_session() {
+  require_bluetoothctl
+  local address="${1:-}"
+  [ -n "$address" ] || fail "pair-session" "missing device address"
+  if [ "$(adapter_powered)" != "yes" ]; then
+    bluetoothctl power on >/dev/null 2>&1 || fail "pair-session" "failed to power adapter"
+  fi
+  # Keep stdin attached: bluetoothctl may request yes/no confirmation or a PIN.
+  exec bluetoothctl --timeout 45 --agent KeyboardDisplay pair "$address"
+}
+
+connect_device() {
+  require_bluetoothctl
+  local address="${1:-}"
+  [ -n "$address" ] || fail "connect" "missing device address"
+
+  if [ "$(adapter_powered)" != "yes" ]; then
+    bluetoothctl power on >/dev/null 2>&1 || fail "connect" "failed to power adapter"
+  fi
+
+  short_scan
+
+  if ! device_paired "$address"; then
+    bluetoothctl pair "$address" >/dev/null 2>&1 || true
+  fi
+  if ! device_trusted "$address"; then
+    bluetoothctl trust "$address" >/dev/null 2>&1 || true
+  fi
+
+  bluetoothctl connect "$address" >/dev/null 2>&1 || fail "connect" "bluetoothctl connect failed for $address"
+  sleep 0.35
+  device_connected "$address" || fail "connect" "device did not report connected"
+  ok "connect" "$address"
+}
+
+disconnect_device() {
+  require_bluetoothctl
+  local address="${1:-}"
+  [ -n "$address" ] || fail "disconnect" "missing device address"
+
+  bluetoothctl disconnect "$address" >/dev/null 2>&1 || fail "disconnect" "bluetoothctl disconnect failed for $address"
+  sleep 0.25
+  if device_connected "$address"; then
+    fail "disconnect" "device still reports connected"
+  fi
+  ok "disconnect" "$address"
+}
+
+remove_device() {
+  require_bluetoothctl
+  local address="${1:-}"
+  [ -n "$address" ] || fail "remove" "missing device address"
+  bluetoothctl remove "$address" >/dev/null 2>&1 || fail "remove" "failed to remove $address"
+  write_icon_override "$address" "" >/dev/null 2>&1 || true
+  ok "remove" "$address"
+}
+
+emit_status() {
+  require_bluetoothctl
+  local detailed="${1:-0}"
+  local power address name info connected paired trusted type status rssi battery
+  power="$(adapter_powered)"
+  [ -n "$power" ] || power="unknown"
+  printf 'POWER|%s\n' "$power"
+  bluetoothctl devices 2>/dev/null | while read -r _ address name; do
+    [ -n "${address:-}" ] || continue
+    info="$(device_info "$address" || true)"
+    connected="$(printf '%s\n' "$info" | info_value "Connected")"
+    paired="$(printf '%s\n' "$info" | info_value "Paired")"
+    trusted="$(printf '%s\n' "$info" | info_value "Trusted")"
+    if [ "$connected" = "yes" ]; then
+      status="CONNECTED"
+    elif [ "$paired" = "yes" ]; then
+      status="PAIRED"
+    else
+      status="KNOWN"
+    fi
+    type="$(device_type "$address" "$info" "$name")"
+    if [ "$detailed" != "1" ]; then
+      printf '%s|%s|%s|%s\n' "$status" "$address" "$(clean_field "$name")" "$type"
+      continue
+    fi
+    rssi="$(printf '%s\n' "$info" | awk -F': ' '/RSSI/ {gsub(/[^0-9-]/, "", $2); print $2; exit}')"
+    battery="$(printf '%s\n' "$info" | awk -F'[()]' '/Battery Percentage/ {gsub(/[^0-9]/, "", $2); print $2; exit}')"
+    printf 'DEVICE|%s|%s|%s|%s|%s|%s|%s|%s|%s\n' \
+      "$status" "$address" "$(clean_field "$name")" "$type" \
+      "${paired:-no}" "${trusted:-no}" "${connected:-no}" "${rssi:--127}" "${battery:--1}"
+  done
+}
+
+case "$cmd" in
+  status) emit_status 0 ;;
+  status-detailed) emit_status 1 ;;
+  power) power_adapter "${1:-}" ;;
+  scan) scan_devices "${1:-10}" ;;
+  pair) pair_device "${1:-}" ;;
+  pair-session) pair_session "${1:-}" ;;
+  connect) connect_device "${1:-}" ;;
+  disconnect) disconnect_device "${1:-}" ;;
+  remove) remove_device "${1:-}" ;;
+  icon-set) set_device_icon "${1:-}" "${2:-}" ;;
+  *) fail "$cmd" "unknown command" ;;
+esac

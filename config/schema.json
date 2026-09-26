@@ -1,0 +1,385 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://velora-shell.local/config.schema.json",
+  "title": "Velora Shell configuration",
+  "type": "object",
+  "required": ["schemaVersion"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {"const": 8},
+    "appearance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "locale": {"type": "string", "minLength": 1},
+        "reducedMotion": {"type": "boolean"},
+        "motionPreset": {"enum": ["calm", "balanced", "snappy"]},
+        "intelligentContrast": {"type": "boolean"},
+        "reduceTransparency": {"type": "boolean"},
+        "visualStyle": {"enum": ["editorial", "classic", "minimal"]},
+        "colorScheme": {"enum": ["dark", "light"]},
+        "material": {"enum": ["glass", "solid", "adaptive"]},
+        "surfaceOpacity": {"type": "number", "minimum": 0.45, "maximum": 1},
+        "blurStrength": {"type": "number", "minimum": 0, "maximum": 1},
+        "contrast": {"type": "number", "minimum": 0.8, "maximum": 1.35},
+        "reflection": {"type": "number", "minimum": 0, "maximum": 1},
+        "accentMode": {"enum": ["wallpaper", "custom"]},
+        "pywalTone": {"enum": ["auto", "dark", "light"]},
+        "accentColor": {"type": "string", "pattern": "^#[0-9a-fA-F]{6}$"},
+        "customColors": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "accent": {"type": "string", "pattern": "^#[0-9a-fA-F]{6}$"},
+            "bar": {"type": "string", "pattern": "^#[0-9a-fA-F]{6}$"},
+            "icons": {"type": "string", "pattern": "^#[0-9a-fA-F]{6}$"},
+            "widgets": {"type": "string", "pattern": "^#[0-9a-fA-F]{6}$"},
+            "text": {"type": "string", "pattern": "^#[0-9a-fA-F]{6}$"},
+            "panels": {"type": "string", "pattern": "^#[0-9a-fA-F]{6}$"}
+          }
+        },
+        "characterPywal": {"type": "boolean"}
+      }
+    },
+    "topbar": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "variant": {"enum": ["velora", "end4-first"]},
+        "systemName": {"type": "string", "minLength": 1, "maxLength": 80},
+        "height": {"type": "number", "minimum": 36, "maximum": 52},
+        "scale": {"type": "number", "minimum": 0.75, "maximum": 1.35},
+        "gap": {"type": "number", "minimum": 0, "maximum": 12},
+        "margin": {"type": "number", "minimum": 6, "maximum": 20},
+        "layout": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": {"$ref": "#/$defs/topbarItem"}
+        }
+      }
+    },
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "displayName": {"type": "string", "maxLength": 80},
+        "greeting": {"type": "string", "maxLength": 120},
+        "verticalLabel": {"type": "string", "maxLength": 80},
+        "avatar": {"type": "string"}
+      }
+    },
+    "lockPreview": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "caustics": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "intensity": {"type": "number", "minimum": 0, "maximum": 1},
+            "lines": {"type": "boolean"},
+            "modules": {"type": "boolean"}
+          }
+        },
+        "dimming": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "mode": {"enum": ["off", "background", "panel", "both"]},
+            "amount": {"type": "number", "minimum": 0, "maximum": 0.72}
+          }
+        },
+        "calendar": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "reminders": {
+              "type": "array",
+              "maxItems": 512,
+              "items": {"$ref": "#/$defs/reminder"}
+            }
+          }
+        },
+        "sharedWidgets": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["layoutTemplate", "layoutSeed", "items"],
+          "properties": {
+            "layoutTemplate": {
+              "enum": ["side-column", "split-corners", "scattered", "gallery-top-right", "custom"]
+            },
+            "layoutSeed": {"type": "string", "minLength": 1, "maxLength": 160},
+            "items": {
+              "type": "array",
+              "minItems": 6,
+              "maxItems": 6,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["id", "kind", "name", "desktopEnabled", "lockEnabled", "locked", "stagger", "baseWidth", "baseHeight", "desktop", "lock"],
+                "properties": {
+                  "id": {"type": "string", "minLength": 1},
+                  "kind": {"enum": ["clock", "calendar", "weather", "media", "gallery", "system"]},
+                  "name": {"type": "string", "maxLength": 80},
+                  "desktopEnabled": {"type": "boolean"},
+                  "lockEnabled": {"type": "boolean"},
+                  "locked": {"type": "boolean"},
+                  "stagger": {"type": "integer", "minimum": 0, "maximum": 31},
+                  "baseWidth": {"type": "number", "minimum": 8, "maximum": 8192},
+                  "baseHeight": {"type": "number", "minimum": 8, "maximum": 8192},
+                  "desktopSize": {"$ref": "#/$defs/widgetSize"},
+                  "lockSize": {"$ref": "#/$defs/widgetSize"},
+                  "desktop": {"$ref": "#/$defs/widgetTransform"},
+                  "lock": {"$ref": "#/$defs/widgetTransform"},
+                  "desktopStyle": {"$ref": "#/$defs/itemStyle"},
+                  "lockStyle": {"$ref": "#/$defs/itemStyle"},
+                  "variantId": {"type": "string", "maxLength": 80}
+                }
+              }
+            }
+          }
+        },
+        "character": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "path": {"type": "string"},
+            "scale": {"type": "number", "minimum": 0.5, "maximum": 2.5},
+            "offsetX": {"type": "number", "minimum": -800, "maximum": 800},
+            "offsetY": {"type": "number", "minimum": -800, "maximum": 800},
+            "flipX": {"type": "boolean"}
+          }
+        },
+        "clock": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "scale": {"type": "number", "minimum": 0.55, "maximum": 1.8},
+            "offsetX": {"type": "number", "minimum": -500, "maximum": 500},
+            "offsetY": {"type": "number", "minimum": -400, "maximum": 400}
+          }
+        },
+        "titles": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "greeting": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "fontSize": {"type": "number", "minimum": 10, "maximum": 64},
+                "offsetX": {"type": "number", "minimum": -500, "maximum": 500},
+                "offsetY": {"type": "number", "minimum": -400, "maximum": 400}
+              }
+            },
+            "vertical": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "fontSize": {"type": "number", "minimum": 10, "maximum": 64},
+                "offsetX": {"type": "number", "minimum": -500, "maximum": 500},
+                "offsetY": {"type": "number", "minimum": -400, "maximum": 400}
+              }
+            }
+          }
+        },
+        "gallery": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": {
+            "oneOf": [
+              {"type": "string"},
+              {
+                "type": "object",
+                "required": ["path"],
+                "additionalProperties": false,
+                "properties": {
+                  "path": {"type": "string"},
+                  "scale": {"type": "number", "minimum": 0.65, "maximum": 2.5},
+                  "offsetX": {"type": "number", "minimum": -400, "maximum": 400},
+                  "offsetY": {"type": "number", "minimum": -400, "maximum": 400},
+                  "flipX": {"type": "boolean"}
+                }
+              }
+            ]
+          }
+        },
+        "galleryOrder": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "uniqueItems": true,
+          "items": {"type": "integer", "minimum": 0, "maximum": 2}
+        },
+        "scene": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["layers"],
+          "properties": {
+            "layers": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["id", "type", "name", "plane", "order", "visible", "locked", "transform"],
+                "additionalProperties": false,
+                "properties": {
+                  "id": {"type": "string", "minLength": 1},
+                  "type": {"enum": ["character", "image", "clock", "calendar", "weather", "profileHeader", "greeting", "verticalLabel", "gallery", "mediaPlayer", "photoGrid", "text"]},
+                  "name": {"type": "string", "maxLength": 80},
+                  "plane": {"enum": ["belowPanel", "abovePanel"]},
+                  "order": {"type": "integer", "minimum": 0},
+                  "visible": {"type": "boolean"},
+                  "desktopEnabled": {"type": "boolean"},
+                  "lockEnabled": {"type": "boolean"},
+                  "locked": {"type": "boolean"},
+                  "source": {"type": "string"},
+                  "baseWidth": {"type": "number", "minimum": 8, "maximum": 8192},
+                  "baseHeight": {"type": "number", "minimum": 8, "maximum": 8192},
+                  "desktop": {"$ref": "#/$defs/widgetTransform"},
+                  "lock": {"$ref": "#/$defs/widgetTransform"},
+                  "desktopStyle": {"$ref": "#/$defs/itemStyle"},
+                  "lockStyle": {"$ref": "#/$defs/itemStyle"},
+                  "crop": {"$ref": "#/$defs/crop"},
+                  "variantId": {"type": "string", "maxLength": 80},
+                  "text": {"type": "string", "maxLength": 2000},
+                  "items": {
+                    "type": "array",
+                    "maxItems": 16,
+                    "items": {"$ref": "#/$defs/photoItem"}
+                  },
+                  "transform": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["x", "y", "scale", "rotation", "opacity", "flipX"],
+                    "properties": {
+                      "x": {"type": "number", "minimum": -1600, "maximum": 3200},
+                      "y": {"type": "number", "minimum": -900, "maximum": 1800},
+                      "scale": {"type": "number", "minimum": 0.02, "maximum": 32},
+                      "rotation": {"type": "number", "minimum": -360, "maximum": 360},
+                      "opacity": {"type": "number", "minimum": 0, "maximum": 1},
+                      "flipX": {"type": "boolean"}
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "dock": {
+          "type": "array",
+          "maxItems": 12,
+          "items": {
+            "type": "object",
+            "required": ["id", "symbol", "label"],
+            "additionalProperties": false,
+            "properties": {
+              "id": {"type": "string", "minLength": 1},
+              "symbol": {"type": "string", "minLength": 1, "maxLength": 4},
+              "label": {"type": "string", "maxLength": 80},
+              "surface": {"enum": ["clear", "dark"]}
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "topbarItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "section", "order", "enabled", "scale"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1, "maxLength": 80},
+        "type": {"enum": ["brand", "workspaces", "launcher", "search", "context", "weather", "clock", "media", "wifi", "volume", "battery", "settings", "avatar"]},
+        "section": {"enum": ["left", "center", "right"]},
+        "order": {"type": "integer", "minimum": 0, "maximum": 31},
+        "enabled": {"type": "boolean"},
+        "scale": {"type": "number", "minimum": 0.75, "maximum": 1.35}
+      }
+    },
+    "widgetTransform": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y", "scale", "rotation", "opacity", "flipX"],
+      "properties": {
+        "x": {"type": "number", "minimum": -1600, "maximum": 3200},
+        "y": {"type": "number", "minimum": -900, "maximum": 1800},
+        "scale": {"type": "number", "minimum": 0.02, "maximum": 32},
+        "rotation": {"type": "number", "minimum": -360, "maximum": 360},
+        "opacity": {"type": "number", "minimum": 0, "maximum": 1},
+        "flipX": {"type": "boolean"}
+      }
+    },
+    "widgetSize": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["width", "height"],
+      "properties": {
+        "width": {"type": "number", "minimum": 8, "maximum": 8192},
+        "height": {"type": "number", "minimum": 8, "maximum": 8192}
+      }
+    },
+    "crop": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y", "width", "height"],
+      "properties": {
+        "x": {"type": "number", "minimum": 0, "maximum": 1},
+        "y": {"type": "number", "minimum": 0, "maximum": 1},
+        "width": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+        "height": {"type": "number", "exclusiveMinimum": 0, "maximum": 1}
+      }
+    },
+    "itemStyle": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "material": {"enum": ["inherit", "liquid", "solid", "none"]},
+        "solidColor": {"type": "string"},
+        "surfaceOpacity": {"type": "number", "minimum": 0, "maximum": 1},
+        "radius": {"type": "number", "minimum": 0, "maximum": 240},
+        "fontFamily": {"type": "string", "maxLength": 160},
+        "displayFontFamily": {"type": "string", "maxLength": 160},
+        "fontAsset": {"type": "string"},
+        "fontScale": {"type": "number", "minimum": 0.25, "maximum": 4},
+        "fontWeight": {"type": "integer", "minimum": 100, "maximum": 900},
+        "letterSpacing": {"type": "number", "minimum": -8, "maximum": 32},
+        "textColor": {"type": "string"},
+        "accentColor": {"type": "string"},
+        "galleryLayout": {"enum": ["feature", "grid2", "grid3", "grid4"]},
+        "gap": {"type": "number", "minimum": 0, "maximum": 80}
+      }
+    },
+    "photoItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "path", "crop", "flipX"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "path": {"type": "string"},
+        "crop": {"$ref": "#/$defs/crop"},
+        "flipX": {"type": "boolean"}
+      }
+    },
+    "reminder": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "start", "end", "allDay", "notes", "color", "completed", "repeat"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "title": {"type": "string", "minLength": 1, "maxLength": 160},
+        "start": {"type": "string"},
+        "end": {"type": "string"},
+        "allDay": {"type": "boolean"},
+        "notes": {"type": "string", "maxLength": 2000},
+        "color": {"type": "string"},
+        "completed": {"type": "boolean"},
+        "repeat": {"enum": ["none", "daily", "weekly", "monthly", "yearly"]}
+      }
+    }
+  }
+}

@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -u
+
+kitty_config="${XDG_CONFIG_HOME:-$HOME/.config}/kitty/kitty.conf"
+restore_opacity="0.4"
+
+if [[ -r "$kitty_config" ]]; then
+  configured_opacity="$(awk '$1 == "background_opacity" && $0 !~ /^[[:space:]]*#/ { print $2; exit }' "$kitty_config")"
+  if [[ "$configured_opacity" =~ ^(0(\.[0-9]+)?|1(\.0+)?)$ ]]; then
+    restore_opacity="$configured_opacity"
+  fi
+fi
+
+restore_background() {
+  if [[ -n "${KITTY_WINDOW_ID:-}" ]] && command -v kitten >/dev/null 2>&1; then
+    kitten @ set-background-opacity --match "id:${KITTY_WINDOW_ID}" "$restore_opacity" >/dev/null 2>&1 || true
+  fi
+}
+
+if [[ -n "${KITTY_WINDOW_ID:-}" ]] && command -v kitten >/dev/null 2>&1; then
+  kitten @ set-background-opacity --match "id:${KITTY_WINDOW_ID}" 0 >/dev/null 2>&1 || true
+  trap restore_background EXIT
+fi
+
+/usr/bin/cmatrix "$@"

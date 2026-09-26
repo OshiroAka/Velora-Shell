@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+project_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+source_id=$(printf '%s' "$project_dir" | sha256sum | cut -c1-16)
+build_dir=${VELORA_BUILD_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/velora-shell/build/$source_id}
+jobs=${VELORA_BUILD_JOBS:-2}
+for module in spectrum visualizer hyprland; do
+    cmake -S "$project_dir/native/$module" -B "$build_dir/$module" -DCMAKE_BUILD_TYPE=Release >&2
+    cmake --build "$build_dir/$module" --parallel "$jobs" >&2
+done
+printf '%s\n' "$build_dir"

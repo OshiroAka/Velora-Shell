@@ -1,0 +1,518 @@
+{
+  "schemaVersion": 8,
+  "appearance": {
+    "locale": "system",
+    "reducedMotion": false,
+    "motionPreset": "balanced",
+    "intelligentContrast": true,
+    "reduceTransparency": false,
+    "visualStyle": "classic",
+    "colorScheme": "dark",
+    "material": "glass",
+    "surfaceOpacity": 0.82,
+    "blurStrength": 0.55,
+    "contrast": 1.08,
+    "reflection": 0.35,
+    "accentMode": "wallpaper",
+    "pywalTone": "auto",
+    "accentColor": "#c8788f",
+    "customColors": {
+      "accent": "#c8788f",
+      "bar": "#171a22",
+      "icons": "#f4f4f6",
+      "widgets": "#171a22",
+      "text": "#edf1ff",
+      "panels": "#11141b"
+    },
+    "characterPywal": false
+  },
+  "bar": {
+    "material": "glass",
+    "opacity": 0.52,
+    "waveStrength": 0.28
+  },
+  "topbar": {
+    "enabled": true,
+    "variant": "velora",
+    "systemName": "Velora Shell",
+    "height": 40,
+    "scale": 1,
+    "gap": 4,
+    "margin": 8,
+    "layout": [
+      {
+        "id": "bar-brand",
+        "type": "brand",
+        "section": "left",
+        "order": 0,
+        "enabled": false,
+        "scale": 1
+      },
+      {
+        "id": "bar-launcher",
+        "type": "launcher",
+        "section": "left",
+        "order": 1,
+        "enabled": true,
+        "scale": 1
+      },
+      {
+        "id": "bar-workspaces",
+        "type": "workspaces",
+        "section": "left",
+        "order": 2,
+        "enabled": true,
+        "scale": 1
+      },
+      {
+        "id": "bar-context",
+        "type": "context",
+        "section": "left",
+        "order": 3,
+        "enabled": true,
+        "scale": 1
+      },
+      {
+        "id": "bar-search",
+        "type": "search",
+        "section": "left",
+        "order": 4,
+        "enabled": false,
+        "scale": 1
+      },
+      {
+        "id": "bar-weather",
+        "type": "weather",
+        "section": "center",
+        "order": 0,
+        "enabled": true,
+        "scale": 1
+      },
+      {
+        "id": "bar-clock",
+        "type": "clock",
+        "section": "right",
+        "order": 0,
+        "enabled": true,
+        "scale": 1
+      },
+      {
+        "id": "bar-wifi",
+        "type": "wifi",
+        "section": "right",
+        "order": 1,
+        "enabled": true,
+        "scale": 1
+      },
+      {
+        "id": "bar-volume",
+        "type": "volume",
+        "section": "right",
+        "order": 2,
+        "enabled": true,
+        "scale": 1
+      },
+      {
+        "id": "bar-battery",
+        "type": "battery",
+        "section": "right",
+        "order": 3,
+        "enabled": true,
+        "scale": 1
+      },
+      {
+        "id": "bar-settings",
+        "type": "settings",
+        "section": "right",
+        "order": 4,
+        "enabled": true,
+        "scale": 1
+      },
+      {
+        "id": "bar-avatar",
+        "type": "avatar",
+        "section": "right",
+        "order": 5,
+        "enabled": false,
+        "scale": 1
+      },
+      {
+        "id": "bar-media",
+        "type": "media",
+        "section": "right",
+        "order": 6,
+        "enabled": true,
+        "scale": 1
+      }
+    ]
+  },
+  "profile": {
+    "displayName": "Velora",
+    "greeting": "Welcome back!",
+    "verticalLabel": "VELORA SHELL",
+    "avatar": "project:assets/profile-avatar.svg"
+  },
+  "lockPreview": {
+    "caustics": {
+      "enabled": true,
+      "intensity": 0.32,
+      "lines": true,
+      "modules": false
+    },
+    "dimming": {
+      "mode": "off",
+      "amount": 0.28
+    },
+    "calendar": {
+      "reminders": []
+    },
+    "sharedWidgets": {
+      "surfaceMode": "solid",
+      "layoutTemplate": "side-column",
+      "layoutSeed": "velora-shell-default",
+      "items": [
+        {
+          "id": "shared-clock",
+          "kind": "clock",
+          "name": "Relógio",
+          "desktopEnabled": true,
+          "lockEnabled": true,
+          "locked": false,
+          "stagger": 0,
+          "baseWidth": 350,
+          "baseHeight": 140,
+          "desktopSize": {
+            "width": 350,
+            "height": 140
+          },
+          "lockSize": {
+            "width": 340,
+            "height": 145
+          },
+          "desktop": {
+            "x": 1210,
+            "y": 345,
+            "scale": 1,
+            "rotation": 0,
+            "opacity": 1,
+            "flipX": false
+          },
+          "lock": {
+            "x": 75,
+            "y": 70,
+            "scale": 1,
+            "rotation": 0,
+            "opacity": 1,
+            "flipX": false
+          },
+          "variantId": "inherit"
+        },
+        {
+          "id": "shared-calendar",
+          "kind": "calendar",
+          "name": "Calendário",
+          "desktopEnabled": true,
+          "lockEnabled": true,
+          "locked": false,
+          "stagger": 1,
+          "baseWidth": 294,
+          "baseHeight": 270,
+          "desktopSize": {
+            "width": 294,
+            "height": 270
+          },
+          "lockSize": {
+            "width": 340,
+            "height": 300
+          },
+          "desktop": {
+            "x": 40,
+            "y": 85,
+            "scale": 1,
+            "rotation": 0,
+            "opacity": 1,
+            "flipX": false
+          },
+          "lock": {
+            "x": 75,
+            "y": 250,
+            "scale": 1,
+            "rotation": 0,
+            "opacity": 1,
+            "flipX": false
+          },
+          "variantId": "inherit"
+        },
+        {
+          "id": "shared-weather",
+          "kind": "weather",
+          "name": "Previsão",
+          "desktopEnabled": true,
+          "lockEnabled": true,
+          "locked": false,
+          "stagger": 2,
+          "baseWidth": 350,
+          "baseHeight": 255,
+          "desktopSize": {
+            "width": 350,
+            "height": 255
+          },
+          "lockSize": {
+            "width": 340,
+            "height": 155
+          },
+          "desktop": {
+            "x": 1210,
+            "y": 500,
+            "scale": 1,
+            "rotation": 0,
+            "opacity": 1,
+            "flipX": false
+          },
+          "lock": {
+            "x": 75,
+            "y": 590,
+            "scale": 1,
+            "rotation": 0,
+            "opacity": 1,
+            "flipX": false
+          },
+          "variantId": "inherit"
+        },
+        {
+          "id": "shared-media",
+          "kind": "media",
+          "name": "Mídia",
+          "desktopEnabled": true,
+          "lockEnabled": true,
+          "locked": false,
+          "stagger": 3,
+          "baseWidth": 360,
+          "baseHeight": 92,
+          "desktopSize": {
+            "width": 360,
+            "height": 92
+          },
+          "lockSize": {
+            "width": 360,
+            "height": 105
+          },
+          "desktop": {
+            "x": 620,
+            "y": 765,
+            "scale": 1,
+            "rotation": 0,
+            "opacity": 1,
+            "flipX": false
+          },
+          "lock": {
+            "x": 1160,
+            "y": 505,
+            "scale": 1,
+            "rotation": 0,
+            "opacity": 1,
+            "flipX": false
+          },
+          "variantId": "inherit"
+        },
+        {
+          "id": "shared-gallery",
+          "kind": "gallery",
+          "name": "Galeria",
+          "desktopEnabled": true,
+          "lockEnabled": true,
+          "locked": false,
+          "stagger": 4,
+          "baseWidth": 350,
+          "baseHeight": 205,
+          "desktopSize": {
+            "width": 350,
+            "height": 205
+          },
+          "lockSize": {
+            "width": 370,
+            "height": 210
+          },
+          "desktop": {
+            "x": 1210,
+            "y": 120,
+            "scale": 1,
+            "rotation": 0,
+            "opacity": 1,
+            "flipX": false
+          },
+          "lock": {
+            "x": 1150,
+            "y": 245,
+            "scale": 1,
+            "rotation": 0,
+            "opacity": 1,
+            "flipX": false
+          },
+          "variantId": "inherit"
+        },
+        {
+          "id": "shared-system",
+          "kind": "system",
+          "name": "Sistema",
+          "desktopEnabled": true,
+          "lockEnabled": false,
+          "locked": false,
+          "stagger": 5,
+          "baseWidth": 294,
+          "baseHeight": 355,
+          "desktopSize": {
+            "width": 294,
+            "height": 355
+          },
+          "lockSize": {
+            "width": 350,
+            "height": 240
+          },
+          "desktop": {
+            "x": 40,
+            "y": 380,
+            "scale": 1,
+            "rotation": 0,
+            "opacity": 1,
+            "flipX": false
+          },
+          "lock": {
+            "x": 1170,
+            "y": 75,
+            "scale": 1,
+            "rotation": 0,
+            "opacity": 1,
+            "flipX": false
+          },
+          "variantId": "inherit"
+        }
+      ]
+    },
+    "character": {
+      "path": "",
+      "scale": 1.0,
+      "offsetX": 0,
+      "offsetY": 0,
+      "flipX": false
+    },
+    "clock": {
+      "scale": 1.0,
+      "offsetX": 0,
+      "offsetY": 0
+    },
+    "titles": {
+      "greeting": {
+        "fontSize": 25,
+        "offsetX": 0,
+        "offsetY": 0
+      },
+      "vertical": {
+        "fontSize": 19,
+        "offsetX": 0,
+        "offsetY": 0
+      }
+    },
+    "gallery": [
+      {
+        "path": "",
+        "scale": 1.0,
+        "offsetX": 0,
+        "offsetY": 0,
+        "flipX": false
+      },
+      {
+        "path": "",
+        "scale": 1.0,
+        "offsetX": 0,
+        "offsetY": 0,
+        "flipX": false
+      },
+      {
+        "path": "",
+        "scale": 1.0,
+        "offsetX": 0,
+        "offsetY": 0,
+        "flipX": false
+      }
+    ],
+    "galleryOrder": [
+      0,
+      1,
+      2
+    ],
+    "scene": {
+      "layers": [
+        {
+          "id": "character",
+          "type": "character",
+          "name": "Personagem",
+          "plane": "abovePanel",
+          "order": 50,
+          "visible": true,
+          "locked": false,
+          "transform": {
+            "x": 482.5,
+            "y": 25,
+            "scale": 1,
+            "rotation": 0,
+            "opacity": 1,
+            "flipX": false
+          }
+        },
+        {
+          "id": "vertical-label",
+          "type": "verticalLabel",
+          "name": "Texto vertical",
+          "plane": "abovePanel",
+          "order": 60,
+          "visible": true,
+          "locked": false,
+          "transform": {
+            "x": 1045.5,
+            "y": 255,
+            "scale": 1,
+            "rotation": 0,
+            "opacity": 1,
+            "flipX": false
+          }
+        },
+        {
+          "id": "profile-header",
+          "type": "profileHeader",
+          "name": "Perfil",
+          "plane": "abovePanel",
+          "order": 70,
+          "visible": true,
+          "locked": false,
+          "transform": {
+            "x": 1240.5,
+            "y": 132,
+            "scale": 1,
+            "rotation": 0,
+            "opacity": 1,
+            "flipX": false
+          }
+        },
+        {
+          "id": "greeting",
+          "type": "greeting",
+          "name": "Saudação",
+          "plane": "abovePanel",
+          "order": 80,
+          "visible": true,
+          "locked": false,
+          "transform": {
+            "x": 1234.5,
+            "y": 250,
+            "scale": 1,
+            "rotation": 0,
+            "opacity": 1,
+            "flipX": false
+          }
+        }
+      ]
+    },
+    "dock": []
+  }
+}

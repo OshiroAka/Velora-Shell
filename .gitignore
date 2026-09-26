@@ -1,0 +1,37 @@
+# User data and credentials
+.env
+.env.*
+*.env
+*.key
+*.pem
+config/local.json
+
+# Build products and runtime state
+build/
+.build/
+*.o
+*.so
+*.log
+*.tmp
+*.qmlc
+*.jsc
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.qmlcache/
+.cache/
+themes/pywal16.json
+
+# Local copies and editor files
+backups/
+backup/
+*.bak*
+*.old
+*.backup
+*.orig
+*.rej
+*~
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

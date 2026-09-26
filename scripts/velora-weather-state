@@ -1,0 +1,309 @@
+#!/usr/bin/env python3
+import json
+import os
+import sys
+import time
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+
+CACHE_TTL = 900
+
+
+def cache_path() -> Path:
+    base = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
+    return base / "velora-shell" / "weather.json"
+
+
+def configured_location() -> str:
+    env_location = os.environ.get("VELORA_WEATHER_LOCATION", "").strip()
+    if env_location:
+        return env_location
+
+    config_home = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
+    location_file = config_home / "velora-shell" / "weather-location"
+    try:
+        return location_file.read_text(encoding="utf-8").strip()
+    except Exception:
+        return ""
+
+
+def safe_text(value, fallback="") -> str:
+    if value is None:
+        return fallback
+    text = str(value).strip()
+    return text if text else fallback
+
+
+def first_value(items, key="value") -> str:
+    if isinstance(items, list) and items:
+        return safe_text(items[0].get(key) if isinstance(items[0], dict) else items[0])
+    return ""
+
+
+def location_from_raw(raw: dict) -> str:
+    area = (raw.get("nearest_area") or [{}])[0]
+    city = first_value(area.get("areaName"))
+    region = first_value(area.get("region"))
+    country = first_value(area.get("country"))
+    location = ", ".join(part for part in [city, region] if part)
+    return location or country or "Localizacao atual"
+
+
+def desc_from_raw(item: dict) -> str:
+    localized_desc = first_value(item.get("lang_pt"))
+    return localized_desc or first_value(item.get("weatherDesc")) or "Clima indisponivel"
+
+
+def weather_icon(desc: str, code: str = "") -> str:
+    text = (desc or "").lower()
+    if "chuva" in text or "rain" in text or "garoa" in text:
+        return "rain"
+    if "neve" in text or "snow" in text:
+        return "snow"
+    if "trovo" in text or "thunder" in text:
+        return "storm"
+    if "nublado" in text or "cloud" in text:
+        return "cloud"
+    if "limpo" in text or "clear" in text or "sol" in text or "sunny" in text:
+        return "sun"
+    if str(code) in {"113"}:
+        return "sun"
+    if str(code) in {"116", "119", "122", "143", "248", "260"}:
+        return "cloud"
+    if str(code).startswith("2") or str(code).startswith("3"):
+        return "rain"
+    return "partly"
+
+
+def time_label(raw_time: str) -> str:
+    text = safe_text(raw_time, "0")
+    try:
+        value = int(text)
+    except Exception:
+        value = 0
+    hour = value // 100
+    minute = value % 100
+    return f"{hour:02d}:{minute:02d}"
+
+
+def normalize_hourly(raw: dict, limit=12) -> list[dict]:
+    out = []
+    for day in raw.get("weather") or []:
+        for hour in day.get("hourly") or []:
+            desc = desc_from_raw(hour)
+            out.append({
+                "time": "Agora" if not out else time_label(hour.get("time", "0")),
+                "temp": safe_text(hour.get("tempC"), "--"),
+                "feels": safe_text(hour.get("FeelsLikeC"), "--"),
+                "desc": desc,
+                "humidity": safe_text(hour.get("humidity"), "--"),
+                "wind": safe_text(hour.get("windspeedKmph"), "--"),
+                "rain": safe_text(hour.get("chanceofrain"), "0"),
+                "icon": weather_icon(desc, safe_text(hour.get("weatherCode"))),
+            })
+            if len(out) >= limit:
+                return out
+    return out
+
+
+def normalize_daily(raw: dict, limit=7) -> list[dict]:
+    out = []
+    for index, day in enumerate(raw.get("weather") or []):
+        hourly = day.get("hourly") or []
+        desc = desc_from_raw(hourly[len(hourly) // 2]) if hourly else "Clima indisponivel"
+        rain_values = []
+        for hour in hourly:
+            try:
+                rain_values.append(int(safe_text(hour.get("chanceofrain"), "0")))
+            except Exception:
+                pass
+        out.append({
+            "date": safe_text(day.get("date")),
+            "label": "Hoje" if index == 0 else safe_text(day.get("date")),
+            "max": safe_text(day.get("maxtempC"), "--"),
+            "min": safe_text(day.get("mintempC"), "--"),
+            "avg": safe_text(day.get("avgtempC"), "--"),
+            "desc": desc,
+            "rain": str(max(rain_values) if rain_values else 0),
+            "uv": safe_text(day.get("uvIndex"), "--"),
+            "icon": weather_icon(desc),
+        })
+        if len(out) >= limit:
+            break
+    return out
+
+
+def normalize(raw: dict, from_cache=False) -> dict:
+    current = (raw.get("current_condition") or [{}])[0]
+    today = (raw.get("weather") or [{}])[0]
+    astronomy = (today.get("astronomy") or [{}])[0]
+    desc = desc_from_raw(current)
+    hourly = normalize_hourly(raw)
+    daily = normalize_daily(raw)
+    chance_rain = hourly[0].get("rain", "0") if hourly else "0"
+
+    return {
+        "schema": 2,
+        "location": location_from_raw(raw),
+        "temp": safe_text(current.get("temp_C"), "--"),
+        "max": safe_text(today.get("maxtempC"), "--"),
+        "min": safe_text(today.get("mintempC"), "--"),
+        "desc": desc,
+        "humidity": safe_text(current.get("humidity"), "--"),
+        "wind": safe_text(current.get("windspeedKmph"), "--"),
+        "wind_dir": safe_text(current.get("winddir16Point"), ""),
+        "feels": safe_text(current.get("FeelsLikeC"), "--"),
+        "rain": chance_rain,
+        "uv": safe_text(current.get("uvIndex"), safe_text(today.get("uvIndex"), "--")),
+        "sunrise": safe_text(astronomy.get("sunrise"), "--"),
+        "sunset": safe_text(astronomy.get("sunset"), "--"),
+        "icon": weather_icon(desc, safe_text(current.get("weatherCode"))),
+        "hourly": hourly,
+        "daily": daily,
+        "air_quality": {
+            "label": "Sem dados",
+            "aqi": "--",
+            "detail": "Qualidade do ar nao disponivel neste provedor.",
+        },
+        "rain_map": {
+            "label": "Sem mapa real",
+            "detail": "Radar de chuva indisponivel neste provedor.",
+        },
+        "from_cache": bool(from_cache),
+        "updated": int(time.time()),
+    }
+
+
+def output(item: dict) -> None:
+    fields = [
+        "WEATHER",
+        item.get("location", "Localizacao atual"),
+        item.get("temp", "--"),
+        item.get("max", "--"),
+        item.get("min", "--"),
+        item.get("desc", "Clima indisponivel"),
+        item.get("humidity", "--"),
+        item.get("wind", "--"),
+        item.get("feels", "--"),
+        "1" if item.get("from_cache") else "0",
+        str(item.get("updated", "")),
+    ]
+    print("|".join(str(field).replace("|", "/").replace("\n", " ") for field in fields))
+
+
+def fallback_rich_from_legacy(item: dict | None) -> dict:
+    item = item or {}
+    desc = item.get("desc", "Clima indisponivel")
+    return {
+        "schema": 2,
+        "location": item.get("location", "Localizacao atual"),
+        "temp": item.get("temp", "--"),
+        "max": item.get("max", "--"),
+        "min": item.get("min", "--"),
+        "desc": desc,
+        "humidity": item.get("humidity", "--"),
+        "wind": item.get("wind", "--"),
+        "wind_dir": item.get("wind_dir", ""),
+        "feels": item.get("feels", "--"),
+        "rain": item.get("rain", "--"),
+        "uv": item.get("uv", "--"),
+        "sunrise": item.get("sunrise", "--"),
+        "sunset": item.get("sunset", "--"),
+        "icon": item.get("icon", weather_icon(str(desc))),
+        "hourly": item.get("hourly", []),
+        "daily": item.get("daily", []),
+        "air_quality": item.get("air_quality", {
+            "label": "Sem dados",
+            "aqi": "--",
+            "detail": "Qualidade do ar nao disponivel neste provedor.",
+        }),
+        "rain_map": item.get("rain_map", {
+            "label": "Sem mapa real",
+            "detail": "Radar de chuva indisponivel neste provedor.",
+        }),
+        "from_cache": bool(item.get("from_cache", True)),
+        "updated": item.get("updated", ""),
+    }
+
+
+def output_json(item: dict) -> None:
+    print(json.dumps(fallback_rich_from_legacy(item), ensure_ascii=False, separators=(",", ":")))
+
+
+def load_cache() -> dict | None:
+    try:
+        return json.loads(cache_path().read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def save_cache(item: dict) -> None:
+    path = cache_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(item, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    tmp.replace(path)
+
+
+def fetch_weather() -> dict:
+    location = configured_location()
+    location_part = "/" + urllib.parse.quote(location) if location else ""
+    url = f"https://wttr.in{location_part}?format=j1&lang=pt"
+    request = urllib.request.Request(url, headers={"User-Agent": "Velora-Shell/1.0"})
+    with urllib.request.urlopen(request, timeout=5) as response:
+        raw = json.loads(response.read().decode("utf-8"))
+    return normalize(raw, False)
+
+
+def main() -> None:
+    force = "--force" in sys.argv[1:]
+    json_mode = "json" in sys.argv[1:] or "--json" in sys.argv[1:]
+    cached = load_cache()
+    now = int(time.time())
+
+    if cached and not force and now - int(cached.get("updated", 0)) < CACHE_TTL:
+        if json_mode:
+            output_json(cached)
+        else:
+            output(cached)
+        return
+
+    try:
+        item = fetch_weather()
+        save_cache(item)
+        if json_mode:
+            output_json(item)
+        else:
+            output(item)
+        return
+    except Exception:
+        if cached:
+            cached["from_cache"] = True
+            if json_mode:
+                output_json(cached)
+            else:
+                output(cached)
+            return
+
+    fallback = {
+        "location": "Localizacao atual",
+        "temp": "--",
+        "max": "--",
+        "min": "--",
+        "desc": "Sem conexao",
+        "humidity": "--",
+        "wind": "--",
+        "feels": "--",
+        "from_cache": True,
+        "updated": "",
+    }
+    if json_mode:
+        output_json(fallback)
+    else:
+        output(fallback)
+
+
+if __name__ == "__main__":
+    main()

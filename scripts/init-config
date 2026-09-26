@@ -1,0 +1,13 @@
+#!/usr/bin/env python3
+"""Initialize portable defaults without importing any user content."""
+import os
+from pathlib import Path
+
+root = Path(__file__).resolve().parents[1]
+directory = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "velora-shell"
+directory.mkdir(parents=True, exist_ok=True)
+try:
+    with (directory / "config.json").open("x", encoding="utf-8") as handle:
+        handle.write((root / "config/default.json").read_text(encoding="utf-8"))
+except FileExistsError:
+    pass

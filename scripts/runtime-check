@@ -1,0 +1,43 @@
+#!/usr/bin/env python3
+"""Check QML loading or query the active Velora Shell instance."""
+import argparse
+import json
+import os
+import subprocess
+import tempfile
+from pathlib import Path
+
+root = Path(__file__).resolve().parents[1]
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--parse", action="store_true", help="Load all QML types without creating desktop surfaces")
+parser.add_argument("--build-dir", type=Path)
+args = parser.parse_args()
+env = os.environ.copy()
+runtime_bin = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share") / "velora-shell/runtime/quickshell/bin"
+env["PATH"] = str(runtime_bin) + os.pathsep + env.get("PATH", "")
+if args.parse:
+    build = args.build_dir or Path(subprocess.check_output([str(root / "scripts/build")], text=True).strip())
+    env.update(QT_QPA_PLATFORM="wayland", VELORA_VALIDATE="1",
+               QML_IMPORT_PATH=f"{build}/visualizer/qml:{build}/spectrum/qml")
+    with tempfile.TemporaryDirectory(prefix="velora-validation-") as temporary:
+        env["XDG_CACHE_HOME"] = temporary + "/cache"
+        process = subprocess.Popen(["qs", "-p", str(root)], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        try:
+            output, _ = process.communicate(timeout=6)
+        except subprocess.TimeoutExpired:
+            process.terminate()
+            output, _ = process.communicate(timeout=5)
+        print(output)
+        if "Configuration Loaded" not in output or "ERROR" in output or "unresolvable import" in output:
+            raise SystemExit(1)
+else:
+    result = subprocess.run(["qs", "-p", str(root), "ipc", "call", "composition", "status"], env=env, capture_output=True, text=True)
+    if result.returncode:
+        raise SystemExit(result.stderr.strip() or "Velora Shell is not responding in this session")
+    state = json.loads(result.stdout)
+    if not state.get("ready") or state.get("configurationError") or state["compositionProfiles"].get("error"):
+        raise SystemExit("Velora Shell reports an initialization error")
+    print(json.dumps({"ready": state["ready"], "widgets": state["sharedWidgets"]["count"],
+                      "profiles": state["compositionProfiles"]["count"],
+                      "nativeVisualizer": state["visualizer"]["native"],
+                      "topbar": state["topbar"]["enabled"]}))

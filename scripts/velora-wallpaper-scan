@@ -1,0 +1,402 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cache_root="$HOME/.cache/velora-shell"
+cache_live="$cache_root/live-previews"
+cache_engine="$cache_root/engine-previews"
+cache_metadata="$cache_root/wallpaper-metadata-v2"
+json_mode=0
+refresh_requested=0
+
+for arg in "$@"; do
+  case "$arg" in
+    --json) json_mode=1 ;;
+    --refresh) refresh_requested=1 ;;
+  esac
+done
+runtime_root="${XDG_RUNTIME_DIR:-}"
+if [ -z "$runtime_root" ] || [ ! -d "$runtime_root" ]; then
+  runtime_root="/dev/shm"
+fi
+cache_ram="$runtime_root/velora-shell/wallpaper-previews"
+declare -A seen_static=()
+declare -A seen_engine=()
+
+mkdir -p "$cache_live" "$cache_engine" "$cache_metadata"
+if ! mkdir -p "$cache_ram" >/dev/null 2>&1 || ! touch "$cache_ram/.write-test" >/dev/null 2>&1; then
+  cache_ram="/tmp/velora-shell/wallpaper-previews"
+  if ! mkdir -p "$cache_ram" >/dev/null 2>&1 || ! touch "$cache_ram/.write-test" >/dev/null 2>&1; then
+    cache_ram="/dev/shm/velora-shell/wallpaper-previews"
+    if ! mkdir -p "$cache_ram" >/dev/null 2>&1 || ! touch "$cache_ram/.write-test" >/dev/null 2>&1; then
+      cache_ram="$cache_root/ram-fallback-previews"
+      mkdir -p "$cache_ram"
+    fi
+  fi
+fi
+rm -f "$cache_ram/.write-test" >/dev/null 2>&1 || true
+if [ "$json_mode" -eq 1 ]; then
+  cache_list="$cache_ram/wallpapers-json.list"
+else
+  cache_list="$cache_ram/wallpapers.list"
+fi
+cache_lock="$cache_ram/wallpapers.lock"
+find "$cache_ram" -type f -mmin +720 -delete >/dev/null 2>&1 || true
+
+emit_cached_list() {
+  [ -s "$cache_list" ] || return 1
+  find "$cache_list" -mmin -10 -print -quit 2>/dev/null | grep -q . || return 1
+  cat "$cache_list"
+  return 0
+}
+
+if [ "$refresh_requested" -eq 0 ] && emit_cached_list; then
+  exit 0
+fi
+
+exec 9>"$cache_lock"
+if ! flock -n 9; then
+  for _ in $(seq 1 80); do
+    if [ "$refresh_requested" -eq 0 ] && emit_cached_list; then
+      exit 0
+    fi
+    sleep 0.05
+  done
+
+  flock 9
+  if [ "$refresh_requested" -eq 0 ] && emit_cached_list; then
+    exit 0
+  fi
+fi
+
+make_thumb() {
+  local input="$1"
+  local output="$2"
+
+  command -v ffmpeg >/dev/null 2>&1 || return 0
+  [ -s "$output" ] && return 0
+
+  ffmpeg -hide_banner -loglevel error -y \
+    -ss 2 -i "$input" \
+    -frames:v 1 \
+    -vf "scale=640:-2:force_original_aspect_ratio=decrease" \
+    "$output" >/dev/null 2>&1 || true
+}
+
+safe_name() {
+  local base="$1"
+  printf '%s' "$base" | tr -c 'A-Za-z0-9._-' '_'
+}
+
+cache_key() {
+  local input="$1"
+  local size mtime
+
+  size="$(stat -c '%s' "$input" 2>/dev/null || printf '0')"
+  mtime="$(stat -c '%Y' "$input" 2>/dev/null || printf '0')"
+  printf '%s|%s|%s' "$input" "$size" "$mtime" | sha256sum | awk '{print $1}'
+}
+
+json_escape() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  value="${value//$'\n'/\\n}"
+  value="${value//$'\r'/\\r}"
+  value="${value//$'\t'/\\t}"
+  printf '%s' "$value"
+}
+
+color_group() {
+  local hex="$1"
+  local r=$((16#${hex:0:2}))
+  local g=$((16#${hex:2:2}))
+  local b=$((16#${hex:4:2}))
+
+  awk -v r="$r" -v g="$g" -v b="$b" 'BEGIN {
+    max = r; if (g > max) max = g; if (b > max) max = b
+    min = r; if (g < min) min = g; if (b < min) min = b
+    delta = max - min
+    saturation = max > 0 ? delta / max : 0
+    if (max < 42 || saturation < 0.16) { print "neutral"; exit }
+    if (max == r) hue = 60 * ((g - b) / delta)
+    else if (max == g) hue = 60 * (2 + (b - r) / delta)
+    else hue = 60 * (4 + (r - g) / delta)
+    if (hue < 0) hue += 360
+    if (hue < 18 || hue >= 342) print "red"
+    else if (hue < 48) print "orange"
+    else if (hue < 72) print "yellow"
+    else if (hue < 165) print "green"
+    else if (hue < 200) print "cyan"
+    else if (hue < 260) print "blue"
+    else if (hue < 315) print "purple"
+    else print "pink"
+  }'
+}
+
+wallpaper_color_metadata() {
+  local source="$1"
+  local preview="$2"
+  local key key_source metadata_file raw hex group tmp
+
+  [ -f "$preview" ] || preview="$source"
+  [ -f "$preview" ] || {
+    printf '#808080|neutral'
+    return 0
+  }
+
+  key_source="$source"
+  [ -f "$key_source" ] || key_source="$preview"
+  key="$(cache_key "$key_source")"
+  metadata_file="$cache_metadata/${key}.color"
+  if [ -s "$metadata_file" ]; then
+    cat "$metadata_file"
+    return 0
+  fi
+
+  raw=""
+  if command -v magick >/dev/null 2>&1; then
+    raw="$(magick "${preview}[0]" -auto-orient -resize '1x1!' -alpha off -format '%[hex:p{0,0}]' info: 2>/dev/null || true)"
+  elif command -v convert >/dev/null 2>&1; then
+    raw="$(convert "${preview}[0]" -auto-orient -resize '1x1!' -alpha off -format '%[hex:p{0,0}]' info: 2>/dev/null || true)"
+  fi
+
+  hex="$(printf '%s' "$raw" | tr '[:lower:]' '[:upper:]' | tr -cd '0-9A-F' | cut -c1-6)"
+  if [ "${#hex}" -ne 6 ]; then
+    hex="808080"
+  fi
+  group="$(color_group "$hex")"
+  tmp="${metadata_file}.$$-tmp"
+  printf '#%s|%s' "$hex" "$group" > "$tmp"
+  mv -f "$tmp" "$metadata_file"
+  printf '#%s|%s' "$hex" "$group"
+}
+
+emit_wallpaper() {
+  local kind="$1"
+  local path="$2"
+  local preview="$3"
+  local title="$4"
+  local media_type="$5"
+
+  if [ "$json_mode" -eq 0 ]; then
+    printf '%s|%s|%s|%s\n' "${kind^^}" "$path" "$preview" "$title"
+    return 0
+  fi
+
+  local metadata dominant_color color_group_name key
+  metadata="$(wallpaper_color_metadata "$path" "$preview")"
+  dominant_color="${metadata%%|*}"
+  color_group_name="${metadata#*|}"
+  key="${kind}:${path}"
+
+  printf '{"key":"%s","kind":"%s","mediaType":"%s","path":"%s","preview":"%s","title":"%s","dominantColor":"%s","colorGroup":"%s"}\n' \
+    "$(json_escape "$key")" \
+    "$(json_escape "$kind")" \
+    "$(json_escape "$media_type")" \
+    "$(json_escape "$path")" \
+    "$(json_escape "$preview")" \
+    "$(json_escape "$title")" \
+    "$(json_escape "$dominant_color")" \
+    "$(json_escape "$color_group_name")"
+}
+
+cache_preview_ram() {
+  local input="$1"
+  local key output tmp
+
+  [ -f "$input" ] || {
+    printf '%s' "$input"
+    return 0
+  }
+
+  key="$(cache_key "$input")"
+  output="$cache_ram/${key}.jpg"
+  [ -s "$output" ] && {
+    printf '%s' "$output"
+    return 0
+  }
+
+  tmp="$cache_ram/${key}.$$-tmp.jpg"
+  if command -v magick >/dev/null 2>&1; then
+    magick "${input}[0]" -auto-orient -resize '1200x720>' -strip -quality 84 "$tmp" >/dev/null 2>&1 || true
+  elif command -v convert >/dev/null 2>&1; then
+    convert "${input}[0]" -auto-orient -resize '1200x720>' -strip -quality 84 "$tmp" >/dev/null 2>&1 || true
+  elif command -v ffmpeg >/dev/null 2>&1; then
+    ffmpeg -hide_banner -loglevel error -y -i "$input" -frames:v 1 -vf "scale=1200:-2:force_original_aspect_ratio=decrease" "$tmp" >/dev/null 2>&1 || true
+  fi
+
+  if [ -s "$tmp" ]; then
+    mv -f "$tmp" "$output"
+    printf '%s' "$output"
+  else
+    rm -f "$tmp"
+    printf '%s' "$input"
+  fi
+}
+
+project_preview() {
+  local root="$1"
+  python3 - "$root" <<'PY' 2>/dev/null || true
+import json
+import os
+import sys
+
+root = sys.argv[1]
+try:
+    with open(os.path.join(root, "project.json"), "r", encoding="utf-8", errors="ignore") as fh:
+        data = json.load(fh)
+except Exception:
+    sys.exit(0)
+
+for key in ("preview", "thumbnail", "cover", "image"):
+    val = data.get(key)
+    if isinstance(val, str) and val.strip():
+        path = val if os.path.isabs(val) else os.path.join(root, val)
+        if os.path.exists(path):
+            print(path)
+            break
+PY
+}
+
+project_title() {
+  local root="$1"
+  python3 - "$root" <<'PY' 2>/dev/null || true
+import json
+import os
+import sys
+
+root = sys.argv[1]
+try:
+    with open(os.path.join(root, "project.json"), "r", encoding="utf-8", errors="ignore") as fh:
+        data = json.load(fh)
+except Exception:
+    sys.exit(0)
+
+title = data.get("title") or data.get("name")
+if isinstance(title, str) and title.strip():
+    print(title.strip().replace("|", " "))
+PY
+}
+
+emit_static_dir() {
+  local dir="$1"
+  [ -d "$dir" ] || return 0
+
+  find "$dir" -maxdepth 1 -type f \
+    \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.webp' -o -iname '*.gif' \) \
+    2>/dev/null | sort | while IFS= read -r file; do
+    local preview
+    [ -n "${seen_static[$file]:-}" ] && continue
+    seen_static[$file]=1
+    preview="$(cache_preview_ram "$file")"
+    local media_type="img"
+    [[ "${file,,}" == *.gif ]] && media_type="gif"
+    emit_wallpaper "static" "$file" "$preview" "$(basename "${file%.*}")" "$media_type"
+  done
+}
+
+emit_live_dir() {
+  local dir="$1"
+  [ -d "$dir" ] || return 0
+
+  find "$dir" -maxdepth 1 -type f \
+    \( -iname '*.mp4' -o -iname '*.webm' -o -iname '*.mkv' -o -iname '*.mov' -o -iname '*.gif' \) \
+    2>/dev/null | sort | while IFS= read -r file; do
+    local base safe thumb
+    base="$(basename "$file")"
+    safe="$(safe_name "${base%.*}")"
+    thumb="$cache_live/${safe}.jpg"
+    make_thumb "$file" "$thumb"
+    if [ -s "$thumb" ]; then
+      thumb="$(cache_preview_ram "$thumb")"
+    else
+      thumb=""
+    fi
+    local media_type="vid"
+    [[ "${file,,}" == *.gif ]] && media_type="gif"
+    emit_wallpaper "live" "$file" "$thumb" "${base%.*}" "$media_type"
+  done
+}
+
+emit_engine_root() {
+  local root="$1"
+  [ -d "$root" ] || return 0
+
+  for dir in "$root"/*/; do
+    [ -d "$dir" ] || continue
+
+    local id preview gif video still thumb title
+    id="$(basename "$dir")"
+    [ -n "${seen_engine[$id]:-}" ] && continue
+    seen_engine[$id]=1
+
+    preview=""
+    title="$(project_title "$dir")"
+    [ -n "$title" ] || title="Workshop $id"
+
+    gif="$(find "$dir" -maxdepth 5 -type f \
+      \( -iname 'preview*.gif' -o -iname 'thumbnail*.gif' -o -iname 'thumb*.gif' -o -iname 'cover*.gif' -o -iname '*.gif' \) \
+      2>/dev/null | sort | head -1 || true)"
+    if [ -n "$gif" ]; then
+      thumb="$cache_engine/${id}.jpg"
+      make_thumb "$gif" "$thumb"
+      if [ -s "$thumb" ]; then
+        preview="$thumb"
+      else
+        preview="$gif"
+      fi
+    fi
+
+    if [ -z "$preview" ]; then
+      for ext in jpg png jpeg webp; do
+        still="$cache_engine/${id}.${ext}"
+        if [ -s "$still" ]; then
+          preview="$still"
+          break
+        fi
+      done
+    fi
+
+    if [ -z "$preview" ]; then
+      preview="$(project_preview "$dir")"
+    fi
+
+    if [ -z "$preview" ]; then
+      still="$(find "$dir" -maxdepth 5 -type f \
+        \( -iname 'preview.*' -o -iname 'thumbnail.*' -o -iname 'thumb.*' -o -iname 'cover.*' -o -iname 'icon.*' \) \
+        \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.webp' -o -iname '*.gif' \) \
+        2>/dev/null | sort | head -1 || true)"
+      preview="$still"
+    fi
+
+    if [ -z "$preview" ]; then
+      video="$(find "$dir" -maxdepth 5 -type f \
+        \( -iname '*.mp4' -o -iname '*.webm' -o -iname '*.mkv' -o -iname '*.mov' \) \
+        2>/dev/null | sort | head -1 || true)"
+      if [ -n "$video" ]; then
+        thumb="$cache_engine/${id}.jpg"
+        make_thumb "$video" "$thumb"
+        [ -s "$thumb" ] && preview="$thumb"
+      fi
+    fi
+
+    [ -n "$preview" ] || continue
+    preview="$(cache_preview_ram "$preview")"
+    emit_wallpaper "engine" "$id" "$preview" "$title" "engine"
+  done
+}
+
+tmp_list="$cache_ram/wallpapers.$$-tmp.list"
+trap 'rm -f "$tmp_list"' EXIT
+
+{
+  printf 'BEGIN\n'
+  emit_static_dir "$HOME/Pictures/Wallpapers/static"
+  emit_static_dir "$HOME/Pictures/Wallpapers/WallpaperSelector"
+  emit_live_dir "$HOME/Pictures/Wallpapers/live"
+  emit_engine_root "$HOME/.steam/steam/steamapps/workshop/content/431960"
+  emit_engine_root "$HOME/.local/share/Steam/steamapps/workshop/content/431960"
+  printf 'END\n'
+} | tee "$tmp_list"
+
+[ -s "$tmp_list" ] && mv -f "$tmp_list" "$cache_list"

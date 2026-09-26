@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+command=${1:-start}
+runtime_bin="${XDG_DATA_HOME:-$HOME/.local/share}/velora-shell/runtime/quickshell/bin"
+if [[ -x "$runtime_bin/qs" ]]; then export PATH="$runtime_bin:$PATH"; fi
+project_dir=$(cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/.." && pwd)
+
+default_xdg_runtime_dir() {
+    if [[ -z "${XDG_RUNTIME_DIR:-}" && -d "/run/user/$(id -u)" ]]; then
+        export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+    fi
+}
+
+discover_graphical_session() {
+    local socket signature_dir
+    default_xdg_runtime_dir
+    if [[ -z "${WAYLAND_DISPLAY:-}" ]]; then
+        for socket in "$XDG_RUNTIME_DIR"/wayland-*; do
+            [[ -S "$socket" ]] || continue
+            export WAYLAND_DISPLAY="${socket##*/}"
+            break
+        done
+    fi
+    if [[ -z "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]]; then
+        for socket in "$XDG_RUNTIME_DIR"/hypr/*/.socket.sock; do
+            [[ -S "$socket" ]] || continue
+            signature_dir=$(dirname "$socket")
+            export HYPRLAND_INSTANCE_SIGNATURE="${signature_dir##*/}"
+            break
+        done
+    fi
+    [[ -n "${WAYLAND_DISPLAY:-}" && -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]]
+}
+
+is_running() {
+    qs list --all 2>/dev/null | rg -F "Config path: $project_dir/shell.qml" >/dev/null
+}
+
+start_shell() {
+    is_running && return 0
+    if ! discover_graphical_session; then
+        printf 'velora: nenhuma sessão Wayland/Hyprland ativa foi encontrada.\n' >&2
+        return 1
+    fi
+    systemctl --user stop mako.service >/dev/null 2>&1 || true
+    "$project_dir/scripts/run" -d
+}
+
+case "$command" in
+    shell|Shell|start|Start|run|Run) start_shell ;;
+    stop|Stop|kill|Kill) discover_graphical_session || true; "$project_dir/scripts/stop" ;;
+    restart|Restart)
+        discover_graphical_session
+        "$project_dir/scripts/stop"
+        start_shell
+        ;;
+    ipc) shift; exec qs -p "$project_dir" ipc call "$@" ;;
+    status|Status)
+        if is_running; then
+            qs -p "$project_dir" ipc call composition status
+        else
+            printf 'Velora Shell não está em execução.\n' >&2
+            exit 1
+        fi
+        ;;
+    *)
+        printf 'uso: velora start|stop|restart|status\n' >&2
+        exit 2
+        ;;
+esac

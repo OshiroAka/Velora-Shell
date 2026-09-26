@@ -1,0 +1,869 @@
+#!/usr/bin/env python3
+"""A small, input-safe infinite canvas for floating Hyprland windows.
+
+The canvas is the set of non-pinned floating clients on the active workspace.
+It never reads the keyboard.  Hyprland owns all keybinds; the optional mouse
+drag reads only relative motion and the release of the button that began it.
+"""
+
+from __future__ import annotations
+
+import json
+import math
+import os
+import random
+import select
+import struct
+import subprocess
+import sys
+import time
+from pathlib import Path
+from typing import Any
+
+
+STEP = 180
+DRAG_FPS = 45
+DRAG_SPEED = 1.15
+SCATTER_X = 720
+SCATTER_Y = 460
+RANDOM_SCATTER_GAP_X = 180
+RANDOM_SCATTER_GAP_Y = 140
+
+EV_SYN = 0
+EV_KEY = 1
+EV_REL = 2
+SYN_REPORT = 0
+REL_X = 0
+REL_Y = 1
+BTN_LEFT = 272
+BTN_RIGHT = 273
+INPUT_EVENT = struct.Struct("@llHHi")
+
+RUNTIME_DIR = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp"))
+STATE_FILES = (
+    RUNTIME_DIR / f"infinite-desktop-{os.getuid()}.enabled",
+    Path("/tmp") / f"infinite-desktop-{os.getuid()}.enabled",
+)
+INVERT_FILES = tuple(path.with_suffix(".inverted") for path in STATE_FILES)
+LAYOUT_FILES = tuple(path.with_suffix(".layout.json") for path in STATE_FILES)
+UI_STATE_FILE = RUNTIME_DIR / "velora-infinite-desktop.state"
+DIRECTIONS = {
+    "left": (-1, 0),
+    "right": (1, 0),
+    "up": (0, -1),
+    "down": (0, 1),
+}
+DIRECTION_LETTERS = {"left": "l", "right": "r", "up": "u", "down": "d"}
+
+
+class HyprlandError(RuntimeError):
+    """An actionable problem reported to the user through a notification."""
+
+
+class InputAccessError(HyprlandError):
+    """The mouse cannot be read safely from this user session."""
+
+
+def notify(message: str, force: bool = False) -> None:
+    """Only state changes deserve a desktop notification, never navigation."""
+    if not force:
+        return
+    subprocess.Popen(
+        ["notify-send", "Infinite Desktop", message],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
+def enabled() -> bool:
+    return any(path.exists() for path in STATE_FILES)
+
+
+def inverted() -> bool:
+    return any(path.exists() for path in INVERT_FILES)
+
+
+def set_marker(paths: tuple[Path, ...], value: bool) -> None:
+    if not value:
+        for path in paths:
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                pass
+        return
+    for path in paths:
+        try:
+            path.touch(exist_ok=True)
+            return
+        except OSError:
+            continue
+    raise HyprlandError("não foi possível salvar o estado do canvas")
+
+
+def publish_ui_state(value: bool | None = None) -> str:
+    """Expose canvas state to the optional Quickshell gesture surface."""
+    state = enabled() if value is None else value
+    payload = f"enabled={int(state)}\n"
+    try:
+        UI_STATE_FILE.write_text(payload)
+    except OSError as error:
+        raise HyprlandError("não foi possível sincronizar o estado com o Velora") from error
+    return payload.strip()
+
+
+def read_layouts() -> dict[str, Any]:
+    for path in LAYOUT_FILES:
+        try:
+            data = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(data, dict) and isinstance(data.get("workspaces"), dict):
+            return data
+    return {"workspaces": {}}
+
+
+def write_layouts(data: dict[str, Any]) -> None:
+    serialized = json.dumps(data, separators=(",", ":"))
+    for path in LAYOUT_FILES:
+        temporary = path.with_suffix(".layout.tmp")
+        try:
+            temporary.write_text(serialized)
+            temporary.replace(path)
+            return
+        except OSError:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+    raise HyprlandError("não foi possível salvar o layout do canvas")
+
+
+def window_id(window: dict[str, Any]) -> str:
+    """A Hyprland stableId survives floating/tiled changes in the same session."""
+    return str(window.get("stableId") or window["address"])
+
+
+def save_canvas_layout() -> tuple[int, str]:
+    workspace = hyprctl_json("activeworkspace")
+    workspace_id = workspace["id"]
+    clients = hyprctl_json("clients")
+    windows = [
+        client
+        for client in clients
+        if client.get("floating")
+        and not client.get("pinned")
+        and client.get("workspace", {}).get("id") == workspace_id
+    ]
+    focused = hyprctl_json("activewindow")
+    layouts = read_layouts()
+    layouts["workspaces"][str(workspace_id)] = {
+        "windows": [
+            {
+                "id": window_id(window),
+                "address": window["address"],
+                "at": window["at"],
+                "size": window["size"],
+            }
+            for window in windows
+        ],
+        "focused": window_id(focused) if focused.get("address") else None,
+    }
+    write_layouts(layouts)
+    return len(windows), str(workspace_id)
+
+
+def restore_canvas_layout() -> int:
+    workspace = hyprctl_json("activeworkspace")
+    workspace_id = workspace["id"]
+    record = read_layouts()["workspaces"].get(str(workspace_id))
+    if not isinstance(record, dict):
+        return 0
+    visible_clients = {
+        window_id(client): client
+        for client in hyprctl_json("clients")
+        if client.get("mapped")
+        and client.get("workspace", {}).get("id") == workspace_id
+    }
+    commands: list[str] = []
+    restored = 0
+    for saved in record.get("windows", []):
+        if not isinstance(saved, dict):
+            continue
+        client = visible_clients.get(str(saved.get("id")))
+        at, size = saved.get("at"), saved.get("size")
+        if not client or not isinstance(at, list) or not isinstance(size, list):
+            continue
+        if len(at) != 2 or len(size) != 2:
+            continue
+        address = client["address"]
+        commands.extend(
+            [
+                f"dispatch setfloating address:{address}",
+                f"dispatch resizewindowpixel exact {round(size[0])} {round(size[1])},address:{address}",
+                f"dispatch movewindowpixel exact {round(at[0])} {round(at[1])},address:{address}",
+            ]
+        )
+        restored += 1
+    focused_id = record.get("focused")
+    focused = visible_clients.get(str(focused_id)) if focused_id else None
+    if focused:
+        commands.append(f"dispatch focuswindow address:{focused['address']}")
+    hyprctl_batch(commands)
+    return restored
+
+
+def tile_canvas_windows() -> int:
+    workspace = hyprctl_json("activeworkspace")
+    workspace_id = workspace["id"]
+    windows = [
+        client
+        for client in hyprctl_json("clients")
+        if client.get("floating")
+        and not client.get("pinned")
+        and client.get("workspace", {}).get("id") == workspace_id
+    ]
+    hyprctl_batch(
+        [f"dispatch settiled address:{window['address']}" for window in windows]
+    )
+    return len(windows)
+
+
+def toggle(announce_activation: bool = True) -> int:
+    if enabled():
+        saved, _ = save_canvas_layout()
+        tiled = tile_canvas_windows()
+        set_marker(STATE_FILES, False)
+        publish_ui_state(False)
+        print(f"Infinite desktop: disabled ({saved} janelas salvas)")
+        return 0
+    set_marker(STATE_FILES, True)
+    publish_ui_state(True)
+    restored = restore_canvas_layout()
+    message = (
+        f"Canvas ativado — {restored} janelas restauradas"
+        if restored
+        else "Canvas ativado"
+    )
+    if announce_activation:
+        notify(message, force=True)
+    print(f"Infinite desktop: enabled ({restored} janelas restauradas)")
+    return 0
+
+
+def toggle_invert() -> int:
+    new_state = not inverted()
+    set_marker(INVERT_FILES, new_state)
+    notify("Direção invertida" if new_state else "Direção normal")
+    return 0
+
+
+def require_enabled() -> bool:
+    if enabled():
+        return True
+    notify("Canvas desativado — use Super + Z")
+    return False
+
+
+def sync_state() -> int:
+    print(publish_ui_state(), flush=True)
+    return 0
+
+
+def hyprctl_json(command: str) -> Any:
+    result = subprocess.run(
+        ["hyprctl", "-j", command], text=True, capture_output=True, check=False
+    )
+    if result.returncode:
+        raise HyprlandError(result.stderr.strip() or "Hyprland não está acessível")
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError as error:
+        raise HyprlandError("Hyprland retornou uma resposta inválida") from error
+
+
+def hyprctl_batch(commands: list[str]) -> None:
+    if not commands:
+        return
+    result = subprocess.run(
+        ["hyprctl", "--batch", " ; ".join(commands)],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode:
+        raise HyprlandError(result.stderr.strip() or result.stdout.strip())
+
+
+
+def center(window: dict[str, Any]) -> tuple[float, float]:
+    return (
+        window["at"][0] + window["size"][0] / 2,
+        window["at"][1] + window["size"][1] / 2,
+    )
+
+
+def active_canvas() -> tuple[list[dict[str, Any]], dict[str, Any] | None, tuple[float, float]]:
+    workspace = hyprctl_json("activeworkspace")
+    workspace_id = workspace["id"]
+    clients = hyprctl_json("clients")
+    windows = [
+        client
+        for client in clients
+        if client.get("floating")
+        and not client.get("pinned")
+        and client.get("workspace", {}).get("id") == workspace_id
+    ]
+    focused = hyprctl_json("activewindow")
+    monitors = hyprctl_json("monitors")
+    if not monitors:
+        raise HyprlandError("nenhum monitor ativo foi encontrado")
+    monitor = next((item for item in monitors if item.get("focused")), monitors[0])
+    screen_center = (
+        monitor["x"] + monitor["width"] / 2,
+        monitor["y"] + monitor["height"] / 2,
+    )
+    return windows, focused, screen_center
+
+
+def float_active_workspace_clients() -> int:
+    """Promote regular windows in the active workspace into the canvas."""
+    workspace = hyprctl_json("activeworkspace")
+    workspace_id = workspace["id"]
+    clients = hyprctl_json("clients")
+    targets = [
+        client
+        for client in clients
+        if client.get("mapped")
+        and not client.get("pinned")
+        and client.get("workspace", {}).get("id") == workspace_id
+        and not client.get("floating")
+    ]
+    hyprctl_batch(
+        [f"dispatch setfloating address:{client['address']}" for client in targets]
+    )
+    return len(targets)
+
+
+def cursor_position() -> tuple[float, float]:
+    position = hyprctl_json("cursorpos")
+    return float(position["x"]), float(position["y"])
+
+
+def contains_point(window: dict[str, Any], point: tuple[float, float]) -> bool:
+    x, y = point
+    left, top = window["at"]
+    width, height = window["size"]
+    return left <= x < left + width and top <= y < top + height
+
+
+def cursor_over_client(point: tuple[float, float]) -> bool:
+    """True for any visible Hyprland client, floating or tiled."""
+    for client in hyprctl_json("clients"):
+        if (
+            client.get("mapped")
+            and client.get("visible")
+            and client.get("at")
+            and client.get("size")
+            and contains_point(client, point)
+        ):
+            return True
+    return False
+
+
+def dispatch_positions(
+    positions: dict[str, tuple[float, float]], focus: str | None = None
+) -> None:
+    commands = [
+        f"dispatch movewindowpixel exact {round(x)} {round(y)},address:{address}"
+        for address, (x, y) in positions.items()
+    ]
+    if focus:
+        commands.append(f"dispatch focuswindow address:{focus}")
+    hyprctl_batch(commands)
+
+
+def move_canvas(
+    windows: list[dict[str, Any]],
+    dx: float,
+    dy: float,
+    focus: str | None = None,
+    cursor: tuple[float, float] | None = None,
+) -> None:
+    positions = {
+        window["address"]: (window["at"][0] + dx, window["at"][1] + dy)
+        for window in windows
+    }
+    commands = [
+        f"dispatch movewindowpixel exact {round(x)} {round(y)},address:{address}"
+        for address, (x, y) in positions.items()
+    ]
+    if cursor:
+        commands.append(f"dispatch movecursor {round(cursor[0])} {round(cursor[1])}")
+    if focus:
+        commands.append(f"dispatch focuswindow address:{focus}")
+    hyprctl_batch(commands)
+
+
+def choose_neighbor(
+    windows: list[dict[str, Any]], origin: tuple[float, float], direction: str
+) -> dict[str, Any] | None:
+    vx, vy = DIRECTIONS[direction]
+    candidates: list[tuple[float, dict[str, Any]]] = []
+    for window in windows:
+        wx, wy = center(window)
+        dx, dy = wx - origin[0], wy - origin[1]
+        forward = dx * vx + dy * vy
+        if forward <= 1:
+            continue
+        perpendicular = abs(dx * vy - dy * vx)
+        candidates.append((forward + 2.5 * perpendicular, window))
+    return min(candidates, key=lambda item: item[0])[1] if candidates else None
+
+
+def focus_direction(direction: str) -> int:
+    # Super+arrows retain the normal Hyprland navigation until the canvas is on.
+    if not enabled():
+        hyprctl_batch([f"dispatch movefocus {DIRECTION_LETTERS[direction]}"])
+        return 0
+    windows, focused, screen_center = active_canvas()
+    if not windows:
+        notify("Não há janelas flutuantes neste workspace")
+        return 1
+    focused_address = focused.get("address") if focused else None
+    current = next((window for window in windows if window["address"] == focused_address), None)
+    origin = center(current) if current else screen_center
+    target = choose_neighbor(
+        [window for window in windows if window is not current], origin, direction
+    )
+    if not target:
+        notify(f"Não há janela à {direction}")
+        return 1
+    target_x, target_y = center(target)
+    move_canvas(
+        windows,
+        screen_center[0] - target_x,
+        screen_center[1] - target_y,
+        target["address"],
+        screen_center,
+    )
+    return 0
+
+
+def center_focused() -> int:
+    """Put the currently focused floating client at the monitor centre."""
+    if not require_enabled():
+        return 1
+    windows, focused, screen_center = active_canvas()
+    focused_address = focused.get("address") if focused else None
+    target = next(
+        (window for window in windows if window["address"] == focused_address), None
+    )
+    if not target:
+        notify("Foque uma janela flutuante para centralizá-la")
+        return 1
+    target_x, target_y = center(target)
+    move_canvas(
+        windows,
+        screen_center[0] - target_x,
+        screen_center[1] - target_y,
+        target["address"],
+        screen_center,
+    )
+    return 0
+
+
+def focus_address(address: str) -> int:
+    """Centre a specific canvas client and focus it.
+
+    This is the non-interactive counterpart of directional navigation.  It is
+    used by integrations such as Velyrics, where the next window is selected
+    by a coordinator rather than by the currently focused client.
+    """
+    if not require_enabled():
+        return 1
+    windows, _, screen_center = active_canvas()
+    target = next(
+        (window for window in windows if str(window.get("address")) == address),
+        None,
+    )
+    if not target:
+        # Do not focus an arbitrary non-canvas window supplied by a caller.
+        # Velyrics redirects this command's output, so keep failure quiet.
+        return 1
+    target_x, target_y = center(target)
+    move_canvas(
+        windows,
+        screen_center[0] - target_x,
+        screen_center[1] - target_y,
+        target["address"],
+        screen_center,
+    )
+    return 0
+
+
+def pan_direction(direction: str) -> int:
+    if not require_enabled():
+        return 1
+    windows, _, _ = active_canvas()
+    if not windows:
+        notify("Não há janelas flutuantes neste workspace")
+        return 1
+    vx, vy = DIRECTIONS[direction]
+    # A viewpoint moving left makes the canvas move right.
+    sign = 1 if inverted() else -1
+    move_canvas(windows, sign * vx * STEP, sign * vy * STEP)
+    return 0
+
+
+def pointer_candidates() -> list[Path]:
+    explicit = os.environ.get("INFINITE_DESKTOP_POINTER")
+    candidates: list[Path] = [Path(explicit)] if explicit else []
+    by_id = Path("/dev/input/by-id")
+    if by_id.is_dir():
+        candidates.extend(sorted(by_id.glob("*-event-mouse")))
+    for device in sorted(Path("/dev/input").glob("event*")):
+        capability = Path("/sys/class/input") / device.name / "device/capabilities/rel"
+        try:
+            relative_axes = int(capability.read_text().strip(), 16)
+        except (OSError, ValueError):
+            continue
+        if relative_axes & 0b11 == 0b11:
+            candidates.append(device)
+    unique: list[Path] = []
+    seen: set[Path] = set()
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        if resolved not in seen:
+            seen.add(resolved)
+            unique.append(candidate)
+    return unique
+
+
+def open_pointer() -> tuple[int, Path]:
+    candidates = pointer_candidates()
+    if not candidates:
+        raise InputAccessError("nenhum mouse com movimento relativo foi encontrado")
+    errors: list[str] = []
+    for device in candidates:
+        try:
+            return os.open(device, os.O_RDONLY | os.O_NONBLOCK), device
+        except OSError as error:
+            errors.append(f"{device.name}: {error.strerror}")
+    hint = "entre no grupo input e encerre/inicie a sessão"
+    raise InputAccessError(f"sem acesso ao mouse ({hint})")
+
+
+def drag_canvas(empty_only: bool = False, release_button: int = BTN_LEFT) -> int:
+    """Move a frozen snapshot of the canvas until its initiating button releases."""
+    if not require_enabled():
+        return 1
+    windows, _, _ = active_canvas()
+    if not windows:
+        notify("Não há janelas flutuantes neste workspace")
+        return 1
+    if empty_only and cursor_over_client(cursor_position()):
+        # The non-consuming bind leaves the right-click untouched for the client.
+        return 0
+    fd, device = open_pointer()
+    positions = {
+        window["address"]: (float(window["at"][0]), float(window["at"][1]))
+        for window in windows
+    }
+    pending_x = 0.0
+    pending_y = 0.0
+    remainder_x = 0.0
+    remainder_y = 0.0
+    packet = b""
+    interval = 1 / DRAG_FPS
+    last_flush = time.monotonic()
+    direction = -1 if inverted() else 1
+    print(f"Infinite desktop: dragging with {device}")
+
+    def flush() -> None:
+        nonlocal pending_x, pending_y, remainder_x, remainder_y, last_flush
+        dx = (pending_x * DRAG_SPEED * direction) + remainder_x
+        dy = (pending_y * DRAG_SPEED * direction) + remainder_y
+        pending_x = 0.0
+        pending_y = 0.0
+        move_x = math.trunc(dx)
+        move_y = math.trunc(dy)
+        remainder_x = dx - move_x
+        remainder_y = dy - move_y
+        last_flush = time.monotonic()
+        if not move_x and not move_y:
+            return
+        for address, (x, y) in positions.items():
+            positions[address] = (x + move_x, y + move_y)
+        dispatch_positions(positions)
+
+    try:
+        while True:
+            timeout = max(0.0, interval - (time.monotonic() - last_flush))
+            readable, _, _ = select.select([fd], [], [], timeout)
+            if not readable:
+                flush()
+                continue
+            data = os.read(fd, 4096)
+            if not data:
+                raise InputAccessError("a conexão com o mouse foi encerrada")
+            packet += data
+            while len(packet) >= INPUT_EVENT.size:
+                event, packet = packet[: INPUT_EVENT.size], packet[INPUT_EVENT.size :]
+                _, _, event_type, code, value = INPUT_EVENT.unpack(event)
+                if event_type == EV_REL and code == REL_X:
+                    pending_x += value
+                elif event_type == EV_REL and code == REL_Y:
+                    pending_y += value
+                elif event_type == EV_KEY and code == release_button and value == 0:
+                    flush()
+                    return 0
+                elif event_type == EV_SYN and code == SYN_REPORT:
+                    if time.monotonic() - last_flush >= interval:
+                        flush()
+    finally:
+        os.close(fd)
+
+
+def drag_empty_canvas() -> int:
+    return drag_canvas(empty_only=True, release_button=BTN_RIGHT)
+
+
+def stream_drag_canvas() -> int:
+    """Pan from relative MOVE records sent by the Quickshell desktop surface."""
+    if not require_enabled():
+        return 1
+    windows, _, _ = active_canvas()
+    if not windows:
+        notify("Não há janelas flutuantes neste workspace")
+        return 1
+
+    positions = {
+        window["address"]: (float(window["at"][0]), float(window["at"][1]))
+        for window in windows
+    }
+    pending_x = 0.0
+    pending_y = 0.0
+    remainder_x = 0.0
+    remainder_y = 0.0
+    packet = b""
+    interval = 1 / DRAG_FPS
+    last_flush = time.monotonic()
+    direction = -1 if inverted() else 1
+
+    def flush() -> None:
+        nonlocal pending_x, pending_y, remainder_x, remainder_y, last_flush
+        dx = (pending_x * DRAG_SPEED * direction) + remainder_x
+        dy = (pending_y * DRAG_SPEED * direction) + remainder_y
+        pending_x = 0.0
+        pending_y = 0.0
+        move_x = math.trunc(dx)
+        move_y = math.trunc(dy)
+        remainder_x = dx - move_x
+        remainder_y = dy - move_y
+        last_flush = time.monotonic()
+        if not move_x and not move_y:
+            return
+        for address, (x, y) in positions.items():
+            positions[address] = (x + move_x, y + move_y)
+        dispatch_positions(positions)
+
+    print("READY", flush=True)
+    finished = False
+    while not finished:
+        timeout = max(0.0, interval - (time.monotonic() - last_flush))
+        readable, _, _ = select.select([sys.stdin.fileno()], [], [], timeout)
+        if readable:
+            data = os.read(sys.stdin.fileno(), 4096)
+            if not data:
+                finished = True
+            else:
+                packet += data
+                while b"\n" in packet:
+                    record, packet = packet.split(b"\n", 1)
+                    fields = record.decode("utf-8", errors="replace").strip().split()
+                    if not fields:
+                        continue
+                    if fields == ["END"]:
+                        finished = True
+                        break
+                    if len(fields) != 3 or fields[0] != "MOVE":
+                        continue
+                    try:
+                        dx, dy = float(fields[1]), float(fields[2])
+                    except ValueError:
+                        continue
+                    if math.isfinite(dx) and math.isfinite(dy):
+                        pending_x += dx
+                        pending_y += dy
+        if finished or time.monotonic() - last_flush >= interval:
+            flush()
+    return 0
+
+
+def zoom_canvas(mode: str) -> int:
+    """Scale the floating canvas around the screen centre like a camera zoom."""
+    if not enabled():
+        # Preserve the previous Super+wheel workspace navigation while disabled.
+        offset = "e+1" if mode == "out" else "e-1"
+        hyprctl_batch([f"dispatch workspace {offset}"])
+        return 0
+    windows, focused, screen_center = active_canvas()
+    if not windows:
+        notify("Não há janelas flutuantes neste workspace")
+        return 1
+    factor = 0.88 if mode == "out" else 1 / 0.88
+    commands: list[str] = []
+    for window in windows:
+        old_width, old_height = window["size"]
+        new_width = max(140, round(old_width * factor))
+        new_height = max(90, round(old_height * factor))
+        old_center_x, old_center_y = center(window)
+        new_center_x = screen_center[0] + (old_center_x - screen_center[0]) * factor
+        new_center_y = screen_center[1] + (old_center_y - screen_center[1]) * factor
+        new_x = round(new_center_x - new_width / 2)
+        new_y = round(new_center_y - new_height / 2)
+        address = window["address"]
+        commands.append(
+            f"dispatch resizewindowpixel exact {new_width} {new_height},address:{address}"
+        )
+        commands.append(f"dispatch movewindowpixel exact {new_x} {new_y},address:{address}")
+    focused_address = focused.get("address") if focused else None
+    if focused_address:
+        commands.append(f"dispatch focuswindow address:{focused_address}")
+    hyprctl_batch(commands)
+    return 0
+
+
+def scatter_canvas() -> int:
+    """Spread current floating windows into a two-dimensional starting layout."""
+    if not require_enabled():
+        return 1
+    windows, focused, screen_center = active_canvas()
+    if not windows:
+        notify("Não há janelas flutuantes neste workspace")
+        return 1
+    ordered = sorted(windows, key=lambda window: window["address"])
+    columns = max(2, math.ceil(math.sqrt(len(ordered))))
+    rows = math.ceil(len(ordered) / columns)
+    positions: dict[str, tuple[float, float]] = {}
+    for index, window in enumerate(ordered):
+        column, row = index % columns, index // columns
+        target_center_x = screen_center[0] + (column - (columns - 1) / 2) * SCATTER_X
+        target_center_y = screen_center[1] + (row - (rows - 1) / 2) * SCATTER_Y
+        positions[window["address"]] = (
+            target_center_x - window["size"][0] / 2,
+            target_center_y - window["size"][1] / 2,
+        )
+    focus = focused.get("address") if focused else None
+    dispatch_positions(positions, focus)
+    notify(f"Canvas organizado: {len(ordered)} janelas")
+    return 0
+
+
+def scatter_random_canvas() -> int:
+    """Arrange and resize canvas windows organically without overlap."""
+    if not enabled():
+        toggle(announce_activation=False)
+    float_active_workspace_clients()
+    windows, focused, screen_center = active_canvas()
+    if not windows:
+        return 1
+
+    rng = random.SystemRandom()
+    size_steps = [
+        (index + rng.uniform(0.15, 0.85)) / len(windows)
+        for index in range(len(windows))
+    ]
+    rng.shuffle(size_steps)
+    sizes = {}
+    for window, step in zip(windows, size_steps):
+        sizes[window["address"]] = (
+            round(800 + 480 * step),
+            round(600 - 200 * step),
+        )
+    max_width = max(float(sizes[window["address"]][0]) for window in windows)
+    max_height = max(float(sizes[window["address"]][1]) for window in windows)
+    base_radius = max(max_width * 1.25, max_height * 2.0)
+    clearance_x = RANDOM_SCATTER_GAP_X / 2
+    clearance_y = RANDOM_SCATTER_GAP_Y / 2
+    positions: dict[str, tuple[float, float]] = {}
+    placed: list[tuple[float, float, int, int]] = []
+    ordered = list(windows)
+    rng.shuffle(ordered)
+    for window in ordered:
+        width, height = sizes[window["address"]]
+        for attempt in range(1200):
+            radius = rng.uniform(0, base_radius * (1 + attempt // 180))
+            angle = rng.uniform(0, math.tau)
+            x = screen_center[0] + math.cos(angle) * radius - width / 2
+            y = screen_center[1] + math.sin(angle) * radius - height / 2
+            if all(
+                x + width + clearance_x <= other_x
+                or other_x + other_width + clearance_x <= x
+                or y + height + clearance_y <= other_y
+                or other_y + other_height + clearance_y <= y
+                for other_x, other_y, other_width, other_height in placed
+            ):
+                positions[window["address"]] = (x, y)
+                placed.append((x, y, width, height))
+                break
+        else:
+            raise HyprlandError("não foi possível encontrar espaço livre para organizar as janelas")
+    focus = focused.get("address") if focused else None
+    commands = []
+    for address, (x, y) in positions.items():
+        width, height = sizes[address]
+        commands.append(f"dispatch resizewindowpixel exact {width} {height},address:{address}")
+        commands.append(f"dispatch movewindowpixel exact {round(x)} {round(y)},address:{address}")
+    if focus:
+        commands.append(f"dispatch focuswindow address:{focus}")
+    hyprctl_batch(commands)
+    return 0
+
+
+def status() -> int:
+    candidates = pointer_candidates()
+    print(f"enabled={enabled()}")
+    print(f"inverted={inverted()}")
+    print("pointer=" + (str(candidates[0]) if candidates else "not-found"))
+    return 0
+
+
+def main() -> int:
+    commands = {
+        ("toggle",): toggle,
+        ("invert",): toggle_invert,
+        ("drag",): drag_canvas,
+        ("drag-empty",): drag_empty_canvas,
+        ("stream-drag",): stream_drag_canvas,
+        ("sync-state",): sync_state,
+        ("scatter",): scatter_canvas,
+        ("scatter-random",): scatter_random_canvas,
+        ("center",): center_focused,
+        ("status",): status,
+    }
+    try:
+        args = tuple(sys.argv[1:])
+        if args in commands:
+            return commands[args]()
+        if len(args) == 2 and args[0] == "focus" and args[1] in DIRECTIONS:
+            return focus_direction(args[1])
+        if len(args) == 2 and args[0] == "focus-address":
+            return focus_address(args[1])
+        if len(args) == 2 and args[0] == "pan" and args[1] in DIRECTIONS:
+            return pan_direction(args[1])
+        if len(args) == 2 and args[0] == "zoom" and args[1] in {"in", "out"}:
+            return zoom_canvas(args[1])
+        print(
+            "Usage: infinite-desktop toggle|invert|drag|drag-empty|stream-drag|sync-state|scatter|scatter-random|status|focus direction|focus-address address|pan direction|zoom {in|out}",
+            file=sys.stderr,
+        )
+        return 2
+    except (HyprlandError, KeyError, ValueError) as error:
+        notify(f"Erro: {error}")
+        print(f"Infinite desktop: {error}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+project_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+export PATH="${XDG_DATA_HOME:-$HOME/.local/share}/velora-shell/runtime/quickshell/bin:$project_dir/scripts:$PATH"
+export VELORA_HOST_XDG_CONFIG_HOME="${VELORA_HOST_XDG_CONFIG_HOME:-${XDG_CONFIG_HOME:-$HOME/.config}}"
+"$project_dir/scripts/init-config"
+sound_file="${XDG_CONFIG_HOME:-$HOME/.config}/velora-shell/notification-sound"
+if [[ -z "${VELORA_NOTIFICATION_SOUND:-}" && -f "$sound_file" ]]; then
+    IFS= read -r VELORA_NOTIFICATION_SOUND < "$sound_file" || true
+    export VELORA_NOTIFICATION_SOUND
+fi
+build_dir=$("$project_dir/scripts/build")
+"$project_dir/scripts/load-native-blur" "$build_dir/hyprland/velora-blur.so" >/dev/null
+export QML_IMPORT_PATH="$build_dir/visualizer/qml:$build_dir/spectrum/qml${QML_IMPORT_PATH:+:$QML_IMPORT_PATH}"
+export QS_NO_RELOAD_POPUP=1
+export QSG_RENDER_LOOP=threaded
+exec qs -p "$project_dir" "$@"

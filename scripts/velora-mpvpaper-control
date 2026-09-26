@@ -1,0 +1,214 @@
+#!/usr/bin/env python3
+"""Small, dependency-free mpv JSON IPC client for Velora Shell wallpapers."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import select
+import socket
+import sys
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+
+
+COLOR_PROPERTIES: tuple[tuple[str, object], ...] = (
+    ("video-output-levels", "full"),
+    ("target-colorspace-hint", "no"),
+    ("target-prim", "bt.709"),
+    ("target-trc", "srgb"),
+    ("saturation", 0),
+    ("brightness", 0),
+    ("contrast", 0),
+    ("gamma", 0),
+)
+
+
+@dataclass
+class MpvConnection:
+    path: str
+    sock: socket.socket
+    buffer: bytes = b""
+    next_request_id: int = 1
+    responses: dict[int, dict] = field(default_factory=dict)
+    saw_file_loaded: bool = False
+    ready_samples: int = 0
+
+    def send(self, command: list[object]) -> int:
+        request_id = self.next_request_id
+        self.next_request_id += 1
+        payload = {"command": command, "request_id": request_id}
+        self.sock.sendall(json.dumps(payload, separators=(",", ":")).encode() + b"\n")
+        return request_id
+
+    def receive(self) -> None:
+        chunk = self.sock.recv(65536)
+        if not chunk:
+            raise ConnectionError(f"mpv closed IPC socket {self.path}")
+        self.buffer += chunk
+        while b"\n" in self.buffer:
+            raw, self.buffer = self.buffer.split(b"\n", 1)
+            if not raw:
+                continue
+            try:
+                message = json.loads(raw)
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                continue
+            if message.get("event") == "file-loaded":
+                self.saw_file_loaded = True
+            request_id = message.get("request_id")
+            if isinstance(request_id, int):
+                self.responses[request_id] = message
+
+    def property(self, name: str, deadline: float) -> object:
+        request_id = self.send(["get_property", name])
+        while time.monotonic() < deadline:
+            cached = self.responses.pop(request_id, None)
+            if cached is not None:
+                if cached.get("error") == "success":
+                    return cached.get("data")
+                return None
+            remaining = max(0.0, deadline - time.monotonic())
+            readable, _, _ = select.select([self.sock], [], [], min(0.05, remaining))
+            if readable:
+                self.receive()
+        return None
+
+    def frame_ready(self, expected_path: str | None, deadline: float) -> bool:
+        loaded_path = self.property("path", deadline)
+        video_out = self.property("video-out-params", deadline)
+        vo_configured = self.property("vo-configured", deadline)
+        if expected_path:
+            try:
+                path_matches = os.path.samefile(str(loaded_path), expected_path)
+            except (OSError, TypeError, ValueError):
+                path_matches = os.path.abspath(str(loaded_path or "")) == expected_path
+        else:
+            path_matches = bool(loaded_path)
+        dimensions_ready = (
+            isinstance(video_out, dict)
+            and int(video_out.get("w", 0) or 0) > 0
+            and int(video_out.get("h", 0) or 0) > 0
+        )
+        load_committed = expected_path is None or self.saw_file_loaded
+        return (load_committed and path_matches and dimensions_ready
+                and vo_configured is not False)
+
+
+def connect_when_ready(path: str, deadline: float) -> MpvConnection:
+    last_error: OSError | None = None
+    while time.monotonic() < deadline:
+        candidate = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            candidate.connect(path)
+            candidate.setblocking(True)
+            return MpvConnection(path=path, sock=candidate)
+        except OSError as error:
+            last_error = error
+            candidate.close()
+            time.sleep(0.025)
+    detail = f": {last_error}" if last_error else ""
+    raise TimeoutError(f"timed out connecting to {path}{detail}")
+
+
+def wait_for_frames(
+    connections: list[MpvConnection], expected_path: str | None, deadline: float
+) -> None:
+    while time.monotonic() < deadline:
+        all_ready = True
+        for connection in connections:
+            if connection.ready_samples >= 2:
+                continue
+            if connection.frame_ready(expected_path, deadline):
+                connection.ready_samples += 1
+            else:
+                connection.ready_samples = 0
+            all_ready = all_ready and connection.ready_samples >= 2
+        if all_ready:
+            return
+        time.sleep(0.04)
+    pending = ", ".join(
+        connection.path for connection in connections if connection.ready_samples < 2
+    )
+    raise TimeoutError(f"mpv did not publish a stable video frame on: {pending}")
+
+
+def wait_for_response(
+    connection: MpvConnection, request_id: int, deadline: float
+) -> dict:
+    while request_id not in connection.responses and time.monotonic() < deadline:
+        remaining = max(0.0, deadline - time.monotonic())
+        readable, _, _ = select.select(
+            [connection.sock], [], [], min(0.05, remaining)
+        )
+        if readable:
+            connection.receive()
+    return connection.responses.pop(request_id, {})
+
+
+def normalize_color(connections: list[MpvConnection], deadline: float) -> None:
+    """Keep static and live wallpaper output in one sRGB/full-range space."""
+    for connection in connections:
+        for name, value in COLOR_PROPERTIES:
+            request_id = connection.send(["set_property", name, value])
+            response = wait_for_response(connection, request_id, deadline)
+            if response.get("error") != "success":
+                raise RuntimeError(
+                    f"mpv rejected {name} on {connection.path}: "
+                    f"{response.get('error', 'timeout')}"
+                )
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    action = parser.add_mutually_exclusive_group(required=True)
+    action.add_argument("--load", metavar="PATH", help="replace the current file")
+    action.add_argument(
+        "--wait-ready", action="store_true", help="wait for the current file to render"
+    )
+    action.add_argument(
+        "--normalize-color", action="store_true",
+        help="enforce a stable sRGB/full-range wallpaper output",
+    )
+    parser.add_argument("--timeout", type=float, default=2.2)
+    parser.add_argument("sockets", nargs="+")
+    args = parser.parse_args()
+
+    if args.timeout <= 0:
+        parser.error("--timeout must be positive")
+    expected_path = os.path.abspath(args.load) if args.load else None
+    if expected_path and not Path(expected_path).is_file():
+        parser.error(f"wallpaper not found: {expected_path}")
+
+    deadline = time.monotonic() + args.timeout
+    connections: list[MpvConnection] = []
+    try:
+        connections = [connect_when_ready(path, deadline) for path in args.sockets]
+        normalize_color(connections, deadline)
+        if expected_path:
+            requests = [
+                (connection, connection.send(["loadfile", expected_path, "replace"]))
+                for connection in connections
+            ]
+            for connection, request_id in requests:
+                response = wait_for_response(connection, request_id, deadline)
+                if response.get("error") != "success":
+                    raise RuntimeError(
+                        f"mpv rejected loadfile on {connection.path}: "
+                        f"{response.get('error', 'timeout')}"
+                    )
+        if not args.normalize_color:
+            wait_for_frames(connections, expected_path, deadline)
+    except (ConnectionError, OSError, RuntimeError, TimeoutError) as error:
+        print(f"velora-mpvpaper-control: {error}", file=sys.stderr)
+        return 1
+    finally:
+        for connection in connections:
+            connection.sock.close()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

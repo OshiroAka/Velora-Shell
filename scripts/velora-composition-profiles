@@ -1,0 +1,740 @@
+#!/usr/bin/env python3
+"""Transactional storage helper for Velora Shell composition profiles."""
+
+from __future__ import annotations
+
+import argparse
+import copy
+import colorsys
+import datetime as dt
+import hashlib
+import json
+import os
+import shutil
+import subprocess
+import sys
+import uuid
+from pathlib import Path
+from urllib.parse import unquote, urlparse
+
+try:
+    from PIL import Image
+except ImportError:  # The profile format still works without preview analysis.
+    Image = None
+
+
+SCHEMA_VERSION = 1
+COMPOSITION_VERSION = 8
+
+TOPBAR_TYPES = {
+    "brand", "workspaces", "launcher", "search", "context", "weather",
+    "clock", "media", "wifi", "volume", "battery", "settings", "avatar",
+}
+TOPBAR_SECTIONS = {"left", "center", "right"}
+
+
+def default_topbar_layout() -> list[dict]:
+    return [
+        {"id": "bar-brand", "type": "brand", "section": "left", "order": 0, "enabled": False, "scale": 1.0},
+        {"id": "bar-launcher", "type": "launcher", "section": "left", "order": 1, "enabled": True, "scale": 1.0},
+        {"id": "bar-workspaces", "type": "workspaces", "section": "left", "order": 2, "enabled": True, "scale": 1.0},
+        {"id": "bar-context", "type": "context", "section": "left", "order": 3, "enabled": True, "scale": 1.0},
+        {"id": "bar-search", "type": "search", "section": "left", "order": 4, "enabled": False, "scale": 1.0},
+        {"id": "bar-weather", "type": "weather", "section": "center", "order": 0, "enabled": True, "scale": 1.0},
+        {"id": "bar-clock", "type": "clock", "section": "right", "order": 0, "enabled": True, "scale": 1.0},
+        {"id": "bar-wifi", "type": "wifi", "section": "right", "order": 1, "enabled": True, "scale": 1.0},
+        {"id": "bar-volume", "type": "volume", "section": "right", "order": 2, "enabled": True, "scale": 1.0},
+        {"id": "bar-battery", "type": "battery", "section": "right", "order": 3, "enabled": True, "scale": 1.0},
+        {"id": "bar-settings", "type": "settings", "section": "right", "order": 4, "enabled": True, "scale": 1.0},
+        {"id": "bar-avatar", "type": "avatar", "section": "right", "order": 5, "enabled": False, "scale": 1.0},
+        {"id": "bar-media", "type": "media", "section": "right", "order": 6, "enabled": True, "scale": 1.0},
+    ]
+
+
+def now_iso() -> str:
+    return dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
+
+
+def atomic_json(path: Path, document: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    with temporary.open("w", encoding="utf-8") as handle:
+        json.dump(document, handle, ensure_ascii=False, indent=2)
+        handle.write("\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temporary, path)
+
+
+def load_index(path: Path) -> dict:
+    if not path.exists():
+        return {"schemaVersion": SCHEMA_VERSION, "activeProfileId": "", "profiles": []}
+    with path.open("r", encoding="utf-8") as handle:
+        document = json.load(handle)
+    if document.get("schemaVersion") != SCHEMA_VERSION:
+        raise ValueError("versão incompatível do índice de perfis")
+    if not isinstance(document.get("profiles"), list):
+        raise ValueError("lista de perfis inválida")
+    return document
+
+
+def local_path(value: str) -> Path:
+    text = str(value or "")
+    parsed = urlparse(text)
+    if parsed.scheme == "file":
+        candidate = Path(unquote(parsed.path))
+    elif not parsed.scheme and text.startswith("/"):
+        candidate = Path(text)
+    else:
+        raise ValueError(f"somente arquivos locais podem ser salvos: {text}")
+    candidate = candidate.resolve()
+    if not candidate.is_file():
+        raise FileNotFoundError(f"arquivo não encontrado: {candidate}")
+    return candidate
+
+
+def safe_name(name: str) -> str:
+    clean = " ".join(str(name or "").split()).strip()
+    if not clean:
+        raise ValueError("o perfil precisa de um nome")
+    return clean[:64]
+
+
+def normalized_order(value: object) -> list[int]:
+    if not isinstance(value, list) or len(value) != 3:
+        return [0, 1, 2]
+    order = [int(item) for item in value]
+    return order if sorted(order) == [0, 1, 2] else [0, 1, 2]
+
+
+def normalized_entry(entry: object, *, character: bool = False) -> dict:
+    if not isinstance(entry, dict):
+        raise ValueError("entrada de imagem inválida")
+    minimum = 0.5 if character else 0.65
+    maximum_offset = 800 if character else 400
+    return {
+        "path": str(entry.get("path", "")),
+        "scale": max(minimum, min(2.5, float(entry.get("scale", 1.0)))),
+        "offsetX": max(-maximum_offset, min(maximum_offset, float(entry.get("offsetX", 0)))),
+        "offsetY": max(-maximum_offset, min(maximum_offset, float(entry.get("offsetY", 0)))),
+        "flipX": bool(entry.get("flipX", False)),
+    }
+
+
+def normalized_topbar_layout(value: object) -> list[dict]:
+    if not isinstance(value, list):
+        return []
+    if not any(isinstance(item, dict)
+               and str(item.get("type", "")) in {"weather", "media"}
+               for item in value):
+        return default_topbar_layout()
+    result: list[dict] = []
+    identifiers: set[str] = set()
+    for position, raw in enumerate(value[:16]):
+        if not isinstance(raw, dict):
+            raise ValueError(f"item da barra inválido na posição {position}")
+        identifier = str(raw.get("id", "")).strip()[:80]
+        item_type = str(raw.get("type", ""))
+        section = str(raw.get("section", ""))
+        if not identifier or identifier in identifiers:
+            raise ValueError(f"identificador da barra inválido: {identifier}")
+        if item_type not in TOPBAR_TYPES or section not in TOPBAR_SECTIONS:
+            raise ValueError(f"tipo ou seção da barra inválido: {identifier}")
+        identifiers.add(identifier)
+        result.append({
+            "id": identifier,
+            "type": item_type,
+            "section": section,
+            "order": max(0, min(31, int(raw.get("order", 0)))),
+            "enabled": bool(raw.get("enabled", True)),
+            "scale": max(0.75, min(1.35, float(raw.get("scale", 1.0)))),
+        })
+    for section in ("left", "center", "right"):
+        entries = sorted((item for item in result if item["section"] == section),
+                         key=lambda item: (item["order"], item["id"]))
+        for order, item in enumerate(entries):
+            item["order"] = order
+    return result
+
+
+def ensure_profile_composition_versions(index_path: Path,
+                                        data_root: Path) -> None:
+    index = load_index(index_path)
+    changed = False
+    for profile in index["profiles"]:
+        composition = profile.get("composition")
+        if not isinstance(composition, dict):
+            composition = {}
+        else:
+            composition = copy.deepcopy(composition)
+        layout = normalized_topbar_layout(composition.get("topbarLayout"))
+        if not layout:
+            layout = default_topbar_layout()
+        layout_changed = composition.get("topbarLayout") != layout
+        needs_migration = (int(composition.get("schemaVersion", 1) or 1)
+                           != COMPOSITION_VERSION
+                           or layout_changed)
+        if not needs_migration:
+            continue
+        previous_version = int(composition.get("schemaVersion", 1) or 1)
+        composition["schemaVersion"] = COMPOSITION_VERSION
+        composition["topbarLayout"] = layout
+        if layout_changed:
+            composition["topbar"] = {
+                "variant": "velora", "height": 40, "scale": 1.0,
+                "gap": 4, "margin": 8,
+            }
+        if previous_version < 7:
+            appearance = composition.get("appearance")
+            if not isinstance(appearance, dict):
+                appearance = {}
+            appearance.setdefault("visualStyle", "classic")
+            appearance.setdefault("colorScheme", "dark")
+            appearance.setdefault("material", "glass")
+            appearance.setdefault("surfaceOpacity", 0.82)
+            appearance.setdefault("blurStrength", 0.55)
+            appearance.setdefault("contrast", 1.08)
+            appearance.setdefault("reflection", 0.35)
+            appearance.setdefault("accentMode", "wallpaper")
+            appearance.setdefault("accentColor", "#c8788f")
+            composition["appearance"] = appearance
+            composition.setdefault("topbar", {
+                "height": 40, "scale": 1.0, "gap": 4, "margin": 8,
+            })
+        if previous_version < 8:
+            topbar = composition.get("topbar")
+            if not isinstance(topbar, dict):
+                topbar = {}
+            topbar.setdefault("variant", "velora")
+            topbar.setdefault("height", 40)
+            topbar.setdefault("scale", 1.0)
+            topbar.setdefault("gap", 4)
+            topbar.setdefault("margin", 8)
+            composition["topbar"] = topbar
+        profile["schemaVersion"] = COMPOSITION_VERSION
+        profile["composition"] = composition
+        manifest = copy.deepcopy(profile)
+        manifest.pop("directory", None)
+        manifest.pop("preview", None)
+        atomic_json(data_root / str(profile.get("id", "")) / "profile.json",
+                    manifest)
+        changed = True
+    if changed:
+        atomic_json(index_path, index)
+
+
+def normalize_snapshot(value: object) -> dict:
+    if not isinstance(value, dict):
+        raise ValueError("snapshot de composição inválido")
+    gallery = value.get("gallery")
+    if not isinstance(gallery, list) or len(gallery) != 3:
+        raise ValueError("a composição precisa de três imagens na galeria")
+    normalized = {
+        "schemaVersion": COMPOSITION_VERSION,
+        "canvas": {"width": 1600, "height": 900},
+        "character": normalized_entry(value.get("character"), character=True),
+        "gallery": [normalized_entry(entry) for entry in gallery],
+        "galleryOrder": normalized_order(value.get("galleryOrder")),
+    }
+    topbar_layout = normalized_topbar_layout(value.get("topbarLayout"))
+    if topbar_layout:
+        normalized["topbarLayout"] = topbar_layout
+    scene = value.get("scene")
+    if isinstance(scene, dict) and isinstance(scene.get("layers"), list):
+        layers = []
+        identifiers: set[str] = set()
+        for position, raw_layer in enumerate(scene["layers"]):
+            if not isinstance(raw_layer, dict):
+                raise ValueError(f"camada inválida na posição {position}")
+            layer = copy.deepcopy(raw_layer)
+            identifier = str(layer.get("id", "")).strip()
+            layer_type = str(layer.get("type", "")).strip()
+            if not identifier or not layer_type or identifier in identifiers:
+                raise ValueError(f"identificador de camada inválido: {identifier}")
+            identifiers.add(identifier)
+            if layer_type == "image" and not str(layer.get("source", "")):
+                raise ValueError(f"imagem sem arquivo: {identifier}")
+            layers.append(layer)
+        normalized["scene"] = {"layers": layers}
+    shared_widgets = value.get("sharedWidgets")
+    if isinstance(shared_widgets, dict) and isinstance(shared_widgets.get("items"), list):
+        items = copy.deepcopy(shared_widgets["items"])
+        if len(items) != 6:
+            raise ValueError("a composição precisa dos seis widgets compartilhados")
+        identifiers: set[str] = set()
+        kinds: set[str] = set()
+        allowed_kinds = {
+            "clock", "calendar", "weather", "media", "gallery", "system",
+        }
+        for position, item in enumerate(items):
+            if not isinstance(item, dict):
+                raise ValueError(f"widget compartilhado inválido na posição {position}")
+            identifier = str(item.get("id", "")).strip()
+            if not identifier or identifier in identifiers:
+                raise ValueError(f"identificador de widget inválido: {identifier}")
+            kind = str(item.get("kind", ""))
+            if kind not in allowed_kinds or kind in kinds:
+                raise ValueError(f"tipo de widget inválido: {item.get('kind')}")
+            identifiers.add(identifier)
+            kinds.add(kind)
+        if kinds != allowed_kinds:
+            raise ValueError("a composição precisa dos seis widgets-base")
+        template = str(shared_widgets.get("layoutTemplate", "custom"))
+        allowed_templates = {
+            "side-column", "split-corners", "scattered",
+            "gallery-top-right", "custom",
+        }
+        template_aliases = {
+            "bottom-strip": "split-corners",
+            "lower-clusters": "split-corners",
+            "top-strip": "side-column",
+            "upper-clusters": "side-column",
+        }
+        template = template_aliases.get(template, template)
+        normalized["sharedWidgets"] = {
+            "layoutTemplate": template if template in allowed_templates else "custom",
+            "layoutSeed": str(shared_widgets.get("layoutSeed", "profile"))[:160] or "profile",
+            "items": items,
+        }
+    profile = value.get("profile")
+    if isinstance(profile, dict):
+        normalized["profile"] = {
+            "displayName": str(profile.get("displayName", ""))[:80],
+            "greeting": str(profile.get("greeting", ""))[:120],
+            "verticalLabel": str(profile.get("verticalLabel", ""))[:80],
+            "avatar": str(profile.get("avatar", "")),
+        }
+    appearance = value.get("appearance")
+    if isinstance(appearance, dict):
+        dimming_mode = str(appearance.get("lockDimmingMode", "off"))
+        if dimming_mode not in {"off", "background", "panel", "both"}:
+            dimming_mode = "off"
+        try:
+            dimming_amount = float(appearance.get("lockDimmingAmount", 0.28))
+        except (TypeError, ValueError):
+            dimming_amount = 0.28
+        try:
+            caustics_intensity = float(appearance.get("waterCausticsIntensity", 0.32))
+        except (TypeError, ValueError):
+            caustics_intensity = 0.32
+        visual_style = str(appearance.get("visualStyle", "editorial"))
+        color_scheme = str(appearance.get("colorScheme", "dark"))
+        material = str(appearance.get("material", "glass"))
+        accent_mode = str(appearance.get("accentMode", "wallpaper"))
+        accent_color = str(appearance.get("accentColor", "#c8788f"))
+        def appearance_number(name: str, fallback: float,
+                              minimum: float, maximum: float) -> float:
+            try:
+                result = float(appearance.get(name, fallback))
+            except (TypeError, ValueError):
+                result = fallback
+            return max(minimum, min(maximum, result))
+        normalized["appearance"] = {
+            "visualStyle": visual_style if visual_style in {
+                "editorial", "classic", "minimal"} else "editorial",
+            "colorScheme": color_scheme if color_scheme in {
+                "dark", "light"} else "dark",
+            "material": material if material in {
+                "glass", "solid", "adaptive"} else "glass",
+            "surfaceOpacity": appearance_number(
+                "surfaceOpacity", 0.82, 0.45, 1.0),
+            "blurStrength": appearance_number(
+                "blurStrength", 0.55, 0.0, 1.0),
+            "contrast": appearance_number("contrast", 1.08, 0.8, 1.35),
+            "reflection": appearance_number("reflection", 0.35, 0.0, 1.0),
+            "accentMode": accent_mode if accent_mode in {
+                "wallpaper", "custom"} else "wallpaper",
+            "accentColor": accent_color if len(accent_color) == 7
+                and accent_color.startswith("#") else "#c8788f",
+            "characterPywal": bool(appearance.get("characterPywal", False)),
+            "waterCausticsEnabled": bool(
+                appearance.get("waterCausticsEnabled", True)),
+            "waterCausticsIntensity": max(0.0, min(1.0, caustics_intensity)),
+            "waterCausticsLines": bool(
+                appearance.get("waterCausticsLines", True)),
+            "waterCausticsModules": bool(
+                appearance.get("waterCausticsModules", False)),
+            "lockDimmingMode": dimming_mode,
+            "lockDimmingAmount": max(0.0, min(0.72, dimming_amount)),
+        }
+    topbar = value.get("topbar")
+    if isinstance(topbar, dict):
+        def topbar_number(name: str, fallback: float,
+                          minimum: float, maximum: float) -> float:
+            try:
+                result = float(topbar.get(name, fallback))
+            except (TypeError, ValueError):
+                result = fallback
+            return max(minimum, min(maximum, result))
+        normalized["topbar"] = {
+            "variant": str(topbar.get("variant", "velora"))
+                if str(topbar.get("variant", "velora")) in {
+                    "velora", "end4-first"} else "velora",
+            "height": topbar_number("height", 40, 36, 52),
+            "scale": topbar_number("scale", 1, 0.75, 1.35),
+            "gap": topbar_number("gap", 4, 0, 12),
+            "margin": topbar_number("margin", 8, 6, 20),
+        }
+    calendar = value.get("calendar")
+    if isinstance(calendar, dict) and isinstance(calendar.get("reminders"), list):
+        normalized["calendar"] = {
+            "reminders": copy.deepcopy(calendar["reminders"][:512])
+        }
+    wallpaper = value.get("wallpaper")
+    if isinstance(wallpaper, dict) and str(wallpaper.get("path", "")):
+        normalized["wallpaper"] = {"path": str(wallpaper["path"])}
+    return normalized
+
+
+def copy_asset(source_value: str, destination_stem: Path) -> Path:
+    source = local_path(source_value)
+    suffix = source.suffix.lower() or ".bin"
+    destination = destination_stem.with_suffix(suffix)
+    shutil.copy2(source, destination)
+    return destination
+
+
+def make_preview(source: Path, destination: Path) -> bool:
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        return False
+    command = [
+        ffmpeg, "-v", "error", "-y", "-i", str(source), "-frames:v", "1",
+        "-vf", "scale=256:256:force_original_aspect_ratio=decrease:flags=lanczos",
+        str(destination),
+    ]
+    result = subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                            check=False, timeout=30)
+    return result.returncode == 0 and destination.is_file()
+
+
+def fallback_color(seed: str) -> str:
+    palette = (
+        "#d25b79", "#c76ccf", "#8d76dc", "#648fdb", "#4ba7bf",
+        "#49a684", "#91a64e", "#d3914f", "#d66a58",
+    )
+    digest = hashlib.sha256(seed.encode("utf-8")).digest()
+    return palette[digest[0] % len(palette)]
+
+
+def dominant_color(source: Path, seed: str) -> str:
+    """Choose a compact, character-derived swatch for the lock roulette."""
+    if Image is None or not source.is_file():
+        return fallback_color(seed)
+    try:
+        with Image.open(source) as opened:
+            frame = opened.convert("RGBA")
+            frame.thumbnail((72, 72))
+            bins: dict[tuple[int, int, int], float] = {}
+            for red, green, blue, alpha in frame.getdata():
+                if alpha < 56:
+                    continue
+                hue, saturation, value = colorsys.rgb_to_hsv(
+                    red / 255, green / 255, blue / 255)
+                del hue
+                if value < 0.10 or value > 0.97 and saturation < 0.10:
+                    continue
+                key = (red // 32, green // 32, blue // 32)
+                weight = (alpha / 255) * (0.35 + saturation * 1.8) * (0.45 + value)
+                bins[key] = bins.get(key, 0.0) + weight
+            if not bins:
+                return fallback_color(seed)
+            red_bin, green_bin, blue_bin = max(bins, key=bins.get)
+            red = min(255, red_bin * 32 + 20)
+            green = min(255, green_bin * 32 + 20)
+            blue = min(255, blue_bin * 32 + 20)
+            return f"#{red:02x}{green:02x}{blue:02x}"
+    except Exception:
+        return fallback_color(seed)
+
+
+def ensure_profile_accents(index_path: Path, data_root: Path) -> None:
+    index = load_index(index_path)
+    changed = False
+    for profile in index["profiles"]:
+        accent = str(profile.get("accent", ""))
+        if len(accent) == 7 and accent.startswith("#"):
+            continue
+        profile_id = str(profile.get("id", ""))
+        directory = data_root / profile_id
+        source = directory / "preview.png"
+        if not source.is_file():
+            candidates = sorted(directory.glob("character.*"))
+            source = candidates[0] if candidates else source
+        profile["accent"] = dominant_color(source, profile_id)
+        manifest_path = directory / "profile.json"
+        if manifest_path.is_file():
+            manifest = dict(profile)
+            manifest.pop("directory", None)
+            manifest.pop("preview", None)
+            atomic_json(manifest_path, manifest)
+        changed = True
+    if changed:
+        atomic_json(index_path, index)
+
+
+def build_profile(data_root: Path, profile_id: str, name: str, snapshot: dict,
+                  created_at: str) -> tuple[Path, dict]:
+    staging = data_root / f".staging-{profile_id}-{uuid.uuid4().hex}"
+    staging.mkdir(parents=True, exist_ok=False)
+    try:
+        character_source = (copy_asset(snapshot["character"]["path"], staging / "character")
+                            if snapshot["character"]["path"] else None)
+        gallery_sources = [
+            copy_asset(entry["path"], staging / f"gallery-{index}") if entry["path"] else None
+            for index, entry in enumerate(snapshot["gallery"])
+        ]
+        wallpaper_source = None
+        if snapshot.get("wallpaper", {}).get("path"):
+            wallpaper_source = copy_asset(snapshot["wallpaper"]["path"],
+                                          staging / "wallpaper")
+
+        avatar_source = None
+        if snapshot.get("profile", {}).get("avatar"):
+            avatar_source = copy_asset(snapshot["profile"]["avatar"], staging / "avatar")
+
+        scene = copy.deepcopy(snapshot.get("scene", {"layers": []}))
+        shared_widgets = copy.deepcopy(snapshot.get("sharedWidgets", {}))
+        final_dir = data_root / profile_id
+        dynamic_asset = 0
+
+        def store_dynamic(value: str, label: str) -> str:
+            nonlocal dynamic_asset
+            copied = copy_asset(value, staging / f"{label}-{dynamic_asset:04d}")
+            dynamic_asset += 1
+            return (final_dir / copied.name).as_uri()
+
+        for position, layer in enumerate(scene.get("layers", [])):
+            layer_type = str(layer.get("type", ""))
+            if layer_type in {"image", "character"} and str(layer.get("source", "")):
+                layer["source"] = store_dynamic(
+                    str(layer["source"]), f"layer-{position}")
+            if layer_type == "photoGrid":
+                for photo_index, photo in enumerate(layer.get("items", [])):
+                    if str(photo.get("path", "")):
+                        photo["path"] = store_dynamic(
+                            str(photo["path"]), f"grid-{position}-{photo_index}")
+            for style_name in ("desktopStyle", "lockStyle"):
+                style = layer.get(style_name)
+                if isinstance(style, dict) and str(style.get("fontAsset", "")):
+                    style["fontAsset"] = store_dynamic(
+                        str(style["fontAsset"]), f"font-layer-{position}")
+
+        for widget_position, widget in enumerate(shared_widgets.get("items", [])):
+            for style_name in ("desktopStyle", "lockStyle"):
+                style = widget.get(style_name)
+                if isinstance(style, dict) and str(style.get("fontAsset", "")):
+                    style["fontAsset"] = store_dynamic(
+                        str(style["fontAsset"]), f"font-widget-{widget_position}")
+
+        character = dict(snapshot["character"])
+        character["path"] = (final_dir / character_source.name).as_uri() if character_source else ""
+        gallery = []
+        for entry, copied in zip(snapshot["gallery"], gallery_sources):
+            stored = dict(entry)
+            stored["path"] = (final_dir / copied.name).as_uri() if copied else ""
+            gallery.append(stored)
+
+        preview_path = staging / "preview.png"
+        preview_source = character_source or wallpaper_source or avatar_source
+        preview_ready = bool(preview_source) and make_preview(preview_source, preview_path)
+        accent = (dominant_color(preview_path if preview_ready else preview_source, profile_id)
+                  if preview_source else fallback_color(profile_id))
+        updated_at = now_iso()
+        profile_snapshot = copy.deepcopy(snapshot.get("profile", {}))
+        if avatar_source:
+            profile_snapshot["avatar"] = (final_dir / avatar_source.name).as_uri()
+
+        composition = {
+            "schemaVersion": COMPOSITION_VERSION,
+            "canvas": copy.deepcopy(snapshot.get("canvas", {"width": 1600, "height": 900})),
+            "character": character,
+            "gallery": gallery,
+            "galleryOrder": snapshot["galleryOrder"],
+            "scene": scene,
+            "profile": profile_snapshot,
+            "appearance": copy.deepcopy(snapshot.get("appearance", {})),
+            "topbar": copy.deepcopy(snapshot.get("topbar", {})),
+            "calendar": copy.deepcopy(snapshot.get("calendar", {"reminders": []})),
+        }
+        if snapshot.get("topbarLayout"):
+            composition["topbarLayout"] = copy.deepcopy(snapshot["topbarLayout"])
+        if shared_widgets:
+            composition["sharedWidgets"] = shared_widgets
+        if wallpaper_source:
+            composition["wallpaper"] = {
+                "path": (final_dir / wallpaper_source.name).as_uri()
+            }
+        manifest = {
+            "schemaVersion": COMPOSITION_VERSION,
+            "id": profile_id,
+            "name": name,
+            "accent": accent,
+            "createdAt": created_at,
+            "updatedAt": updated_at,
+            "composition": composition,
+        }
+        atomic_json(staging / "profile.json", manifest)
+        metadata = dict(manifest)
+        metadata["directory"] = profile_id
+        metadata["preview"] = (final_dir / "preview.png").as_uri() if preview_ready else ""
+        return staging, metadata
+    except Exception:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+
+
+def replace_profile(data_root: Path, profile_id: str, staging: Path) -> Path | None:
+    final_dir = data_root / profile_id
+    backup = None
+    if final_dir.exists():
+        backup = data_root / f".backup-{profile_id}-{uuid.uuid4().hex}"
+        os.replace(final_dir, backup)
+    os.replace(staging, final_dir)
+    return backup
+
+
+def restore_replaced(data_root: Path, profile_id: str, backup: Path | None) -> None:
+    final_dir = data_root / profile_id
+    shutil.rmtree(final_dir, ignore_errors=True)
+    if backup and backup.exists():
+        os.replace(backup, final_dir)
+
+
+def save_profile(index_path: Path, data_root: Path, name: str, snapshot: dict,
+                 profile_id: str | None = None) -> str:
+    index = load_index(index_path)
+    existing_index = -1
+    existing = None
+    if profile_id:
+        for position, profile in enumerate(index["profiles"]):
+            if profile.get("id") == profile_id:
+                existing_index = position
+                existing = profile
+                break
+        if existing is None:
+            raise ValueError("perfil não encontrado")
+    else:
+        profile_id = str(uuid.uuid4())
+
+    snapshot = copy.deepcopy(snapshot)
+    shared_widgets = snapshot.get("sharedWidgets")
+    if isinstance(shared_widgets, dict):
+        # ConfigStore intentionally keys deterministic layouts by profile ID
+        # while applying a composition. Persist the same seed so a freshly
+        # created/applied profile is immediately clean rather than reporting
+        # a synthetic layout change.
+        shared_widgets["layoutSeed"] = profile_id
+
+    created_at = str(existing.get("createdAt")) if existing else now_iso()
+    staging, metadata = build_profile(data_root, profile_id, safe_name(name), snapshot,
+                                      created_at)
+    backup = None
+    try:
+        backup = replace_profile(data_root, profile_id, staging)
+        if existing_index >= 0:
+            index["profiles"][existing_index] = metadata
+        else:
+            index["profiles"].append(metadata)
+        index["activeProfileId"] = profile_id
+        atomic_json(index_path, index)
+    except Exception:
+        restore_replaced(data_root, profile_id, backup)
+        raise
+    if backup:
+        shutil.rmtree(backup, ignore_errors=True)
+    return profile_id
+
+
+def rename_profile(index_path: Path, data_root: Path, profile_id: str, name: str) -> None:
+    index = load_index(index_path)
+    profile = next((item for item in index["profiles"] if item.get("id") == profile_id), None)
+    if not profile:
+        raise ValueError("perfil não encontrado")
+    profile["name"] = safe_name(name)
+    profile["updatedAt"] = now_iso()
+    manifest_path = data_root / profile_id / "profile.json"
+    manifest = dict(profile)
+    manifest.pop("directory", None)
+    manifest.pop("preview", None)
+    atomic_json(manifest_path, manifest)
+    atomic_json(index_path, index)
+
+
+def delete_profile(index_path: Path, data_root: Path, profile_id: str) -> str:
+    index = load_index(index_path)
+    profiles = index["profiles"]
+    if len(profiles) <= 1:
+        raise ValueError("o último perfil não pode ser excluído")
+    position = next((i for i, item in enumerate(profiles) if item.get("id") == profile_id), -1)
+    if position < 0:
+        raise ValueError("perfil não encontrado")
+    removed_dir = data_root / profile_id
+    backup = data_root / f".deleted-{profile_id}-{uuid.uuid4().hex}"
+    if removed_dir.exists():
+        os.replace(removed_dir, backup)
+    profiles.pop(position)
+    if index.get("activeProfileId") == profile_id:
+        neighbor = profiles[min(position, len(profiles) - 1)]
+        index["activeProfileId"] = neighbor["id"]
+    try:
+        atomic_json(index_path, index)
+    except Exception:
+        if backup.exists():
+            os.replace(backup, removed_dir)
+        raise
+    shutil.rmtree(backup, ignore_errors=True)
+    return str(index.get("activeProfileId", ""))
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("operation", choices=["ensure", "create", "update", "rename", "delete"])
+    parser.add_argument("--index", required=True)
+    parser.add_argument("--data-root", required=True)
+    parser.add_argument("--id", default="")
+    parser.add_argument("--name", default="")
+    parser.add_argument("--snapshot-json", default="")
+    args = parser.parse_args()
+
+    index_path = Path(args.index).expanduser().resolve()
+    data_root = Path(args.data_root).expanduser().resolve()
+    data_root.mkdir(parents=True, exist_ok=True)
+
+    if args.operation == "ensure":
+        index = load_index(index_path)
+        if not index["profiles"]:
+            snapshot = normalize_snapshot(json.loads(args.snapshot_json))
+            profile_id = save_profile(index_path, data_root, "Atual", snapshot)
+        else:
+            profile_id = str(index.get("activeProfileId") or index["profiles"][0]["id"])
+            if index.get("activeProfileId") != profile_id:
+                index["activeProfileId"] = profile_id
+                atomic_json(index_path, index)
+        ensure_profile_accents(index_path, data_root)
+        ensure_profile_composition_versions(index_path, data_root)
+    elif args.operation == "create":
+        snapshot = normalize_snapshot(json.loads(args.snapshot_json))
+        profile_id = save_profile(index_path, data_root, args.name, snapshot)
+    elif args.operation == "update":
+        snapshot = normalize_snapshot(json.loads(args.snapshot_json))
+        current = load_index(index_path)
+        profile = next((item for item in current["profiles"] if item.get("id") == args.id), None)
+        name = args.name or (profile.get("name") if profile else "")
+        profile_id = save_profile(index_path, data_root, name, snapshot, args.id)
+    elif args.operation == "rename":
+        rename_profile(index_path, data_root, args.id, args.name)
+        profile_id = args.id
+    else:
+        profile_id = delete_profile(index_path, data_root, args.id)
+
+    print(json.dumps({"ok": True, "activeProfileId": profile_id}, ensure_ascii=False))
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except Exception as error:
+        print(json.dumps({"ok": False, "error": str(error)}, ensure_ascii=False))
+        raise SystemExit(1)

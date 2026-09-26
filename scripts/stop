@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+project_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+export PATH="${XDG_DATA_HOME:-$HOME/.local/share}/velora-shell/runtime/quickshell/bin:$PATH"
+for surface in editorHide settingsHide lockPreviewHide; do
+    qs -p "$project_dir" ipc call composition "$surface" >/dev/null 2>&1 || true
+done
+sleep 0.8
+qs kill -p "$project_dir" >/dev/null 2>&1 || true
+for attempt in {1..50}; do
+    if ! qs list --all 2>/dev/null | rg -Fq "Config path: $project_dir/shell.qml"; then
+        break
+    fi
+    if [[ "$attempt" == 50 ]]; then
+        printf 'Velora Shell did not stop within five seconds.\n' >&2
+        exit 1
+    fi
+    sleep 0.1
+done
+if hyprctl plugin list | rg -q '^Plugin velora-blur by '; then
+    hyprctl plugin unload "${XDG_CACHE_HOME:-$HOME/.cache}/velora-shell/native/velora-blur.so"
+fi

@@ -1,0 +1,116 @@
+#!/usr/bin/env python3
+import datetime as dt
+import json
+import os
+import sys
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+
+CONFIG_DIR = os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")), "velora-shell")
+CONFIG_PATH = os.path.join(CONFIG_DIR, "world-clocks.json")
+DEFAULTS = [
+    {"label": "New York", "zone": "America/New_York"},
+    {"label": "Tokyo", "zone": "Asia/Tokyo"},
+]
+OPTIONS = [
+    {"label": "São Paulo", "zone": "America/Sao_Paulo"},
+    {"label": "New York", "zone": "America/New_York"},
+    {"label": "Los Angeles", "zone": "America/Los_Angeles"},
+    {"label": "London", "zone": "Europe/London"},
+    {"label": "Paris", "zone": "Europe/Paris"},
+    {"label": "Berlin", "zone": "Europe/Berlin"},
+    {"label": "Dubai", "zone": "Asia/Dubai"},
+    {"label": "Tokyo", "zone": "Asia/Tokyo"},
+    {"label": "Seoul", "zone": "Asia/Seoul"},
+    {"label": "Sydney", "zone": "Australia/Sydney"},
+]
+
+
+def valid_zone(value):
+    try:
+        ZoneInfo(str(value))
+        return True
+    except (ZoneInfoNotFoundError, ValueError):
+        return False
+
+
+def clean_items(raw):
+    result = []
+    values = raw if isinstance(raw, list) else []
+    for index in range(2):
+        fallback = DEFAULTS[index]
+        item = values[index] if index < len(values) and isinstance(values[index], dict) else {}
+        zone = str(item.get("zone") or fallback["zone"])
+        if not valid_zone(zone):
+            zone = fallback["zone"]
+        label = str(item.get("label") or next((option["label"] for option in OPTIONS if option["zone"] == zone), zone))
+        result.append({"label": label, "zone": zone})
+    return result
+
+
+def load_items():
+    try:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as handle:
+            return clean_items(json.load(handle).get("items"))
+    except (OSError, ValueError, AttributeError):
+        return clean_items(DEFAULTS)
+
+
+def save_items(items):
+    os.makedirs(CONFIG_DIR, exist_ok=True)
+    temporary = CONFIG_PATH + ".tmp"
+    with open(temporary, "w", encoding="utf-8") as handle:
+        json.dump({"items": clean_items(items)}, handle, ensure_ascii=False, indent=2)
+    os.replace(temporary, CONFIG_PATH)
+
+
+def offset_text(value):
+    offset = value.utcoffset() or dt.timedelta()
+    minutes = int(offset.total_seconds() // 60)
+    sign = "+" if minutes >= 0 else "−"
+    minutes = abs(minutes)
+    hours, remainder = divmod(minutes, 60)
+    return f"UTC{sign}{hours}" + (f":{remainder:02d}" if remainder else "")
+
+
+def status(items):
+    values = []
+    for item in items:
+        current = dt.datetime.now(ZoneInfo(item["zone"]))
+        values.append({
+            "label": item["label"],
+            "zone": item["zone"],
+            "time": current.strftime("%H:%M"),
+            "offset": offset_text(current),
+        })
+    print(json.dumps({"items": values}, ensure_ascii=False, separators=(",", ":")))
+
+
+def main():
+    command = sys.argv[1] if len(sys.argv) > 1 else "status"
+    items = load_items()
+    if command in ("status", "get"):
+        status(items)
+        return 0
+    if command == "options":
+        print(json.dumps({"items": OPTIONS}, ensure_ascii=False, separators=(",", ":")))
+        return 0
+    if command == "set" and len(sys.argv) >= 4:
+        try:
+            slot = int(sys.argv[2])
+        except ValueError:
+            return 2
+        zone = sys.argv[3]
+        if slot not in (0, 1) or not valid_zone(zone):
+            return 2
+        label = sys.argv[4] if len(sys.argv) > 4 else next((option["label"] for option in OPTIONS if option["zone"] == zone), zone)
+        items[slot] = {"label": label, "zone": zone}
+        save_items(items)
+        status(items)
+        return 0
+    print("usage: velora-world-clock-state status|options|set SLOT ZONE [LABEL]", file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
