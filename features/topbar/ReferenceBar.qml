@@ -13,40 +13,83 @@ Item {
     required property var actions
     required property var compositor
     required property var editorController
-    // Geometry stays compact, while typography remains readable at 40 px.
-    readonly property real unit: 1
-    readonly property bool compact: width < 1280
-    readonly property bool nativeGlassActive: config.barMaterial !== "solid"
+    required property var controller
+    required property var host
+    required property var system
+    required property var timerService
     required property real wavePhase
     property int opticsGeneration: 0
     property alias barSurfaceItem: background
-
-    function syncNativeShape() {
-        if (width <= 0 || height <= 0 || config.barMaterial !== "liquid") {
-            Hyprland.dispatch("velora-blur:topbar-shape 0")
-            return
-        }
-        // Extend the native lens above the monitor. Its medial axis then sits
-        // on the clipped screen edge instead of crossing the 40 px strip.
-        Hyprland.dispatch("velora-blur:topbar-shape 1 0 -1 1 3.0 "
-            + Number(Math.min(20, height / 2) / width).toFixed(6))
+    readonly property var hyprMonitor: Hyprland.monitorFor(host.screen)
+    readonly property var workspaceIds: {
+        const ids = [1, 2, 3, 4, 5]
+        for (const workspace of Hyprland.workspaces.values)
+            if (workspace.id > 0 && !ids.includes(workspace.id)) ids.push(workspace.id)
+        const active = hyprMonitor && hyprMonitor.activeWorkspace ? hyprMonitor.activeWorkspace.id : 0
+        if (active > 0 && !ids.includes(active)) ids.push(active)
+        return ids.sort((a, b) => a - b)
     }
-
-    function itemWidth(type) {
+    readonly property real unit: 1
+    readonly property bool compact: width < 1280
+    readonly property real density: width < 760 ? 0.8 : 1
+    readonly property bool editing: editorController.shown && editorController.mode === "editing"
+        && editorController.editSpace === "desktop"
+    readonly property var visibleTools: config.topbarToolsOrder.filter(type =>
+        type !== "caffeine" && (type !== "thing" || config.topbarOneThingEnabled)
+        && (type !== "notes" || config.topbarNotesEnabled))
+    property string dragType: ""
+    property int dragFrom: -1
+    property int dragTo: -1
+    property real dragOrigin: 0
+    property real dragPosition: 0
+    property real dragWidth: 0
+    onEditingChanged: { cancelDrag(); root.controller.close() }
+    function cancelDrag() { dragType = ""; dragFrom = -1; dragTo = -1 }
+    function beginDrag(type, item, point) {
+        dragType = type; dragFrom = visibleTools.indexOf(type); dragTo = dragFrom
+        dragOrigin = point; dragPosition = point; dragWidth = item.width
+    }
+    function updateDrag(point) {
+        dragPosition = point
+        let target = 0
+        for (let i = 0; i < toolRepeater.count; ++i) {
+            const item = toolRepeater.itemAt(i)
+            if (point > toolRow.x + item.x + item.width / 2) target = i + 1
+        }
+        dragTo = Math.max(0, Math.min(visibleTools.length - 1, target > dragFrom ? target - 1 : target))
+    }
+    function finishDrag() {
+        const type = dragType, target = visibleTools[dragTo]
+        cancelDrag()
+        if (target && type !== target) config.moveTopbarTool(type, target)
+    }
+    function displacement(index, type) {
+        if (!dragType) return 0
+        if (type === dragType) return dragPosition - dragOrigin
+        if (dragFrom < dragTo && index > dragFrom && index <= dragTo) return -dragWidth - toolRow.spacing
+        if (dragTo < dragFrom && index >= dragTo && index < dragFrom) return dragWidth + toolRow.spacing
+        return 0
+    }
+    function label(type) {
+        return ({cat: "RunCat · CPU", caffeine: "Manter acordado", timer: "Timer", usb: "Dispositivos USB",
+            thing: "One Thing", notes: "Notas · arraste para baixo para criar", battery: "Bateria", monitor: "Monitores", paint: "Misturar cores do wallpaper", wifi: "Wi-Fi",
+            search: "Buscar aplicativos", controls: "Controles", clock: "Data e calendário"})[type] || type
+    }
+    function legacyItemWidth(type) {
         const widths = { launcher: 90, workspaces: 208, context: compact ? 130 : 250,
             clock: compact ? 210 : 330, media: compact ? 100 : 140,
             wifi: 54, volume: 54, battery: 86, settings: 48, avatar: 48,
             search: 48, weather: 60, brand: 90 }
         return (widths[type] || 48) * unit
     }
-    function glyph(type) {
+    function legacyGlyph(type) {
         if (type === "launcher") return "apps"
         if (type === "media") return media.playing ? "pause" : "play"
         if (type === "volume") return status.muted ? "volume-muted" : "volume"
         if (type === "battery") return "battery"
         return type === "avatar" ? "person" : type
     }
-    function label(type) {
+    function legacyLabel(type) {
         if (type === "clock") return clock.locale().toString(clock.now,
             compact ? "ddd, dd MMM — HH:mm" : "ddd, dd 'de' MMMM — HH:mm").replace(/\./g, "")
         if (type === "media") return media.hasPlayer ? media.title : "Sem mídia"
@@ -56,7 +99,7 @@ Item {
         if (type === "brand") return "Velora"
         return ""
     }
-    function activate(type) {
+    function activateLegacy(type) {
         if (type === "launcher" || type === "search") actions.openLauncher()
         else if (type === "media") media.hasPlayer ? media.togglePlaying() : actions.openMusic()
         else if (type === "wifi") actions.openNetworkSettings()
@@ -65,52 +108,7 @@ Item {
         else actions.openSettings()
     }
 
-    Canvas {
-        id: background
-        anchors.fill: parent
-        antialiasing: true
-        onWidthChanged: requestPaint()
-        onHeightChanged: requestPaint()
-        onPaint: {
-            const ctx = getContext("2d")
-            const r = 20
-            ctx.clearRect(0, 0, width, height)
-            ctx.beginPath()
-            ctx.moveTo(0, 0)
-            ctx.lineTo(width - r, 0)
-            ctx.arcTo(width, 0, width, r, r)
-            // The lower-right edge meets the desktop frame and must remain
-            // filled; a second rounded corner exposed the wallpaper here.
-            ctx.lineTo(width, height)
-            ctx.lineTo(0, height)
-            ctx.lineTo(0, 0)
-            ctx.closePath()
-            ctx.fillStyle = root.theme.barSurface
-            ctx.fill()
-        }
-        Component.onCompleted: requestPaint()
-    }
-
-    onWavePhaseChanged: background.requestPaint()
-    onOpticsGenerationChanged: Qt.callLater(syncNativeShape)
-    Connections {
-        target: root.theme
-        function onBarSurfaceChanged() { background.requestPaint() }
-        function onAccentChanged() { background.requestPaint() }
-        function onAccentAltChanged() { background.requestPaint() }
-    }
-    Connections {
-        target: root.config
-        function onBarMaterialChanged() {
-            root.syncNativeShape(); background.requestPaint()
-        }
-        function onBarWaveStrengthChanged() { background.requestPaint() }
-    }
-    Component.onCompleted: Qt.callLater(root.syncNativeShape)
-    Component.onDestruction: Hyprland.dispatch("velora-blur:topbar-shape 0")
-    onWidthChanged: Qt.callLater(syncNativeShape)
-    onHeightChanged: Qt.callLater(syncNativeShape)
-
+    Item { id: background; anchors.fill: parent }
     component Section: Row {
         id: section
         required property string sectionName
@@ -121,7 +119,7 @@ Item {
                 id: entry
                 required property var modelData
                 readonly property string type: modelData.type
-                width: root.itemWidth(type)
+                width: root.legacyItemWidth(type)
                 height: root.height
                 Rectangle {
                     anchors.fill: parent
@@ -131,6 +129,7 @@ Item {
                     visible: pointer.containsMouse && entry.type !== "workspaces"
                 }
                 Row {
+                    id: entryVisual
                     anchors.centerIn: parent
                     spacing: 8 * root.unit
                     visible: !["workspaces", "context"].includes(entry.type)
@@ -138,19 +137,25 @@ Item {
                         anchors.verticalCenter: parent.verticalCenter
                         width: 23 * root.unit; height: width
                         visible: !["clock", "brand"].includes(entry.type)
-                        iconName: root.glyph(entry.type)
+                        iconName: root.legacyGlyph(entry.type)
                         iconColor: root.theme.accentSoft
                     }
                     Text {
                         anchors.verticalCenter: parent.verticalCenter
                         visible: text.length > 0
-                        text: root.label(entry.type)
+                        text: root.legacyLabel(entry.type)
                         width: entry.type === "media" ? entry.width - 46 * root.unit : implicitWidth
                         elide: Text.ElideRight
                         color: root.theme.textPrimary
                         font.family: "Poppins"
                         font.pixelSize: (entry.type === "clock" ? 15 : 12) * root.unit
                     }
+                }
+                Loader {
+                    active: entry.type === "weather"
+                    x: entryVisual.x + entryVisual.width + 10
+                    width: 46; height: root.height
+                    sourceComponent: catComponent
                 }
                 Rectangle {
                     anchors.right: parent.right
@@ -187,39 +192,24 @@ Item {
                 MouseArea {
                     id: pointer
                     anchors.fill: parent
-                    enabled: entry.type !== "workspaces"
+                    enabled: entry.type !== "workspaces" && entry.type !== "weather"
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
-                    onClicked: root.activate(entry.type)
+                    onClicked: root.activateLegacy(entry.type)
                     onWheel: function(event) {
                         if (entry.type === "volume") root.status.adjustVolume(event.angleDelta.y > 0 ? 1 : -1)
                     }
                 }
-                Row {
+                Loader {
                     anchors.centerIn: parent
-                    visible: entry.type === "workspaces"
-                    spacing: 4 * root.unit
-                    Repeater {
-                        model: 5
-                        Rectangle {
-                            required property int index
-                            readonly property int workspace: index + 1
-                            readonly property bool selected: Hyprland.focusedWorkspace
-                                && Hyprland.focusedWorkspace.id === workspace
-                            width: 32 * root.unit; height: width; radius: width / 2
-                            color: selected ? root.theme.accent : "transparent"
-                            Text {
-                                anchors.centerIn: parent
-                                text: parent.workspace
-                                color: root.theme.textPrimary
-                                font.family: "Poppins"; font.pixelSize: 13 * root.unit
-                            }
-                            MouseArea {
-                                anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: Hyprland.dispatch("workspace " + parent.workspace)
-                            }
-                        }
+                    active: entry.type === "workspaces"
+                    width: Math.min(176, entry.width - 32); height: 32
+                    sourceComponent: WorkspaceSwitcher {
+                        theme: root.theme
+                        workspaceIds: root.workspaceIds
+                        activeWorkspaceId: root.hyprMonitor && root.hyprMonitor.activeWorkspace
+                            ? root.hyprMonitor.activeWorkspace.id : 0
+                        onWorkspaceRequested: workspaceId => Hyprland.dispatch("workspace " + workspaceId)
                     }
                 }
             }
@@ -227,20 +217,180 @@ Item {
     }
     Section { sectionName: "left"; anchors.left: parent.left }
     Section { sectionName: "center"; anchors.horizontalCenter: parent.horizontalCenter }
-    Section { sectionName: "right"; anchors.right: power.left }
-    Item {
-        id: power
-        anchors.right: parent.right
-        width: 62 * root.unit; height: parent.height
-        Components.VeloraMaterialIcon {
-            anchors.centerIn: parent
-            width: 25 * root.unit; height: width
-            iconName: "power"; iconColor: root.theme.accentSoft
+
+    Component {
+        id: catComponent
+        BarItem {
+            id: catItem
+            theme: root.theme
+            reducedMotion: root.config.reducedMotion
+            label: root.label("cat")
+            selected: root.controller.owner === root.host && root.controller.activeType === "cat"
+            onActivated: root.controller.toggle("cat", catItem, root.host)
+            onSecondaryActivated: root.controller.toggle("cat", catItem, root.host)
+            Component.onCompleted: root.controller.registerItem("cat", catItem, root.host)
+            Component.onDestruction: root.controller.unregisterItem(catItem)
+            RunCatIcon {
+                anchors.centerIn: parent
+                width: 34; height: 22
+                color: root.theme.textPrimary
+                cpuUsage: root.system.cpuUsage
+                animate: root.system.enabled && root.system.catAnimation
+            }
         }
-        MouseArea {
-            anchors.fill: parent
-            cursorShape: Qt.PointingHandCursor
-            onClicked: root.actions.openSettings()
+    }
+
+    Row {
+        id: toolRow
+        anchors.right: parent.right
+        anchors.rightMargin: 20
+        height: root.height
+        spacing: 1
+        Repeater {
+            id: toolRepeater
+            model: root.visibleTools
+            BarItem {
+                id: item
+                required property string modelData
+                required property int index
+                readonly property string type: modelData
+                theme: root.theme
+                reducedMotion: root.controller.supportsHover(type) ? false : root.config.reducedMotion
+                width: (type === "clock" ? 178 : type === "thing" ? (root.width < 1000 ? 90 : 160)
+                    : type === "timer" ? 74 : type === "battery" ? 44 : 36) * root.density
+                height: root.height
+                label: root.label(type)
+                Rectangle {
+                    // Boundaries of the text, tools, and calendar groups.
+                    visible: (item.type === "thing" && item.index < toolRepeater.count - 1)
+                        || (item.type === "clock" && item.index > 0)
+                    x: item.type === "thing" ? parent.width - 1 : 0
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 1; height: 16; radius: 0.5
+                    color: root.theme.withAlpha(root.theme.textPrimary, 0.32)
+                }
+                selected: root.controller.owner === root.host && root.controller.activeType === type
+                dragToCreate: type === "notes" && !root.editing
+                onHoveredChanged: {
+                    if (hovered && !root.editing) root.controller.enter(type, item, root.host)
+                    else root.controller.leave(item)
+                }
+                z: root.dragType === type ? 10 : 0
+                transform: Translate {
+                    x: root.displacement(item.index, item.type)
+                    Behavior on x { enabled: root.dragType !== item.type; NumberAnimation { duration: root.config.reducedMotion ? 0 : 120 } }
+                }
+                onDraggedDown: {
+                    root.system.newNote()
+                    if (!selected) root.controller.toggle(type, item, root.host)
+                }
+                onActivated: if (!root.editing) root.controller.toggle(type, item, root.host)
+                onSecondaryActivated: if (!root.editing) root.controller.toggle(type, item, root.host)
+                Keys.onLeftPressed: event => {
+                    if (root.editing) root.config.stepTopbarTool(type, -1)
+                    else event.accepted = false
+                }
+                Keys.onRightPressed: event => {
+                    if (root.editing) root.config.stepTopbarTool(type, 1)
+                    else event.accepted = false
+                }
+                Keys.onEscapePressed: if (root.dragType) root.cancelDrag()
+                Rectangle {
+                    anchors.fill: parent; anchors.margins: 3
+                    visible: root.editing
+                    radius: 7; color: "transparent"
+                    border.width: 1
+                    border.color: root.theme.withAlpha(root.theme.accentSoft, root.dragType === item.type ? 1 : 0.35)
+                }
+                MouseArea {
+                    anchors.fill: parent; z: 30
+                    enabled: root.editing
+                    cursorShape: pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+                    preventStealing: true
+                    onPressed: mouse => {
+                        item.forceActiveFocus()
+                        root.beginDrag(item.type, item, mapToItem(root, mouse.x, mouse.y).x)
+                    }
+                    onPositionChanged: mouse => {
+                        if (pressed && root.dragType === item.type)
+                            root.updateDrag(mapToItem(root, mouse.x, mouse.y).x)
+                    }
+                    onReleased: if (root.dragType === item.type) root.finishDrag()
+                    onCanceled: root.cancelDrag()
+                }
+                Component.onCompleted: root.controller.registerItem(type, item, root.host)
+                Component.onDestruction: root.controller.unregisterItem(item)
+                BatteryIndicator {
+                    anchors.centerIn: parent
+                    visible: item.type === "battery"
+                    available: root.status.hasBattery; level: root.status.batteryLevel; charging: root.status.batteryCharging
+                    color: root.theme.textPrimary; warningColor: root.theme.warning; criticalColor: root.theme.danger
+                }
+                BarIcon {
+                    anchors.centerIn: parent
+                    width: item.type === "cat" ? 34 : item.type === "caffeine" ? 24 : 20
+                    height: 22
+                    visible: !["timer", "thing", "clock", "battery", "caffeine", "cat"].includes(item.type)
+                    name: item.type
+                    color: root.theme.textPrimary
+                    level: root.system.wifiStrength
+                    muted: item.type === "wifi" && !root.status.wifiEnabled
+                    connected: root.status.wifiConnected
+                }
+                Loader {
+                    anchors.centerIn: parent
+                    active: item.type === "caffeine"
+                    width: 24; height: 22
+                    sourceComponent: CoffeeIcon {
+                        color: root.theme.textPrimary
+                        active: root.system.caffeineActive
+                        animate: root.system.enabled
+                        opacity: active ? 1 : 0.7
+                        Behavior on opacity { NumberAnimation { duration: 160 } }
+                    }
+                }
+                Rectangle {
+                    anchors.centerIn: parent
+                    visible: item.type === "timer"
+                    width: parent.width - 10; height: 25; radius: 7
+                    color: root.timerService.countdown.running || root.timerService.finished
+                        ? root.theme.textPrimary : root.theme.withAlpha(root.theme.textPrimary, 0.07)
+                    border.width: 1
+                    border.color: root.theme.withAlpha(root.theme.textPrimary, 0.18)
+                    Rectangle {
+                        anchors.fill: parent; anchors.margins: 3
+                        radius: 4; color: "transparent"
+                        border.width: 1; border.color: root.theme.withAlpha(root.theme.textPrimary, 0.09)
+                    }
+                    Behavior on color { ColorAnimation { duration: 160 } }
+                    TimerLabel {
+                        anchors.centerIn: parent; text: root.timerService.barText || root.timerService.timerText
+                        transitionKey: root.timerService.duration + ":" + root.timerService.engaged
+                        color: root.timerService.countdown.running || root.timerService.finished ? root.theme.profileDark : root.theme.textPrimary
+                        family: root.theme.bodyFont; pixelSize: 14; tabular: true
+                        Behavior on color { ColorAnimation { duration: 160 } }
+                    }
+                }
+                Text {
+                    anchors.centerIn: parent
+                    width: parent.width - 12
+                    visible: item.type === "thing"
+                    text: item.type === "thing" ? root.system.oneThing || "What is the one thing?"
+                        : root.clock.locale().toString(root.clock.now, "ddd d MMM  HH:mm").replace(/\./g, "")
+                    horizontalAlignment: Text.AlignHCenter
+                    elide: Text.ElideRight
+                    color: root.theme.textPrimary
+                    font.family: root.theme.bodyFont; font.pixelSize: 12
+                }
+                TimerLabel {
+                    anchors.centerIn: parent
+                    visible: item.type === "clock"
+                    text: root.clock.locale().toString(root.clock.now, "ddd d MMM  HH:mm").replace(/\./g, "")
+                    transitionKey: "clock"
+                    color: root.theme.textPrimary
+                    family: root.theme.bodyFont; pixelSize: 12
+                }
+            }
         }
     }
 }

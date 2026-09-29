@@ -296,6 +296,10 @@ def normalize_snapshot(value: object) -> dict:
             "layoutSeed": str(shared_widgets.get("layoutSeed", "profile"))[:160] or "profile",
             "items": items,
         }
+        if shared_widgets.get("surfaceMode") in {"solid", "bar"}:
+            normalized["sharedWidgets"]["surfaceMode"] = shared_widgets["surfaceMode"]
+        if isinstance(shared_widgets.get("blurEnabled"), bool):
+            normalized["sharedWidgets"]["blurEnabled"] = shared_widgets["blurEnabled"]
     profile = value.get("profile")
     if isinstance(profile, dict):
         normalized["profile"] = {
@@ -375,6 +379,14 @@ def normalize_snapshot(value: object) -> dict:
             "gap": topbar_number("gap", 4, 0, 12),
             "margin": topbar_number("margin", 8, 6, 20),
         }
+        tools = topbar.get("toolsOrder")
+        if isinstance(tools, list):
+            allowed = ["caffeine", "timer", "thing", "notes", "battery", "paint", "monitor", "search", "controls", "clock"]
+            tools = ["monitor" if item == "wifi" else item for item in tools]
+            if "monitor" in tools and "paint" not in tools:
+                tools.insert(tools.index("monitor"), "paint")
+            order = list(dict.fromkeys(item for item in tools if isinstance(item, str) and item in allowed))
+            normalized["topbar"]["toolsOrder"] = order + [item for item in allowed if item not in order]
     calendar = value.get("calendar")
     if isinstance(calendar, dict) and isinstance(calendar.get("reminders"), list):
         normalized["calendar"] = {

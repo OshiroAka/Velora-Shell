@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import "TopBarOrder.js" as TopBarOrder
 
 Scope {
     id: root
@@ -47,6 +48,15 @@ Scope {
     property string lockDimmingMode: "off"
     property real lockDimmingAmount: 0.28
     property bool topbarEnabled: true
+    property bool topbarOneThingEnabled: true
+    property bool topbarNotesEnabled: true
+    property var topbarToolsOrder: TopBarOrder.defaults()
+    property bool desktopWidgetsEnabled: true
+    property bool desktopVisualizerEnabled: true
+    property bool wallpaperBlurEnabled: false
+    property real wallpaperBlurStrength: 0.35
+    property real wallpaperDimming: 0
+    property bool widgetBlurEnabled: true
     property string topbarVariant: "velora"
     property string systemName: "Velora Shell"
     property real topbarHeight: 40
@@ -54,6 +64,8 @@ Scope {
     property real topbarGap: 4
     property real topbarMargin: 8
     property string barMaterial: "glass"
+    property string liquidGlassStyle: "frosted"
+    property bool barBlurEnabled: true
     property real barOpacity: 0.52
     property real barWaveStrength: 0.28
     // Shared Desktop/Lock widgets can either be fully opaque or consume the
@@ -431,10 +443,22 @@ Scope {
             legacyAppearance ? 8 : limitedNumber(
                 resolved, "topbar.margin", 8, 6, 20), 6, 20)
         topbarLayout = normalizedTopbarLayout(requestedTopbarLayout)
+        topbarOneThingEnabled = Boolean(valueAt(resolved, "topbar.oneThingEnabled", true))
+        topbarNotesEnabled = Boolean(valueAt(resolved, "topbar.notesEnabled", true))
+        topbarToolsOrder = TopBarOrder.normalize(valueAt(resolved, "topbar.toolsOrder", null))
+        desktopWidgetsEnabled = Boolean(valueAt(resolved, "desktop.widgetsEnabled", true))
+        desktopVisualizerEnabled = Boolean(valueAt(resolved, "desktop.visualizerEnabled", true))
+        wallpaperBlurEnabled = Boolean(valueAt(resolved, "desktop.wallpaperBlurEnabled", false))
+        wallpaperBlurStrength = limitedNumber(resolved, "desktop.wallpaperBlurStrength", 0.35, 0, 1)
+        wallpaperDimming = limitedNumber(resolved, "desktop.wallpaperDimming", 0, 0, 1)
+        widgetBlurEnabled = Boolean(valueAt(resolved, "lockPreview.sharedWidgets.blurEnabled", true))
+        barBlurEnabled = Boolean(valueAt(resolved, "bar.blurEnabled", true))
         const requestedBarMaterial = String(valueAt(
             resolved, "bar.material", "glass"))
         barMaterial = ["solid", "glass", "liquid"].includes(requestedBarMaterial)
             ? requestedBarMaterial : "glass"
+        const requestedLiquidStyle = String(valueAt(resolved, "bar.liquidStyle", "frosted"))
+        liquidGlassStyle = ["clear", "frosted"].includes(requestedLiquidStyle) ? requestedLiquidStyle : "frosted"
         barOpacity = limitedNumber(resolved, "bar.opacity", 0.52, 0.08, 0.96)
         barWaveStrength = limitedNumber(
             resolved, "bar.waveStrength", 0.28, 0, 1)
@@ -1195,7 +1219,7 @@ Scope {
         if (!widget)
             return false
         const amount = Math.max(0, Math.min(1, Number(progress || 0)))
-        const desktopOpacity = widget.desktopEnabled
+        const desktopOpacity = desktopWidgetsEnabled && widget.desktopEnabled
             ? Number(widget.desktop.opacity === undefined ? 1 : widget.desktop.opacity) : 0
         const lockOpacity = widget.lockEnabled
             ? Number(widget.lock.opacity === undefined ? 1 : widget.lock.opacity) : 0
@@ -1332,6 +1356,7 @@ Scope {
             scene: { layers: clone(sceneLayers) },
             sharedWidgets: {
                 surfaceMode: widgetSurfaceMode,
+                blurEnabled: widgetBlurEnabled,
                 layoutTemplate: desktopLayoutTemplate,
                 layoutSeed: desktopLayoutSeed,
                 items: clone(sharedWidgets)
@@ -1340,6 +1365,7 @@ Scope {
             topbarLayout: clone(topbarLayout),
             topbar: {
                 variant: topbarVariant,
+                toolsOrder: clone(topbarToolsOrder),
                 height: topbarHeight,
                 scale: topbarScale,
                 gap: topbarGap,
@@ -1430,6 +1456,8 @@ Scope {
         next = setAt(next, "lockPreview.sharedWidgets.layoutTemplate",
                      resolvedTemplate)
         if (isObject(snapshot.sharedWidgets)) {
+            if (typeof snapshot.sharedWidgets.blurEnabled === "boolean")
+                next = setAt(next, "lockPreview.sharedWidgets.blurEnabled", snapshot.sharedWidgets.blurEnabled)
             const requestedSurfaceMode = String(
                 snapshot.sharedWidgets.surfaceMode || widgetSurfaceMode)
             next = setAt(next, "lockPreview.sharedWidgets.surfaceMode",
@@ -1518,6 +1546,8 @@ Scope {
             Array.isArray(snapshot.topbarLayout)
                 ? snapshot.topbarLayout : defaultTopbarLayout()))
         if (snapshotVersion >= 7 && isObject(snapshot.topbar)) {
+            if (Array.isArray(snapshot.topbar.toolsOrder))
+                next = setAt(next, "topbar.toolsOrder", TopBarOrder.normalize(snapshot.topbar.toolsOrder))
             const requestedVariant = String(snapshot.topbar.variant || "velora")
             next = setAt(next, "topbar.variant",
                 ["velora", "end4-first"].includes(requestedVariant)
@@ -1680,6 +1710,19 @@ Scope {
     function setTopbarLayout(values) {
         setValue("topbar.layout", normalizedTopbarLayout(values))
         return true
+    }
+
+    function topbarToolLabel(type) { return TopBarOrder.label(type) }
+    function moveTopbarTool(type, target) {
+        if (!topbarToolsOrder.includes(type) || !topbarToolsOrder.includes(target)) return false
+        setValue("topbar.toolsOrder", TopBarOrder.move(topbarToolsOrder, type, target))
+        return true
+    }
+    function stepTopbarTool(type, direction) {
+        const index = topbarToolsOrder.indexOf(type)
+        const next = index + (direction < 0 ? -1 : 1)
+        if (index < 0 || next < 0 || next >= topbarToolsOrder.length) return false
+        return moveTopbarTool(type, topbarToolsOrder[next])
     }
 
     function setTopbarItemEnabled(identifier, enabled) {

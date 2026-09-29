@@ -31,6 +31,18 @@ Super+L toggles the visual lock scene. Print and Shift+Print capture the
 screen and a selected area. **The visual lock scene does not authenticate
 users or secure the session.** Use an authenticated locker when needed.
 
+## Desktop controls
+
+- The top bar hosts display settings and a compact palette brush. The brush
+  remixes wallpaper colors for the bars and pywal, preserves the choice, and
+  adjusts text contrast for light and dark surfaces.
+- Wi-Fi, Bluetooth, notification history, volume and brightness live in the
+  sidebar with connected animated panels. The sidebar clock is display-only.
+- Super+W opens animated application search ordered by recorded usage.
+- Display changes include confirmation and automatic rollback. Volume and
+  brightness keys reveal the corresponding compact sidebar control.
+- Desktop settings control widgets, wallpaper effects, visualizer and blur.
+
 ## Dependencies
 
 The validated combination is Qt 6.11.2, Hyprland 0.56.2 and upstream

@@ -794,6 +794,40 @@ Item {
             spacing: 12
             PageTitle { title: "Barra"; subtitle: "Faixa fina e contínua inspirada na referência" }
             SectionCard {
+                title: "Itens opcionais"
+                Row {
+                    spacing: 10
+                    ActionButton {
+                        label: root.config.topbarOneThingEnabled ? "Mensagem · visível" : "Mensagem · oculta"
+                        selected: root.config.topbarOneThingEnabled
+                        onTriggered: root.config.setValue("topbar.oneThingEnabled", !root.config.topbarOneThingEnabled)
+                    }
+                    ActionButton {
+                        label: root.config.topbarNotesEnabled ? "Notas · visíveis" : "Notas · ocultas"
+                        selected: root.config.topbarNotesEnabled
+                        onTriggered: root.config.setValue("topbar.notesEnabled", !root.config.topbarNotesEnabled)
+                    }
+                }
+                Text {
+                    width: parent.width; wrapMode: Text.WordWrap
+                    text: "Ocultar preserva a mensagem e as notas salvas."
+                    color: root.theme.textSecondary; font.family: root.theme.bodyFont; font.pixelSize: 11
+                }
+            }
+            SectionCard {
+                title: "Desfoque das barras"
+                ActionButton {
+                    label: root.config.barBlurEnabled ? "Blur do vidro · ligado" : "Blur do vidro · desligado"
+                    selected: root.config.barBlurEnabled
+                    onTriggered: root.config.setValue("bar.blurEnabled", !root.config.barBlurEnabled)
+                }
+                Text {
+                    width: parent.width; wrapMode: Text.WordWrap
+                    text: "Desfoca o fundo da barra superior e da lateral no material Vidro."
+                    color: root.theme.textSecondary; font.family: root.theme.bodyFont; font.pixelSize: 11
+                }
+            }
+            SectionCard {
                 title: "Visual"
                 Row {
                     spacing: 8

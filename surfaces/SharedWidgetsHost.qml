@@ -169,7 +169,8 @@ Variants {
             Region { item: root.config.sceneLayers.length > 14 ? sharedScene.dynamicBlurItem(14) : null; radius: 28; intersection: Intersection.Combine }
             Region { item: root.config.sceneLayers.length > 15 ? sharedScene.dynamicBlurItem(15) : null; radius: 28; intersection: Intersection.Combine }
         }
-        BackgroundEffect.blurRegion: Region {}
+        BackgroundEffect.blurRegion: root.config.widgetBlurEnabled ? individualBlurRegion : noWidgetBlur
+        Region { id: noWidgetBlur }
 
         mask: Region {
             Region { item: sharedScene.clockHitItem; intersection: Intersection.Combine }
@@ -189,10 +190,10 @@ Variants {
             visualizer: root.visualizer
             darkPalette: true
             clipSideInset: root.visualizerRailInset
-            clipCornerRadius: root.visualizerCornerRadius
-            clipBottomInset: root.visualizerBottomInset
+            clipCornerRadius: 0
+            clipBottomInset: 0
             clipSideOnRight: root.barOnRight
-            visible: root.visualizer.running && !root.preview.shown
+            visible: root.config.desktopVisualizerEnabled && root.visualizer.running && !root.preview.shown
                 && !(root.settings.shown && root.settings.mode === "editing")
             opacity: 0.78
         }

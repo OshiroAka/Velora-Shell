@@ -1,0 +1,134 @@
+#!/usr/bin/env python3
+"""Apply temporary Hyprland monitor rules with an independent rollback timer."""
+import json
+import os
+from pathlib import Path
+import re
+import secrets
+import subprocess
+import sys
+import time
+
+
+def hyprctl(*args):
+    result = subprocess.run(["hyprctl", *args], capture_output=True, text=True, timeout=6)
+    if result.returncode or (args[:2] == ("keyword", "monitor") and result.stdout.strip().lower() != "ok"):
+        raise RuntimeError(result.stderr.strip() or result.stdout.strip() or "Hyprland indisponível")
+    return result.stdout
+
+
+def monitors():
+    return [m for m in json.loads(hyprctl("-j", "monitors", "all")) if m.get("name")]
+
+
+def rule(m):
+    if m.get("disabled"):
+        return m["name"] + ",disable"
+    mode = f'{m["width"]}x{m["height"]}@{float(m["refreshRate"]):.2f}'
+    position = f'{m.get("x", 0)}x{m.get("y", 0)}'
+    result = f'{m["name"]},{mode},{position},{m.get("scale", 1)}'
+    if m.get("mirrorOf") and m["mirrorOf"] != "none":
+        result += ",mirror," + m["mirrorOf"]
+    return result
+
+
+def state_dir():
+    base = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp")) / "velora-shell" / "monitor-pending"
+    base.mkdir(mode=0o700, parents=True, exist_ok=True)
+    return base
+
+
+def token_path(token):
+    if not re.fullmatch(r"monitor-[0-9a-f]{16}\.json", token):
+        raise ValueError("Token inválido")
+    return state_dir() / token
+
+
+def restore(snapshot):
+    for item in snapshot:
+        hyprctl("keyword", "monitor", rule(item))
+
+
+def apply(layout, name, mode, scale):
+    current = monitors()
+    target = next((m for m in current if m["name"] == name), None)
+    if not target:
+        raise ValueError("Monitor não encontrado")
+    if layout not in {"extend", "mirror", "main"}:
+        raise ValueError("Disposição inválida")
+    if not re.fullmatch(r"\d+x\d+@\d+(?:\.\d+)?", mode):
+        raise ValueError("Resolução inválida")
+    available = [str(m).removesuffix("Hz") for m in target.get("availableModes", [])]
+    if mode not in available:
+        raise ValueError("Modo não anunciado pelo monitor")
+    value = float(scale)
+    if not 0.5 <= value <= 3:
+        raise ValueError("Escala inválida")
+    if layout in {"mirror", "main"} and len(current) < 2:
+        raise ValueError("Conecte outro monitor")
+
+    token = "monitor-" + secrets.token_hex(8) + ".json"
+    path = state_dir() / token
+    fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    try:
+        with os.fdopen(fd, "w") as stream:
+            json.dump(current, stream)
+        os.chmod(path, 0o600)
+        try:
+            hyprctl("keyword", "monitor", f"{name},{mode},{target.get('x', 0)}x{target.get('y', 0)},{value:.2f}")
+            for item in current:
+                if item["name"] == name:
+                    continue
+                if layout == "mirror":
+                    spec = f'{item["name"]},preferred,auto,1,mirror,{name}'
+                elif layout == "main":
+                    spec = item["name"] + ",disable"
+                else:
+                    spec = rule(item)
+                hyprctl("keyword", "monitor", spec)
+        except Exception:
+            restore(current)
+            raise
+        subprocess.Popen([sys.executable, __file__, "rollback", token],
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, start_new_session=True)
+        print(token)
+    except Exception:
+        Path(path).unlink(missing_ok=True)
+        raise
+
+
+def rollback(token):
+    path = token_path(token)
+    if not path.exists():
+        return
+    snapshot = json.loads(path.read_text())
+    try:
+        restore(snapshot)
+    finally:
+        path.unlink(missing_ok=True)
+
+
+def main():
+    action = sys.argv[1]
+    if action == "probe":
+        print(json.dumps(monitors()))
+    elif action == "apply" and len(sys.argv) == 6:
+        apply(*sys.argv[2:])
+    elif action == "confirm" and len(sys.argv) == 3:
+        token_path(sys.argv[2]).unlink(missing_ok=True)
+    elif action == "revert" and len(sys.argv) == 3:
+        rollback(sys.argv[2])
+    elif action == "rollback" and len(sys.argv) == 3:
+        time.sleep(12)
+        rollback(sys.argv[2])
+    else:
+        raise ValueError("Uso inválido")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (RuntimeError, ValueError, OSError, subprocess.TimeoutExpired) as exc:
+        print(str(exc), file=sys.stderr)
+        sys.exit(1)

@@ -211,6 +211,15 @@ Item {
         borderColor: root.theme.border
         shadowColor: root.theme.shadow
 
+        Text {
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.bottom: parent.top; anchors.bottomMargin: 9
+            visible: root.desktop
+            text: "Arraste os itens da barra superior para mudar a ordem."
+            color: root.theme.textPrimary; font.family: root.theme.bodyFont; font.pixelSize: 12
+            style: Text.Outline; styleColor: root.theme.surfaceRaised
+        }
+
         Row {
             anchors.centerIn: parent
             spacing: 8

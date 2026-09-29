@@ -4,6 +4,7 @@ import argparse
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
@@ -11,7 +12,11 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--skip-hypr", action="store_true")
 parser.add_argument("--without-infinite-desktop", action="store_true")
 parser.add_argument("--with-infinite-desktop", action="store_true")
+parser.add_argument("--without-fanplus", action="store_true", help="Ignorar a instalação opcional de Fan+; não altera a ventoinha")
+parser.add_argument("--install-fanplus-deps", action="store_true", help="Instalar dependências Fan+ dos repositórios Arch/CachyOS no notebook suportado")
 args = parser.parse_args()
+if args.without_fanplus and args.install_fanplus_deps:
+    parser.error("--without-fanplus e --install-fanplus-deps são incompatíveis")
 config_home = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
 bin_dir = Path.home() / ".local/bin"
 bin_dir.mkdir(parents=True, exist_ok=True)
@@ -47,3 +52,9 @@ if not args.skip_hypr:
     text = re.sub(r'^\s*source\s*=.*(?:velora-hyprland|project-helix)\.conf\s*$', '', text, flags=re.M)
     main.write_text(text.rstrip() + f"\nsource = {include}\n")
 print("Velora Shell installed from " + str(root))
+if not args.without_fanplus:
+    command = [sys.executable, str(root / "scripts/install-fanplus")]
+    if args.install_fanplus_deps:
+        command.append("--install-deps")
+    if subprocess.run(command, check=False).returncode != 0:
+        print("Velora instalado; Fan+ continua pendente. Siga as instruções acima e execute novamente scripts/install-fanplus.")

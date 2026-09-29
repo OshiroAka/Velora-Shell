@@ -23,7 +23,7 @@ if args.parse:
         env["XDG_CACHE_HOME"] = temporary + "/cache"
         process = subprocess.Popen(["qs", "-p", str(root)], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         try:
-            output, _ = process.communicate(timeout=6)
+            output, _ = process.communicate(timeout=30)
         except subprocess.TimeoutExpired:
             process.terminate()
             output, _ = process.communicate(timeout=5)

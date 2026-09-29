@@ -387,6 +387,16 @@ def build_theme():
         shadow = mix(accent_secondary, background, 0.55)
         shadow_alpha = 0.13
 
+    if raw.get("velora", {}).get("exactSurface"):
+        mode = "light" if luminance(background) > .179 else "dark"
+        surface_base = surface_sidebar = surface_popup = background
+        surface_card = surface_input = surface_button = mix(background, foreground, .08)
+        text_primary = rgb_to_hex(foreground)
+        text_secondary = raw["velora"].get("muted", text_primary)
+        text_muted = text_secondary
+        accent_primary = hex_to_rgb(raw["velora"]["primary"])
+        accent_secondary = hex_to_rgb(raw["velora"]["secondary"])
+
     return {
         "themeName": "pywal16",
         "themeMode": mode,

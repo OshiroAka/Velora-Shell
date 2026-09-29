@@ -13,6 +13,8 @@ Scope {
             + "/velora-shell/pywal/colors.json"
         : ""
 
+    property bool exactSurface: false
+    property bool shufflePending: false
     property bool ready: false
     property bool generating: false
     property bool regeneratePending: false
@@ -59,6 +61,13 @@ Scope {
         generationDelay.restart()
     }
 
+    function shuffle() {
+        if (generating || !requestedSourcePath) return
+        if (!paletteEnabled) config.setValue("appearance.accentMode", "wallpaper")
+        shufflePending = true
+        requestGeneration()
+    }
+
     function startGeneration() {
         if (!paletteEnabled || requestedSourcePath.length === 0)
             return
@@ -74,8 +83,10 @@ Scope {
             Quickshell.shellDir + "/scripts/generate-pywal-palette",
             generatorSourcePath,
             generatorTone,
-            requestedPreviewPath
+            requestedPreviewPath,
+            shufflePending ? "shuffle" : "restore"
         ]
+        shufflePending = false
         generator.running = true
     }
 
@@ -101,10 +112,11 @@ Scope {
                 ready = false
                 return
             }
+            exactSurface = velora.exactSurface === true
             sourcePath = generatedFor
             background = String(special.background || colors.color0 || "#111216")
             foreground = String(special.foreground || colors.color15 || "#f5f7fb")
-            muted = String(colors.color8 || colors.color7 || "#8793a8")
+            muted = String(velora.muted || colors.color8 || colors.color7 || "#8793a8")
             accent = String(velora.primary || colors.color12
                 || colors.color4 || "#b99cff")
             accentAlt = String(velora.secondary || colors.color11

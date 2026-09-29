@@ -21,7 +21,7 @@ class InstallationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             home = Path(temporary)
             env = self.environment(home)
-            command = [str(ROOT / "install.sh"), "--skip-hypr"]
+            command = [str(ROOT / "install.sh"), "--skip-hypr", "--without-fanplus"]
             subprocess.run(command, env=env, check=True, capture_output=True)
             config = home / "config/velora-shell/config.json"
             document = json.loads(config.read_text())

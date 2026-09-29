@@ -13,7 +13,7 @@ Scope {
 
     required property var composition
     property alias unifiedTheme: veloraTheme
-    function openUnifiedSettings() { composition.openEditor("desktop") }
+    function openUnifiedSettings() { closeQuickPopup(); composition.openEditor("desktop") }
 
     VeloraTheme {
         id: veloraTheme
@@ -85,6 +85,7 @@ Scope {
         }
     }
 
+    readonly property bool notificationsInTopbar: !!root.composition && root.composition.connectedNotifications
     property bool notificationToastVisible: false
     property bool notificationToastMounted: false
     property string notificationToastTitle: ""
@@ -105,6 +106,8 @@ Scope {
     property bool sidebarPopupHovering: false
     property bool quickPopupHovering: false
     property bool weatherTopOpen: false
+    // Temporarily inactive at the user's request; keep the weather widget visible.
+    readonly property bool weatherMenuEnabled: false
     property bool weatherTopWindowOpen: false
     property bool weatherTopKeyboardFocus: false
     property string weatherTopMode: "weather"
@@ -160,6 +163,13 @@ Scope {
     property var topWallpaperApplyingEntry: null
     property bool topWallpaperLibrarySaveQueued: false
     property bool topWallpaperLibraryReady: false
+    property string activeRailControl: ""
+    property string railControlHoverTarget: ""
+    property bool railControlPanelHovered: false
+    property int railFeedbackSerial: 0
+    readonly property bool volumeControlOpen: activeRailControl === "volume"
+    readonly property bool brightnessControlOpen: activeRailControl === "brightness"
+    readonly property bool batteryControlOpen: activeRailControl === "battery"
     property bool leftMenuOpen: false
     property bool leftMenuHovering: false
     property bool leftMenuPinned: false
@@ -201,7 +211,7 @@ Scope {
     readonly property string leftMenuAttachSide: leftMenuOnLeft ? "left" : "right"
     readonly property bool rightSoftLayout: true
     readonly property real referenceScale: 1
-    readonly property int sidebarVisualWidth: 66
+    readonly property int sidebarVisualWidth: 64
     readonly property real unifiedBarWavePhase: root.composition
         ? root.composition.unifiedBarWavePhase : 0
     readonly property int desktopFrameMargin: 0
@@ -1859,7 +1869,9 @@ Scope {
         }
     }
 
-    readonly property var focusItems: [
+    readonly property var focusItems: sideBarLayoutEnabled
+        ? ["caffeine", "notes", "discord", "volume",
+            "brightness", "notifications", "bluetooth", "wifi", "avatar"] : [
         "clock",
         "search",
         "workspace1",
@@ -2343,6 +2355,7 @@ Scope {
         topWallpaperKeyboardFocus = nextOpen && withKeyboardFocus === true
 
         if (topWallpaperPopupOpen) {
+            activeRailControl = ""
             topWallpaperErrorMessage = ""
             topWallpaperPreloadStopTimer.stop()
             if (!topWallpaperPreload.running) {
@@ -2374,7 +2387,7 @@ Scope {
     }
 
     function openWeatherTop(withKeyboardFocus, mode) {
-        if (topBarLayout) {
+        if (topBarLayout || (!weatherMenuEnabled && mode !== "search")) {
             disableWeatherTopNow()
             return
         }
@@ -2398,7 +2411,7 @@ Scope {
     }
 
     function openWeatherTopFromMouse() {
-        if (topBarLayout)
+        if (topBarLayout || !weatherMenuEnabled)
             return
 
         weatherTopHoverCloseTimer.stop()
@@ -2428,7 +2441,7 @@ Scope {
     }
 
     function toggleWeatherTop() {
-        if (topBarLayout) {
+        if (topBarLayout || !weatherMenuEnabled) {
             disableWeatherTopNow()
             return
         }
@@ -2582,21 +2595,7 @@ Scope {
     }
 
     function quickPopupForFocus(target) {
-        if (target === "search")
-            return "search"
-        if (target === "volume")
-            return "volume"
-        if (target === "wifi")
-            return "wifi"
-        if (target === "brightness")
-            return "brightness"
-        if (target === "notifications")
-            return "notifications"
-        if (target === "bluetooth")
-            return "bluetooth"
-        if (target === "battery")
-            return "battery"
-        return ""
+        return target === "search" ? "search" : ""
     }
 
     function cachedQuickPopupIndex(type) {
@@ -2687,6 +2686,8 @@ Scope {
     }
 
     onActiveQuickPopupTypeChanged: {
+        if (activeQuickPopupType.length > 0)
+            activeRailControl = ""
         if (quickPopupVisible && activeQuickPopupType.length > 0) {
             renderedQuickPopupType = activeQuickPopupType
         }
@@ -3175,6 +3176,7 @@ Scope {
     }
 
     function closeQuickPopup() {
+        activeRailControl = ""
         if (!quickPopupSwitching) {
             quickPopupSwitchTimer.stop()
             pendingQuickPopupType = ""
@@ -3284,6 +3286,25 @@ Scope {
     }
 
     function openAdaptiveBarPopup(type, centerY) {
+        if (sideBarLayoutEnabled) {
+            if (["volume", "brightness", "battery"].indexOf(type) >= 0) {
+                const nextControl = activeRailControl === type ? "" : type
+                exitFocus()
+                discardQuickPopupAnimation()
+                disableWeatherTopNow()
+                toggleTopWallpaperPopup(false, false)
+                closeLegacyLeftMenu()
+                closeRightDashboard()
+                wallpaperSelectorOpen = false
+                wallpaperSelectorWindowOpen = false
+                settingsPanelOpen = false
+                settingsPanelWindowOpen = false
+                activeRailControl = nextControl
+                return
+            }
+            if (["wifi", "notifications", "bluetooth"].indexOf(type) >= 0)
+                return
+        }
         if (!sideBarLayoutEnabled) {
             const systemPage = topBarSystemPageForType(type)
             if (systemPage.length > 0) {
@@ -3313,6 +3334,14 @@ Scope {
     }
 
     function previewAdaptiveBarPopup(type, centerY) {
+        if (sideBarLayoutEnabled && (type === "volume" || type === "brightness")) {
+            railControlHoverTarget = type
+            railControlCloseTimer.stop()
+            if (activeRailControl !== type) railControlOpenTimer.restart()
+            return
+        }
+        if (sideBarLayoutEnabled && ["battery", "wifi", "notifications", "bluetooth"].indexOf(type) >= 0)
+            return
         if (weatherTopOpen && weatherTopMode === "search")
             return
 
@@ -3334,6 +3363,12 @@ Scope {
     }
 
     function endAdaptiveBarPopupHover(type) {
+        if (sideBarLayoutEnabled && (type === "volume" || type === "brightness")) {
+            if (railControlHoverTarget === type) railControlHoverTarget = ""
+            railControlOpenTimer.stop()
+            railControlCloseTimer.restart()
+            return
+        }
         if (!sideBarLayoutEnabled) {
             const systemPage = topBarSystemPageForType(type)
             endSidebarPopupHover(systemPage.length > 0 ? "system" : type)
@@ -3350,6 +3385,7 @@ Scope {
         }
 
         const value = section && section.length > 0 ? section : "weather"
+        activeRailControl = ""
         rightDashboardSection = value
         rightDashboardOpen = true
     }
@@ -3376,11 +3412,7 @@ Scope {
     }
 
     function openLeftMenu() {
-        if (shellSuppressedByFullscreen)
-            return
-        leftMenuCloseTimer.stop()
-        leftMenuOpen = true
-        leftMenuPreloadEnabled = true
+        closeLegacyLeftMenu()
     }
 
     function updateLeftMenuHovering() {
@@ -3780,7 +3812,7 @@ Scope {
         interval: 700
         running: root.idlePreloadEnabled
         repeat: false
-        onTriggered: root.leftMenuPreloadEnabled = true
+        onTriggered: root.leftMenuPreloadEnabled = false
     }
 
     Timer {
@@ -3794,6 +3826,22 @@ Scope {
             root.quickPopupPreloadCount = Math.max(root.quickPopupPreloadCount, 1)
             quickPopupCacheWarmupTimer.restart()
         }
+    }
+
+    Timer {
+        id: railControlOpenTimer
+        interval: 110
+        onTriggered: if (root.railControlHoverTarget && root.sideBarLayoutEnabled) root.activeRailControl = root.railControlHoverTarget
+    }
+    Timer {
+        id: railControlCloseTimer
+        interval: 180
+        onTriggered: if (!root.railControlHoverTarget && !root.railControlPanelHovered) root.activeRailControl = ""
+    }
+    Timer {
+        id: railControlFeedbackTimer
+        interval: 1800
+        onTriggered: if (!root.railControlHoverTarget && !root.railControlPanelHovered) root.activeRailControl = ""
     }
 
     Timer {
@@ -4160,6 +4208,15 @@ Scope {
 
         function volume(): void {
             root.openAdaptiveBarPopup("volume", root.defaultQuickPopupCenterY("volume"))
+        }
+
+        function railLevel(kind: string): void {
+            if (kind !== "volume" && kind !== "brightness") return
+            root.railFeedbackSerial += 1
+            if (!root.sideBarLayoutEnabled) return
+            railControlCloseTimer.stop()
+            root.activeRailControl = kind
+            railControlFeedbackTimer.restart()
         }
 
         function wifi(): void {
@@ -8523,11 +8580,11 @@ Scope {
             readonly property bool weatherTopConversationExpanded: false
             readonly property bool weatherTopNotificationAttached: root.weatherTopWindowOpen && root.notificationToastMounted
             readonly property int weatherTopOpenY: Math.max(root.desktopFrameMargin + 18, 30)
-            readonly property int weatherTopTargetWidth: Math.round(Math.min(800, Math.max(700, panelWidth * 0.385)))
+            readonly property int weatherTopTargetWidth: Math.round(Math.min(panelWidth - 100, weatherTopSearchMode ? 720 : 800))
             readonly property int weatherTopCompactHeight: 390
             readonly property int weatherTopNotificationHeight: weatherTopCompactHeight
             readonly property int weatherTopExpandedHeight: Math.round(Math.min(560, Math.max(420, panelHeight * 0.50)))
-            readonly property int weatherTopSearchHeight: Math.round(Math.min(410, Math.max(380, panelHeight * 0.32)))
+            readonly property int weatherTopSearchHeight: Math.round(Math.min(540, panelHeight - weatherTopOpenY - 70))
             readonly property int weatherTopTargetHeight: weatherTopSearchMode
                 ? weatherTopSearchHeight
                 : (weatherTopConversationExpanded
@@ -8536,7 +8593,8 @@ Scope {
             readonly property int weatherTopTargetX: Math.round((panelWidth - weatherTopTargetWidth) / 2)
             readonly property int weatherTopTargetY: root.weatherTopOpen ? weatherTopOpenY : -weatherTopTargetHeight - 18
             readonly property int weatherTopCornerRadius: 24
-            readonly property bool wantsDrawerKeyboard: root.focusMode || root.quickPopupType === "search" || root.quickPopupType === "agenda" || root.quickPopupType === "weatherPanel" || root.settingsPanelOpen || root.wallpaperSelectorOpen || (root.topWallpaperKeyboardFocus && root.topWallpaperUsesBottomSelector) || (!root.topBarLayout && root.weatherTopKeyboardFocus) || root.leftMenuInteractiveFocus
+            property var activeRailSystemPopover: null
+            readonly property bool wantsDrawerKeyboard: coffeePopover.mounted || notesPopover.mounted || bluetoothPopover.mounted || notificationsPopover.mounted || wifiPopover.mounted || root.focusMode || root.quickPopupType === "search" || root.quickPopupType === "agenda" || root.quickPopupType === "weatherPanel" || root.settingsPanelOpen || root.wallpaperSelectorOpen || (root.topWallpaperKeyboardFocus && root.topWallpaperUsesBottomSelector) || (!root.topBarLayout && root.weatherTopKeyboardFocus) || root.leftMenuInteractiveFocus
 
             screen: modelData
             color: "transparent"
@@ -8554,7 +8612,10 @@ Scope {
             // ExclusionMode.Normal places this window below the 40 px topbar.
             // Its local origin already is the join: adding barHeight here
             // would leave an unpainted band behind the analog clock.
-            BackgroundEffect.blurRegion: Region {}
+            BackgroundEffect.blurRegion: Region {
+                item: root.composition && root.composition.barBlurEnabled
+                    && root.composition.barMaterial === "glass" ? unifiedFrameCanvas : null
+            }
 
             function syncUnifiedBarNativeShape() {
                 const active = root.composition
@@ -8579,7 +8640,14 @@ Scope {
                     + Number(top).toFixed(6) + " "
                     + Number(rail * 2).toFixed(6) + " "
                     + Number(1 - top).toFixed(6) + " "
-                    + Number(root.sidebarCornerRadius / width).toFixed(6))
+                    + Number(root.sidebarCornerRadius / width).toFixed(6) + " "
+                    + Number(railControls.nativePanel ? railControls.nativePanel.y / height : 0).toFixed(6) + " "
+                    + Number(railControls.nativePanel ? railControls.nativePanel.width / width : 0).toFixed(6) + " "
+                    + Number(railControls.nativePanel ? railControls.nativePanel.height / height : 0).toFixed(6) + " "
+                    + Number(root.bottomBarHeight / height).toFixed(6) + " "
+                    + Number(railControls.nativePanel && railControls.nativePanel.extension ? railControls.nativePanel.extension.y / height : 0).toFixed(6) + " "
+                    + Number(railControls.nativePanel && railControls.nativePanel.extension ? railControls.nativePanel.extension.width / width : 0).toFixed(6) + " "
+                    + Number(railControls.nativePanel && railControls.nativePanel.extension ? railControls.nativePanel.extension.height / height : 0).toFixed(6))
             }
 
             Component.onCompleted: Qt.callLater(syncUnifiedBarNativeShape)
@@ -8629,20 +8697,16 @@ Scope {
                     radius: 0
                 }
 
-                Region {
-                    item: inlineLeftMenuTriggerMask
-                    radius: 0
-                }
-
-                Region {
-                    item: inlineLeftMenuHandleInputMask
-                    radius: Math.min(root.desktopFrameRadius, 16)
-                }
-
-                Region {
-                    item: inlineLeftMenuInputMask
-                    radius: inlineLeftMenuLoader.item ? inlineLeftMenuLoader.item.cornerRadius : 22
-                }
+                Region { item: railControls.volumeMask }
+                Region { item: railControls.brightnessMask }
+                Region { item: railControls.batteryMask }
+                Region { item: coffeePopover.maskItem }
+                Region { item: notesPopover.maskItem }
+                Region { item: bluetoothPopover.maskItem }
+                Region { item: bluetoothPopover.nameMask }
+                Region { item: notificationsPopover.maskItem }
+                Region { item: wifiPopover.maskItem }
+                Region { item: railToolOutsideInput }
 
                 Region {
                     item: inlineNotificationToastInputMask
@@ -8855,6 +8919,7 @@ Scope {
                     ctx.lineTo(w + r, top)
                     ctx.arcTo(w, top, w, top + r, r)
 
+                    railControls.appendOutline(ctx, w)
                     ctx.lineTo(w, height - bottomStrip - innerRadius)
                     ctx.arcTo(w, height - bottomStrip,
                         w + innerRadius, height - bottomStrip, innerRadius)
@@ -8888,6 +8953,7 @@ Scope {
                     ctx.beginPath()
                     ctx.moveTo(w + r, 0.5)
                     ctx.arcTo(w - 0.5, 0.5, w - 0.5, r, r)
+                    railControls.appendOutline(ctx, w - 0.5)
                     ctx.lineTo(w - 0.5, bottom - r - 0.5)
                     ctx.arcTo(w - 0.5, bottom - 0.5,
                         w + r, bottom - 0.5, r)
@@ -8944,6 +9010,7 @@ Scope {
                 }
 
                 function paintWeatherTopSurface(ctx) {
+                    if (panel.weatherTopSearchMode) return
                     if (root.topBarLayout)
                         return
                     if (!root.weatherTopWindowOpen && inlineWeatherTopFrame.opacity <= 0.001)
@@ -9077,36 +9144,6 @@ Scope {
                     )
                 }
 
-                function paintLeftMenuFrameSurfaces(ctx) {
-                    if (!root.sideBarLayoutEnabled || root.shellSuppressedByFullscreen)
-                        return
-
-                    const menuReveal = Math.max(0, Math.min(1, root.leftMenuFrameReveal))
-                    const handleReveal = Math.max(0, Math.min(1, root.leftMenuHandleSurfaceReveal))
-                    const menuHeight = root.leftMenuHeightForScreen(height)
-                    const menuY = root.leftMenuYForScreen(height, menuHeight)
-                    const slideDistance = root.leftMenuWidth + root.leftMenuFrameInset + root.leftMenuTriggerWidth + 8
-                    const menuOpenX = root.leftMenuOnLeft ? root.leftMenuFrameInset : width - root.leftMenuFrameInset - root.leftMenuWidth
-                    const menuX = menuOpenX + (root.leftMenuOnLeft ? -Math.round((1 - menuReveal) * slideDistance) : Math.round((1 - menuReveal) * slideDistance))
-                    const menuRadius = 22
-
-                    paintFrameAttachedSurface(ctx, menuX, menuY, root.leftMenuWidth, menuHeight, menuRadius, root.leftMenuOnLeft ? "left" : "right", menuReveal)
-
-                    if (handleReveal <= 0.001)
-                        return
-
-                    const handleX = root.leftMenuOnLeft
-                        ? Math.round(-10 - (1 - handleReveal) * (root.leftMenuHandleWidth - 10))
-                        : width - root.leftMenuHandleWidth + 10 + Math.round((1 - handleReveal) * (root.leftMenuHandleWidth - 10))
-                    const handleY = menuY + Math.round((menuHeight - root.leftMenuHandleHeight) / 2)
-                    const frameEdge = root.leftMenuOnLeft ? root.leftMenuFrameInset : width - root.leftMenuFrameInset
-                    const drawX = root.leftMenuOnLeft ? Math.max(frameEdge, handleX) : handleX
-                    const drawRight = root.leftMenuOnLeft ? handleX + root.leftMenuHandleWidth : Math.min(frameEdge, handleX + root.leftMenuHandleWidth)
-                    const drawW = Math.max(0, drawRight - drawX)
-
-                    paintFrameAttachedSurface(ctx, drawX, handleY, drawW, root.leftMenuHandleHeight, Math.min(root.desktopFrameRadius, 16), root.leftMenuOnLeft ? "left" : "right", handleReveal)
-                }
-
                 onPaint: {
                     const ctx = getContext("2d")
                     const fx = root.mainAreaX(width)
@@ -9153,7 +9190,6 @@ Scope {
                     paintFrameOutline(ctx, fx, fy, fw, fh, radius)
                     paintWeatherTopSurface(ctx)
                     paintSettingsFrameSurface(ctx)
-                    paintLeftMenuFrameSurfaces(ctx)
                     ctx.restore()
 
                     paintSidebarGutterFill(ctx)
@@ -9278,14 +9314,14 @@ Scope {
 
                 anchors.fill: parent
                 visible: !root.topBarLayout && root.weatherTopWindowOpen && panel.weatherTopSearchMode
-                color: veloraTheme.alpha(veloraTheme.surfaceBase, veloraTheme.themeMode === "dark" ? 0.16 : 0.11)
+                color: "#28000000"
                 opacity: !root.topBarLayout && root.weatherTopOpen && panel.weatherTopSearchMode ? 1 : 0
-                z: -2
+                z: 24
 
                 Behavior on opacity {
-                    enabled: veloraTheme.motionEnabled
+                    enabled: true
                     NumberAnimation {
-                        duration: root.weatherTopOpen && panel.weatherTopSearchMode ? 5000 : root.quickPopupLineCloseDuration
+                        duration: root.weatherTopOpen ? 420 : 240
                         easing.type: root.weatherTopOpen && panel.weatherTopSearchMode ? Easing.InOutSine : veloraTheme.motionEaseExit
                     }
                 }
@@ -9339,13 +9375,27 @@ Scope {
                     : Math.round(y)
                 readonly property int surfaceHeight: Math.max(0, Math.round(y + height - surfaceY))
 
-                width: panel.weatherTopTargetWidth
-                height: panel.weatherTopTargetHeight
-                x: panel.weatherTopTargetX
-                y: panel.weatherTopTargetY
+                property real searchReveal: root.weatherTopOpen ? 1 : 0
+                Behavior on searchReveal {
+                    NumberAnimation { duration: root.weatherTopOpen ? 480 : 280; easing.type: root.weatherTopOpen ? Easing.OutExpo : Easing.InOutCubic }
+                }
+                width: panel.weatherTopSearchMode ? 440 + (panel.weatherTopTargetWidth - 440) * searchReveal : panel.weatherTopTargetWidth
+                height: panel.weatherTopSearchMode ? 56 + (panel.weatherTopTargetHeight - 56) * searchReveal : panel.weatherTopTargetHeight
+                x: Math.round((panel.panelWidth - width) / 2)
+                y: panel.weatherTopSearchMode ? -80 + (panel.weatherTopOpenY + 80) * searchReveal : panel.weatherTopTargetY
                 opacity: 1
                 visible: mounted
                 z: 26
+
+                Rectangle {
+                    anchors.fill: parent
+                    visible: panel.weatherTopSearchMode
+                    radius: 24
+                    color: root.composition ? root.composition.topbarTheme.wallpaperSurfaceTone : veloraTheme.surfaceBase
+                    opacity: inlineWeatherTopFrame.searchReveal
+                    border.width: 1
+                    border.color: root.composition ? root.composition.topbarTheme.borderStrong : veloraTheme.borderSoft
+                }
 
                 onXChanged: if (root.frameVisualsMounted) unifiedFrameCanvas.requestPaint()
                 onYChanged: if (root.frameVisualsMounted) unifiedFrameCanvas.requestPaint()
@@ -9354,7 +9404,7 @@ Scope {
                 onSurfaceYChanged: if (root.frameVisualsMounted) unifiedFrameCanvas.requestPaint()
                 onSurfaceHeightChanged: if (root.frameVisualsMounted) unifiedFrameCanvas.requestPaint()
                 Behavior on y {
-                    enabled: veloraTheme.motionEnabled
+                    enabled: !panel.weatherTopSearchMode && veloraTheme.motionEnabled
                     NumberAnimation {
                         duration: root.weatherTopOpen ? veloraTheme.motionPanelIn : root.quickPopupLineCloseDuration
                         easing.type: root.weatherTopOpen ? Easing.BezierSpline : Easing.InOutCubic
@@ -9363,7 +9413,7 @@ Scope {
                 }
 
                 Behavior on height {
-                    enabled: veloraTheme.motionEnabled
+                    enabled: !panel.weatherTopSearchMode && veloraTheme.motionEnabled
                     NumberAnimation {
                         duration: veloraTheme.motionPanelGeometry
                         easing.type: veloraTheme.motionEaseEnter
@@ -9390,6 +9440,7 @@ Scope {
                 height: inlineWeatherTopFrame.height
                 active: !root.topBarLayout && root.weatherTopWindowOpen
                 visible: active
+                clip: panel.weatherTopSearchMode
                 opacity: inlineWeatherTopFrame.opacity
                 z: 32
 
@@ -9420,206 +9471,12 @@ Scope {
             Component {
                 id: inlineTopSearchComponent
 
-                VeloraSidePopup {
-                    theme: veloraTheme
-                    popupType: "search"
+                VeloraSearchPanel {
+                    theme: root.composition ? root.composition.topbarTheme : null
                     open: root.weatherTopOpen
-                    interactiveFocus: root.weatherTopKeyboardFocus
-                    externalSurface: true
-                    attachSide: "left"
-                    notificationsModelOverride: notificationHistoryModel
                     onCloseRequested: root.closeWeatherTop()
-                    onPopupRequested: function(type) {
-                        root.closeWeatherTop()
-                        root.openAdaptiveBarPopup(type, root.defaultQuickPopupCenterY(type))
-                    }
-                    onPointerInsideChanged: function(inside) {
-                        root.setWeatherTopPanelHovering(inside)
-                    }
-                }
-            }
-
-            Item {
-                id: inlineLeftMenuTriggerMask
-
-                x: root.leftMenuOnLeft ? 0 : parent.width - width
-                y: root.leftMenuYForScreen(parent.height, root.leftMenuHeightForScreen(parent.height))
-                width: root.leftMenuHandleWidth
-                height: root.leftMenuHeightForScreen(parent.height)
-                z: 34
-
-                MouseArea {
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    acceptedButtons: Qt.NoButton
-                    onEntered: {
-                        root.leftMenuTriggerHovering = true
-                        root.holdLeftMenuHandleReveal()
-                        root.updateLeftMenuHovering()
-                    }
-                    onPositionChanged: {
-                        root.leftMenuTriggerHovering = true
-                        root.holdLeftMenuHandleReveal()
-                        root.updateLeftMenuHovering()
-                    }
-                    onExited: {
-                        root.leftMenuTriggerHovering = false
-                        root.releaseLeftMenuHandleRevealSoon()
-                        root.updateLeftMenuHovering()
-                        root.scheduleLeftMenuClose()
-                    }
-                }
-            }
-
-            Item {
-                id: inlineLeftMenuHandleInputMask
-
-                readonly property real reveal: root.leftMenuHandleSurfaceReveal
-
-                x: root.leftMenuOnLeft
-                    ? Math.round(-10 - (1 - reveal) * (root.leftMenuHandleWidth - 10))
-                    : parent.width - root.leftMenuHandleWidth + 10 + Math.round((1 - reveal) * (root.leftMenuHandleWidth - 10))
-                y: root.leftMenuYForScreen(parent.height, root.leftMenuHeightForScreen(parent.height)) + Math.round((root.leftMenuHeightForScreen(parent.height) - root.leftMenuHandleHeight) / 2)
-                width: root.leftMenuHandleWidth
-                height: root.leftMenuHandleHeight
-                opacity: reveal
-                visible: reveal > 0.01
-                z: 34
-
-                Text {
-                    width: 22
-                    height: 34
-                    x: root.leftMenuOnLeft ? parent.width - width - 5 : 5
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: root.leftMenuOnLeft ? "›" : "‹"
-                    color: veloraTheme.alpha(veloraTheme.textPrimary, veloraTheme.themeMode === "dark" ? 0.76 : 0.70)
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                    font.family: veloraTheme.uiFont
-                    font.pixelSize: 27
-                    font.weight: Font.DemiBold
-                }
-
-                MouseArea {
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onEntered: {
-                        root.leftMenuHandleHovering = true
-                        root.holdLeftMenuHandleReveal()
-                        root.updateLeftMenuHovering()
-                    }
-                    onExited: {
-                        root.leftMenuHandleHovering = false
-                        root.releaseLeftMenuHandleRevealSoon()
-                        root.updateLeftMenuHovering()
-                        root.scheduleLeftMenuClose()
-                    }
-                    onClicked: {
-                        root.leftMenuPinned = false
-                        root.leftMenuInteractiveFocus = false
-                        root.openLeftMenu()
-                        root.updateLeftMenuHovering()
-                        root.scheduleLeftMenuClose()
-                    }
-                }
-            }
-
-            Item {
-                id: inlineLeftMenuInputMask
-
-                x: inlineLeftMenuLoader.x
-                y: inlineLeftMenuLoader.y
-                width: (root.leftMenuOpen || root.leftMenuFrameReveal > 0.01) ? inlineLeftMenuLoader.width : 0
-                height: (root.leftMenuOpen || root.leftMenuFrameReveal > 0.01) ? inlineLeftMenuLoader.height : 0
-                z: 28
-            }
-
-            Loader {
-                id: inlineLeftMenuLoader
-
-                readonly property bool contentReady: item !== null
-                readonly property int slideDistance: root.leftMenuWidth + root.leftMenuFrameInset + root.leftMenuTriggerWidth + 8
-                readonly property int menuOpenX: root.leftMenuOnLeft ? root.leftMenuFrameInset : parent.width - root.leftMenuFrameInset - root.leftMenuWidth
-                readonly property int menuSlideOffset: Math.round((1 - root.leftMenuFrameReveal) * slideDistance)
-
-                active: root.leftMenuPreloadEnabled || root.leftMenuOpen || root.leftMenuFrameReveal > 0.01
-                asynchronous: false
-                width: root.leftMenuWidth
-                height: root.leftMenuHeightForScreen(parent.height)
-                x: menuOpenX + (root.leftMenuOnLeft ? -menuSlideOffset : menuSlideOffset)
-                y: root.leftMenuYForScreen(parent.height, height)
-                visible: root.leftMenuOpen || root.leftMenuFrameReveal > 0.01
-                opacity: 1
-                z: 33
-
-                sourceComponent: Component {
-                    VeloraLeftOverview {
-                        theme: veloraTheme
-                        clockState: leftClockState
-                        externalSurface: true
-                        attachSide: root.leftMenuOnLeft ? "left" : "right"
-                        popupType: "search"
-                        open: root.leftMenuOpen || root.leftMenuFrameReveal > 0.01
-                        preload: root.leftMenuPreloadEnabled
-                        interactiveFocus: root.leftMenuInteractiveFocus
-                        width: inlineLeftMenuLoader.width
-                        height: inlineLeftMenuLoader.height
-                        visible: inlineLeftMenuLoader.visible
-
-                        onMediaWindowRequested: function(centerY) {
-                            root.openLeftMediaWindow(inlineLeftMenuLoader.y + centerY)
-                        }
-
-                        onDetailWindowRequested: function(detailType, centerY) {
-                            root.openLeftDetailWindow(detailType, inlineLeftMenuLoader.y + centerY)
-                        }
-
-                        onAgendaRequested: function(centerY) {
-                            root.leftMenuPinned = false
-                            root.leftMenuInteractiveFocus = false
-                            root.leftMediaWindowOpen = false
-                            root.leftMediaWindowEntranceHold = false
-                            root.leftMenuOpen = false
-                            root.openAdaptiveBarPopup("agenda", root.defaultQuickPopupCenterY("agenda"))
-                        }
-
-                        onSettingsRequested: function(centerY) {
-                            root.leftMenuPinned = false
-                            root.leftMenuInteractiveFocus = false
-                            root.leftMediaWindowOpen = false
-                            root.leftMediaWindowEntranceHold = false
-                            root.leftDetailSwitchProgress = 1
-                            root.openLeftMenu()
-                            root.toggleSettingsPanel(inlineLeftMenuLoader.y + centerY)
-                        }
-
-                        onCloseRequested: {
-                            root.leftMenuPinned = false
-                            root.leftMenuInteractiveFocus = false
-                            root.leftMediaWindowOpen = false
-                            root.leftMediaWindowEntranceHold = false
-                            root.leftDetailSwitchProgress = 1
-                            root.leftMenuOpen = false
-                            root.leftMenuTriggerHovering = false
-                            root.leftMenuHandleHovering = false
-                            root.leftMenuHandleRevealHold = false
-                            root.leftMenuPanelHovering = false
-                            root.leftMediaWindowHovering = false
-                        }
-
-                        HoverHandler {
-                            margin: 18
-                            onHoveredChanged: {
-                                root.leftMenuPanelHovering = hovered
-                                root.updateLeftMenuHovering()
-                                if (hovered)
-                                    root.openLeftMenu()
-                                else
-                                    root.scheduleLeftMenuClose()
-                            }
-                        }
-                    }
+                    onSettingsRequested: root.openUnifiedSettings()
+                    onPointerInsideChanged: inside => root.setWeatherTopPanelHovering(inside)
                 }
             }
 
@@ -10790,8 +10647,8 @@ Scope {
 
                 x: inlineNotificationToastStage.x
                 y: inlineNotificationToastStage.y
-                width: root.notificationToastMounted ? inlineNotificationToastStage.width : 0
-                height: root.notificationToastMounted ? inlineNotificationToastStage.height : 0
+                width: inlineNotificationToastStage.visible ? inlineNotificationToastStage.width : 0
+                height: inlineNotificationToastStage.visible ? inlineNotificationToastStage.height : 0
                 z: 139
             }
 
@@ -10813,7 +10670,7 @@ Scope {
                 x: attachedToWeather ? inlineWeatherTopFrame.x : Math.round((panelWidth - width) / 2)
                 y: root.notificationToastVisible || attachedToWeather ? openY : -height - 18
                 z: 140
-                visible: mounted
+                visible: mounted && !root.notificationsInTopbar
                 opacity: root.notificationToastVisible ? 1 : 0
                 scale: 1
                 transformOrigin: Item.Top
@@ -10985,11 +10842,57 @@ Scope {
                 id: barRoot
 
                 theme: veloraTheme
+                mediaService: root.composition ? root.composition.mediaService : null
+                audioVisualizer: root.composition ? root.composition.audioVisualizer : null
+                toolsService: root.composition ? root.composition.topbarTools : null
+                fanPlusService: root.composition ? root.composition.fanPlusService : null
+                bluetoothMenuOpen: bluetoothPopover.opened
+                notificationMenuOpen: notificationsPopover.opened
+                wifiMenuOpen: wifiPopover.opened
+                onBluetoothMenuRequested: centerY => {
+                    bluetoothPopover.anchorY = barRoot.y + centerY
+                    bluetoothPopover.toggle()
+                }
+                onBluetoothHoverChanged: (inside, centerY) => {
+                    bluetoothPopover.anchorY = barRoot.y + centerY
+                    bluetoothPopover.triggerHovered = inside
+                }
+                onNotificationMenuRequested: centerY => {
+                    notificationsPopover.anchorY = barRoot.y + centerY
+                    notificationsPopover.toggle()
+                }
+                onNotificationHoverChanged: (inside, centerY) => {
+                    notificationsPopover.anchorY = barRoot.y + centerY
+                    notificationsPopover.triggerHovered = inside
+                }
+                onWifiMenuRequested: centerY => {
+                    wifiPopover.anchorY = barRoot.y + centerY
+                    wifiPopover.toggle()
+                }
+                onWifiHoverChanged: (inside, centerY) => {
+                    wifiPopover.anchorY = barRoot.y + centerY
+                    wifiPopover.triggerHovered = inside
+                }
+                caffeineMenuOpen: coffeePopover.opened
+                onCaffeineMenuRequested: centerY => {
+                    coffeePopover.anchorY = barRoot.y + centerY
+                    coffeePopover.toggle()
+                }
+                onCaffeineHoverChanged: (inside, centerY) => {
+                    coffeePopover.anchorY = barRoot.y + centerY
+                    coffeePopover.triggerHovered = inside
+                }
+                notesMenuOpen: notesPopover.opened
+                onNotesMenuRequested: centerY => {
+                    notesPopover.anchorY = barRoot.y + centerY
+                    notesPopover.toggle()
+                }
+                unifiedSurface: root.composition ? root.composition.topbarTheme.wallpaperSurfaceTone : veloraTheme.surfaceSidebar
                 unifiedPaletteEnabled: Boolean(root.composition)
                 unifiedTextPrimary: root.composition
                     ? root.composition.unifiedBarTextPrimary : "white"
                 unifiedTextSecondary: root.composition
-                    ? root.composition.unifiedBarAccentAlt : "#c4cede"
+                    ? root.composition.unifiedBarTextSecondary : "#c4cede"
                 unifiedAccent: root.composition
                     ? root.composition.unifiedBarAccent : "#8db8ff"
                 unifiedAccentAlt: root.composition
@@ -11006,6 +10909,9 @@ Scope {
                     && root.audioVisualizerProcessWanted
                 cavaForceActive: false
                 shellDrawsPanelSurface: root.sideBarLayoutEnabled
+                volumeControlOpen: root.volumeControlOpen
+                brightnessControlOpen: root.brightnessControlOpen
+                batteryControlOpen: root.batteryControlOpen
                 activePopupType: root.wallpaperSelectorOpen ? "theme" : root.quickPopupType
                 notificationCountOverride: root.notificationHistoryCount
                 onMoveFocusRequested: function(dir) {
@@ -11039,6 +10945,121 @@ Scope {
                     topMargin: root.sidebarVerticalMargin
                     bottomMargin: root.sidebarVerticalMargin
                 }
+            }
+
+            VeloraRailControls {
+                id: railControls
+                anchors.fill: parent
+                z: 11
+                theme: veloraTheme
+                accent: barRoot.pink
+                rightSide: root.barOnRight
+                railWidth: root.sidebarVisualWidth
+                volumeCenter: barRoot.y + barRoot.volumeControlCenter
+                brightnessCenter: barRoot.y + barRoot.brightnessControlCenter
+                batteryCenter: barRoot.y + barRoot.batteryControlCenter
+                volumeOpen: root.volumeControlOpen
+                brightnessOpen: root.brightnessControlOpen
+                refreshSerial: root.railFeedbackSerial
+                batteryOpen: root.batteryControlOpen
+                extraPanel: wifiPopover.opened ? wifiPopover.outline : notificationsPopover.opened ? notificationsPopover.outline : bluetoothPopover.opened ? bluetoothPopover.outline : notesPopover.opened ? notesPopover.outline : coffeePopover.opened ? coffeePopover.outline : wifiPopover.mounted ? wifiPopover.outline : notificationsPopover.mounted ? notificationsPopover.outline : bluetoothPopover.mounted ? bluetoothPopover.outline : notesPopover.mounted ? notesPopover.outline : coffeePopover.outline
+                onPanelHoverChanged: hovered => {
+                    root.railControlPanelHovered = hovered
+                    if (hovered) railControlCloseTimer.stop()
+                    else if (!root.railControlHoverTarget) railControlCloseTimer.restart()
+                }
+                onShapeChanged: {
+                    Qt.callLater(unifiedFrameCanvas.requestPaint)
+                    Qt.callLater(panel.syncUnifiedBarNativeShape)
+                }
+            }
+
+            VeloraRailCoffee {
+                id: coffeePopover
+                anchors.fill: parent
+                z: 12
+                enabled: root.sideBarLayoutEnabled && !!root.composition
+                theme: root.composition ? root.composition.topbarTheme : null
+                system: root.composition ? root.composition.topbarTools : null
+                rightSide: root.barOnRight
+                railWidth: root.sidebarVisualWidth
+                onOpening: { bluetoothPopover.close(); notesPopover.close(); notificationsPopover.close(); wifiPopover.close(); root.activeRailControl = ""; root.closeQuickPopup(); if (root.composition) root.composition.closeTopbarTool() }
+                onShapeChanged: Qt.callLater(unifiedFrameCanvas.requestPaint)
+            }
+            VeloraRailNotes {
+                id: notesPopover
+                anchors.fill: parent
+                z: 12
+                enabled: root.sideBarLayoutEnabled && !!root.composition
+                theme: root.composition ? root.composition.topbarTheme : null
+                system: root.composition ? root.composition.topbarTools : null
+                rightSide: root.barOnRight
+                railWidth: root.sidebarVisualWidth
+                onOpening: { bluetoothPopover.close(); coffeePopover.close(); notificationsPopover.close(); wifiPopover.close(); root.activeRailControl = ""; root.closeQuickPopup(); if (root.composition) root.composition.closeTopbarTool() }
+                onShapeChanged: Qt.callLater(unifiedFrameCanvas.requestPaint)
+            }
+            VeloraRailBluetooth {
+                id: bluetoothPopover
+                anchors.fill: parent
+                z: 12
+                enabled: root.sideBarLayoutEnabled && !!root.composition
+                theme: root.composition ? root.composition.topbarTheme : null
+                rightSide: root.barOnRight
+                railWidth: root.sidebarVisualWidth
+                ink: barRoot.ink
+                accent: barRoot.pink
+                uiFont: barRoot.uiFont
+                handoffSource: panel.activeRailSystemPopover
+                onOpening: { panel.activeRailSystemPopover = bluetoothPopover; coffeePopover.close(); notesPopover.close(); notificationsPopover.close(); wifiPopover.close(); root.activeRailControl = ""; root.closeQuickPopup(); if (root.composition) root.composition.closeTopbarTool() }
+                onShapeChanged: Qt.callLater(unifiedFrameCanvas.requestPaint)
+            }
+            VeloraRailNotifications {
+                id: notificationsPopover
+                anchors.fill: parent
+                z: 12
+                enabled: root.sideBarLayoutEnabled && !!root.composition
+                theme: root.composition ? root.composition.topbarTheme : null
+                system: root.composition ? root.composition.topbarTools : null
+                rightSide: root.barOnRight
+                railWidth: root.sidebarVisualWidth
+                notificationsModel: notificationHistoryModel
+                ink: barRoot.ink
+                accent: barRoot.pink
+                uiFont: barRoot.uiFont
+                handoffSource: panel.activeRailSystemPopover
+                onDismissRequested: id => root.dismissNotificationHistory(id)
+                onClearRequested: root.clearTrackedNotificationHistory()
+                onOpening: { panel.activeRailSystemPopover = notificationsPopover; coffeePopover.close(); notesPopover.close(); bluetoothPopover.close(); wifiPopover.close(); root.activeRailControl = ""; root.closeQuickPopup() }
+                onShapeChanged: Qt.callLater(unifiedFrameCanvas.requestPaint)
+            }
+            VeloraRailWifi {
+                id: wifiPopover
+                onOpenedChanged: if (root.composition) root.composition.sidebarNetworkActive = opened
+                anchors.fill: parent
+                z: 12
+                enabled: root.sideBarLayoutEnabled && !!root.composition
+                theme: root.composition ? root.composition.topbarTheme : null
+                system: root.composition ? root.composition.topbarTools : null
+                rightSide: root.barOnRight
+                railWidth: root.sidebarVisualWidth
+                ink: barRoot.ink
+                uiFont: barRoot.uiFont
+                handoffSource: panel.activeRailSystemPopover
+                onOpening: { panel.activeRailSystemPopover = wifiPopover; coffeePopover.close(); notesPopover.close(); bluetoothPopover.close(); notificationsPopover.close(); root.activeRailControl = ""; root.closeQuickPopup() }
+                onShapeChanged: Qt.callLater(unifiedFrameCanvas.requestPaint)
+            }
+            MouseArea {
+                id: railToolOutsideInput
+                z: 9
+                width: panel.width
+                height: coffeePopover.mounted || notesPopover.mounted || bluetoothPopover.mounted || notificationsPopover.mounted || wifiPopover.mounted ? panel.height : 0
+                acceptedButtons: Qt.AllButtons
+                onPressed: { coffeePopover.close(); notesPopover.close(); bluetoothPopover.close(); notificationsPopover.close(); wifiPopover.close() }
+            }
+            Connections {
+                target: root
+                function onActiveRailControlChanged() { if (root.activeRailControl) { coffeePopover.close(); notesPopover.close(); bluetoothPopover.close(); notificationsPopover.close(); wifiPopover.close() } }
+                function onQuickPopupTypeChanged() { if (root.quickPopupType) { coffeePopover.close(); notesPopover.close(); bluetoothPopover.close(); notificationsPopover.close(); wifiPopover.close() } }
             }
 
             Item {

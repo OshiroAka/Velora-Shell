@@ -20,7 +20,7 @@ QtObject {
             ? requested : String(config.colorScheme || "dark")
     }
     readonly property bool light: wallpaperAccent
-        ? effectivePywalTone === "light"
+        ? (palette.exactSurface ? colorLuminance(palette.foreground) < 0.5 : effectivePywalTone === "light")
         : String(config.colorScheme || "dark") === "light"
     readonly property int paletteTransitionDuration: config.reducedMotion ? 0 : 420
     readonly property string bodyFont: "Poppins"
@@ -65,7 +65,7 @@ QtObject {
     // deliberately separate from widget opacity so "Translúcido" is real.
     property color barSurface: withAlpha(
         manualPalette ? config.customColor("bar")
-            : (config.barMaterial === "solid" ? surfaceRaised : wallpaperSurfaceTone),
+            : wallpaperSurfaceTone,
         config.barMaterial === "solid" ? 1
             : (config.barMaterial === "liquid"
                 ? Math.min(Number(config.barOpacity) * 0.30, 0.24)
@@ -106,7 +106,7 @@ QtObject {
     property color darkCard: surfaceRaised
     property color widgetSolidSurface: light
         ? (manualPalette ? config.customColor("widgets")
-            : Qt.rgba(0.93, 0.94, 0.96, 1))
+            : withAlpha(surfaceRaised, 1))
         : (manualPalette ? config.customColor("widgets")
             : withAlpha(wallpaperSurfaceTone, 1))
     property color moduleSurface: config.widgetSurfaceMode === "bar"
@@ -136,6 +136,7 @@ QtObject {
     Behavior on accent { ColorAnimation { duration: paletteTransitionDuration; easing.type: Easing.InOutCubic } }
     Behavior on accentAlt { ColorAnimation { duration: paletteTransitionDuration; easing.type: Easing.InOutCubic } }
     Behavior on accentSoft { ColorAnimation { duration: paletteTransitionDuration; easing.type: Easing.InOutCubic } }
+    Behavior on barSurface { ColorAnimation { duration: paletteTransitionDuration; easing.type: Easing.InOutCubic } }
     Behavior on surface { ColorAnimation { duration: paletteTransitionDuration; easing.type: Easing.InOutCubic } }
     Behavior on surfaceRaised { ColorAnimation { duration: paletteTransitionDuration; easing.type: Easing.InOutCubic } }
     Behavior on textPrimary { ColorAnimation { duration: paletteTransitionDuration; easing.type: Easing.InOutCubic } }
@@ -160,6 +161,7 @@ QtObject {
     }
 
     function paletteSurface(lightTone) {
+        if (palette.exactSurface) return palette.background
         const raw = palette.background
         const target = lightTone ? Qt.rgba(0.965, 0.97, 0.98, 1)
                                  : Qt.rgba(0.018, 0.022, 0.03, 1)
@@ -175,6 +177,7 @@ QtObject {
     }
 
     function paletteText(primary) {
+        if (palette.exactSurface) return primary ? palette.foreground : palette.muted
         if (light) {
             const base = mixColor(Qt.rgba(0.045, 0.055, 0.075, 1),
                                   palette.background, primary ? 0.18 : 0.30)

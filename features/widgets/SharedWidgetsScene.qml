@@ -76,7 +76,7 @@ Item {
         const activity = transition.activity(stagger)
         const pulse = motion.reduced ? 1
             : 1 + Math.sin(Math.PI * opacityProgress) * 0.012
-        const desktopOpacity = widgetData.desktopEnabled
+        const desktopOpacity = root.config.desktopWidgetsEnabled && widgetData.desktopEnabled
             ? Number(desktop.opacity === undefined ? 1 : desktop.opacity) : 0
         const lockOpacity = widgetData.lockEnabled
             ? Number(locked.opacity === undefined ? 1 : locked.opacity) : 0
@@ -398,7 +398,7 @@ Item {
                         modelData.desktop || ({})) : null
                 profileTransitioning: root.profileService.transitioning
                 profileTransitionDuration: root.profileService.transitionDuration
-                suppressed: !Boolean(modelData.desktopEnabled)
+                suppressed: !root.config.desktopWidgetsEnabled || !Boolean(modelData.desktopEnabled)
             }
         }
     }

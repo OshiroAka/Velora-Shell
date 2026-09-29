@@ -24,24 +24,31 @@ Variants {
     PanelWindow {
         id: editorWindow
         required property var modelData
+        readonly property bool editingDesktop: root.controller.mode === "editing" && root.controller.editSpace === "desktop"
 
         screen: modelData
         color: "transparent"
         implicitWidth: modelData.width
         implicitHeight: modelData.height
         exclusionMode: ExclusionMode.Ignore
-        focusable: root.controller.shown
 
         anchors { top: true; bottom: true; left: true; right: true }
 
         WlrLayershell.layer: WlrLayer.Overlay
         WlrLayershell.namespace: "velora-shell-editor"
         WlrLayershell.keyboardFocus: root.controller.shown
-            ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
+            ? (editingDesktop ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.Exclusive) : WlrKeyboardFocus.None
 
         BackgroundEffect.blurRegion: Region {}
 
-        mask: Region { item: inputScope }
+        Item { id: topbarInputGap; width: editorWindow.width; height: 40 }
+        mask: Region {
+            item: inputScope
+            Region {
+                item: editorWindow.editingDesktop && root.config.topbarEnabled ? topbarInputGap : null
+                intersection: Intersection.Subtract
+            }
+        }
         property bool shapeDirty: true
         property int appliedOpticsGeneration: root.opticsGeneration
         onAppliedOpticsGenerationChanged: queueShape()

@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
+import QtQuick.Controls
 import QtQuick.Effects
 import Qt5Compat.GraphicalEffects
 import Quickshell
@@ -7,12 +8,32 @@ import Quickshell.Hyprland
 import Quickshell.Io
 import Quickshell.Services.Notifications
 import Quickshell.Services.UPower
+import "../features/topbar" as TopBar
 
 Item {
     id: root
 
     property var theme: null
+    property var mediaService: null
+    property var audioVisualizer: null
+    property var toolsService: null
+    property var fanPlusService: null
+    property bool bluetoothMenuOpen: false
+    signal bluetoothMenuRequested(real centerY)
+    signal bluetoothHoverChanged(bool inside, real centerY)
+    property bool notificationMenuOpen: false
+    property bool wifiMenuOpen: false
+    signal notificationMenuRequested(real centerY)
+    signal notificationHoverChanged(bool inside, real centerY)
+    signal wifiMenuRequested(real centerY)
+    signal wifiHoverChanged(bool inside, real centerY)
+    property bool notesMenuOpen: false
+    signal notesMenuRequested(real centerY)
+    property bool caffeineMenuOpen: false
+    signal caffeineMenuRequested(real centerY)
+    signal caffeineHoverChanged(bool inside, real centerY)
     property bool unifiedPaletteEnabled: false
+    property color unifiedSurface: "#202029"
     property color unifiedTextPrimary: "white"
     property color unifiedTextSecondary: "#c4cede"
     property color unifiedAccent: "#8db8ff"
@@ -40,7 +61,7 @@ Item {
     readonly property color glass: theme
         ? theme.withAlpha(theme.surfaceSidebar, barGlassAlpha)
         : Qt.rgba(1, 0.988, 0.997, 0.66)
-    readonly property color card: theme
+    readonly property color card: unifiedPaletteEnabled ? Qt.tint(unifiedSurface, alpha(ink, 0.08)) : theme
         ? (darkSoft ? theme.withAlpha(theme.surfaceCard, Math.min(theme.surfaceCard.a, 0.62)) : theme.surfaceCard)
         : Qt.rgba(1, 1, 1, 0.70)
     readonly property color borderSoft: theme ? (pywalStyle ? theme.withAlpha(theme.sidebarBorderGlow, Math.min(0.18, Math.max(0.08, theme.sidebarBorderGlow.a * 0.50))) : theme.withAlpha(theme.borderSoft, theme.themeMode === "dark" ? 0.11 : 0.26)) : Qt.rgba(1, 1, 1, 0.26)
@@ -58,10 +79,10 @@ Item {
     readonly property real configuredIconGap: theme ? theme.barIconSpacing : 16
     readonly property real widthProgress: Math.max(0, Math.min(1, (width - 88) / 48))
     readonly property real compactScale: Math.max(0.84, Math.min(1.06, width / 112))
-    readonly property int horizontalContentMargin: Math.round(width <= 112
+    readonly property int horizontalContentMargin: width <= 64 ? 3 : Math.round(width <= 112
         ? 10 + Math.max(0, width - 88) / 24 * 7
         : 17 + Math.min(1, (width - 112) / 24))
-    readonly property int availableContentWidth: Math.max(48, width - horizontalContentMargin * 2)
+    readonly property int availableContentWidth: Math.max(0, width - horizontalContentMargin * 2)
     readonly property int stretchGap: Math.round(Math.min(softStyle ? 10 : 14, Math.max(0, (height - (softStyle ? 1080 : 1032)) / 7)))
     property int makoNotificationCount: 0
     property int lastNotificationCount: 0
@@ -76,6 +97,12 @@ Item {
     property int focusIndex: 0
     property string focusTarget: "clock"
     property string activePopupType: ""
+    property bool volumeControlOpen: false
+    property bool brightnessControlOpen: false
+    property bool batteryControlOpen: false
+    readonly property real volumeControlCenter: contentLayer.y + utilitiesColumn.y + slotVolume.y + slotVolume.height / 2
+    readonly property real brightnessControlCenter: contentLayer.y + utilitiesColumn.y + slotBrightness.y + slotBrightness.height / 2
+    readonly property real batteryControlCenter: contentLayer.y + utilitiesColumn.y + slotBattery.y + slotBattery.height / 2
     property bool autoHideHovering: false
     readonly property bool autoHideRevealed: !theme || !theme.barAutoHideEnabled || autoHideHovering || focusMode || activePopupType.length > 0
     property real focusX: 0
@@ -131,6 +158,12 @@ Item {
         return root.theme ? root.theme.alpha(colorValue, opacity) : Qt.rgba(colorValue.r, colorValue.g, colorValue.b, opacity)
     }
 
+    function toggleCaffeine() {
+        if (!toolsService) return
+        if (toolsService.caffeineRequested) toolsService.stopAwake()
+        else toolsService.keepAwake(0)
+    }
+
     function profileImageSource() {
         const customPath = root.theme ? String(root.theme.profileImagePath || "").trim() : ""
         return customPath.length > 0 ? customPath : Qt.resolvedUrl("../assets/profile-avatar.svg")
@@ -170,14 +203,6 @@ Item {
     function popupProbeAt(y) {
         const pad = Math.round(4 * root.uiScale)
         const probes = [
-            { item: slotClock, type: "time" },
-            { item: slotSearch, type: "search" },
-            { item: slotVolume, type: "volume" },
-            { item: slotWifi, type: "wifi" },
-            { item: slotBrightness, type: "brightness" },
-            { item: slotNotifications, type: "notifications" },
-            { item: slotBluetooth, type: "bluetooth" },
-            { item: slotBattery, type: "battery" },
             { item: slotAvatar, type: "quickSettings" }
         ]
 
@@ -338,13 +363,13 @@ Item {
     }
 
     function focusSlot() {
-        if (focusTarget === "search") return slotSearch
+        if (focusTarget === "search") return null
         if (focusTarget === "workspace1") return slotWorkspace1
         if (focusTarget === "workspace2") return slotWorkspace2
         if (focusTarget === "workspace3") return slotWorkspace3
         if (focusTarget === "workspace4") return slotWorkspace4
-        if (focusTarget === "files") return slotFiles
-        if (focusTarget === "browser") return slotBrowser
+        if (focusTarget === "caffeine") return slotCaffeine
+        if (focusTarget === "notes") return slotNotes
         if (focusTarget === "discord") return slotDiscord
         if (focusTarget === "volume") return slotVolume
         if (focusTarget === "wifi") return slotWifi
@@ -353,9 +378,9 @@ Item {
         if (focusTarget === "bluetooth") return slotBluetooth
         if (focusTarget === "battery") return slotBattery
         if (focusTarget === "settings") return slotSettings
-        if (focusTarget === "layout") return slotLayout
+        if (focusTarget === "layout") return slotWifi
         if (focusTarget === "avatar") return slotAvatar
-        return slotClock
+        return null
     }
 
     function measureSlot(slot) {
@@ -463,10 +488,9 @@ Item {
     }
 
     function activateFocused() {
-        if (focusTarget === "search") {
-            root.quickPopupRequested("search", root.itemCenterY(slotSearch))
+        if (["settings"].indexOf(focusTarget) >= 0)
             return
-        }
+        if (focusTarget === "search" || focusTarget === "clock") return
 
         if (focusTarget.indexOf("workspace") === 0) {
             Hyprland.dispatch("workspace " + focusTarget.replace("workspace", ""))
@@ -474,13 +498,13 @@ Item {
             return
         }
 
-        if (focusTarget === "files") {
-            runFocusCommand(filesCommand)
+        if (focusTarget === "caffeine") {
+            caffeineMenuRequested(root.itemCenterY(slotCaffeine))
             return
         }
 
-        if (focusTarget === "browser") {
-            runFocusCommand(browserCommand)
+        if (focusTarget === "notes") {
+            root.notesMenuRequested(root.itemCenterY(slotNotes))
             return
         }
 
@@ -495,7 +519,7 @@ Item {
         }
 
         if (focusTarget === "wifi") {
-            root.quickPopupRequested("wifi", root.itemCenterY(slotWifi))
+            root.wifiMenuRequested(root.itemCenterY(slotWifi))
             return
         }
 
@@ -505,12 +529,12 @@ Item {
         }
 
         if (focusTarget === "notifications") {
-            root.quickPopupRequested("notifications", root.itemCenterY(slotNotifications))
+            root.notificationMenuRequested(root.itemCenterY(slotNotifications))
             return
         }
 
         if (focusTarget === "bluetooth") {
-            root.quickPopupRequested("bluetooth", root.itemCenterY(slotBluetooth))
+            root.bluetoothMenuRequested(root.itemCenterY(slotBluetooth))
             return
         }
 
@@ -526,7 +550,7 @@ Item {
         }
 
         if (focusTarget === "layout") {
-            root.layoutRequested(root.itemCenterY(slotLayout))
+            root.wifiMenuRequested(root.itemCenterY(slotWifi))
             root.exitFocusRequested()
             return
         }
@@ -536,10 +560,6 @@ Item {
             return
         }
 
-        if (focusTarget === "clock") {
-            root.quickPopupRequested("time", root.itemCenterY(slotClock))
-            return
-        }
     }
 
     function tr(key) {
@@ -918,39 +938,13 @@ Item {
 
         ClockBlock {
             id: slotClock
-
             Layout.alignment: Qt.AlignHCenter
             Layout.preferredWidth: Math.min(root.availableContentWidth, Math.round(72 * root.compactScale))
             Layout.preferredHeight: Math.round(124 * root.uiScale)
         }
-
         Divider {
             Layout.fillWidth: true
-            Layout.topMargin: Math.round(13 * root.uiScale) + Math.round(root.stretchGap * 0.35)
-            Layout.bottomMargin: Math.round(13 * root.uiScale) + Math.round(root.stretchGap * 0.35)
-        }
-
-        SectionLabel {
-            Layout.fillWidth: true
-            text: root.tr("tools")
-        }
-
-        ToolRow {
-            id: slotSearch
-
-            Layout.fillWidth: true
-            Layout.topMargin: Math.round(8 * root.uiScale)
-            label: root.tr("search")
-            iconName: "search"
-            selected: root.activePopupType === "search"
-            command: ""
-            hoverPopupType: "search"
-            onTriggered: root.quickPopupRequested("search", root.itemCenterY(slotSearch))
-        }
-
-        Divider {
-            Layout.fillWidth: true
-            Layout.topMargin: Math.round(15 * root.uiScale) + root.stretchGap
+            Layout.topMargin: Math.round(13 * root.uiScale)
             Layout.bottomMargin: Math.round(13 * root.uiScale)
         }
 
@@ -1017,26 +1011,26 @@ Item {
             spacing: Math.round(root.configuredIconGap * 0.5 * root.uiScale)
 
             AppButton {
-                id: slotFiles
+                id: slotCaffeine
 
-                iconName: "folder"
-                tint: root.theme ? root.theme.accentTertiary : Qt.rgba(0.46, 0.64, 0.90, 0.94)
-                command: root.filesCommand
+                iconName: "caffeine"
+                selected: root.caffeineMenuOpen || (!!root.toolsService && root.toolsService.caffeineActive)
+                onHoveredChanged: root.caffeineHoverChanged(hovered, root.itemCenterY(slotCaffeine))
+                onTriggered: root.caffeineMenuRequested(root.itemCenterY(slotCaffeine))
             }
 
             AppButton {
-                id: slotBrowser
+                id: slotNotes
 
-                iconName: "browser"
-                tint: root.theme ? root.theme.accentPrimary : Qt.rgba(0.91, 0.46, 0.36, 0.90)
-                command: root.browserCommand
+                iconName: "notes"
+                selected: root.notesMenuOpen
+                onTriggered: root.notesMenuRequested(root.itemCenterY(slotNotes))
             }
 
             AppButton {
                 id: slotDiscord
 
                 iconName: "discord"
-                tint: root.theme ? root.theme.accentSecondary : Qt.rgba(0.53, 0.47, 0.84, 0.90)
                 command: root.discordCommand
             }
 
@@ -1054,6 +1048,7 @@ Item {
         }
 
         ColumnLayout {
+            id: utilitiesColumn
             Layout.alignment: Qt.AlignHCenter
             Layout.topMargin: Math.round(9 * root.uiScale)
             spacing: Math.round(root.configuredIconGap * 0.5 * root.uiScale)
@@ -1062,26 +1057,17 @@ Item {
                 id: slotVolume
 
                 iconName: root.muted ? "volume-muted" : "volume"
+                selected: root.volumeControlOpen
                 hoverPopupType: "volume"
-                selected: root.activePopupType === "volume"
                 onTriggered: root.quickPopupRequested("volume", root.itemCenterY(slotVolume))
-            }
-
-            UtilityButton {
-                id: slotWifi
-
-                iconName: "wifi"
-                hoverPopupType: "wifi"
-                selected: root.activePopupType === "wifi"
-                onTriggered: root.quickPopupRequested("wifi", root.itemCenterY(slotWifi))
             }
 
             UtilityButton {
                 id: slotBrightness
 
                 iconName: "sun"
+                selected: root.brightnessControlOpen
                 hoverPopupType: "brightness"
-                selected: root.activePopupType === "brightness"
                 onTriggered: root.quickPopupRequested("brightness", root.itemCenterY(slotBrightness))
             }
 
@@ -1089,51 +1075,78 @@ Item {
                 id: slotNotifications
 
                 iconName: "bell"
+                selected: root.notificationMenuOpen
                 badge: root.notificationBadgeText()
                 iconRotation: root.notificationRingAngle
-                hoverPopupType: "notifications"
-                selected: root.activePopupType === "notifications"
-                onTriggered: root.quickPopupRequested("notifications", root.itemCenterY(slotNotifications))
+                onHoveredChanged: root.notificationHoverChanged(hovered, root.itemCenterY(slotNotifications))
+                onTriggered: root.notificationMenuRequested(root.itemCenterY(slotNotifications))
             }
 
             UtilityButton {
                 id: slotBluetooth
 
                 iconName: "bluetooth"
-                hoverPopupType: "bluetooth"
-                selected: root.activePopupType === "bluetooth"
-                onTriggered: root.quickPopupRequested("bluetooth", root.itemCenterY(slotBluetooth))
+                selected: root.bluetoothMenuOpen
+                onHoveredChanged: root.bluetoothHoverChanged(hovered, root.itemCenterY(slotBluetooth))
+                onTriggered: root.bluetoothMenuRequested(root.itemCenterY(slotBluetooth))
             }
 
             UtilityButton {
                 id: slotBattery
-
-                hoverPopupType: "battery"
-                selected: root.activePopupType === "battery"
+                visible: false
+                selected: root.batteryControlOpen
                 iconName: "battery"
                 onTriggered: root.quickPopupRequested("battery", root.itemCenterY(slotBattery))
             }
 
             UtilityButton {
                 id: slotSettings
-
+                visible: false
+                passive: true
                 iconName: "settings"
-                selected: false
-                onTriggered: root.settingsRequested(root.itemCenterY(slotSettings))
             }
 
             UtilityButton {
-                id: slotLayout
+                id: slotWifi
 
-                iconName: "display"
-                selected: false
-                onTriggered: root.layoutRequested(root.itemCenterY(slotLayout))
+                iconName: "wifi"
+                selected: root.wifiMenuOpen
+                onHoveredChanged: root.wifiHoverChanged(hovered, root.itemCenterY(slotWifi))
+                onTriggered: root.wifiMenuRequested(root.itemCenterY(slotWifi))
             }
         }
 
         Item {
+            Layout.fillWidth: true
             Layout.fillHeight: true
             Layout.minimumHeight: 18
+
+            Column {
+                anchors.horizontalCenter: parent.horizontalCenter
+                anchors.bottom: parent.bottom
+                anchors.bottomMargin: 8
+                spacing: 7
+                VeloraFanPlusIndicator {
+                    id: fanIndicator
+                    width: 44
+                    active: !!root.fanPlusService && root.fanPlusService.state === "active"
+                    ink: root.ink
+                    accent: root.pink
+                    surfaceColor: root.alpha(root.card, 0.58)
+                    borderColor: root.alpha(root.ink, 0.16)
+                }
+                VeloraRailMedia {
+                    width: Math.min(44, root.width - 4)
+                    availableHeight: Math.max(0, parent.parent.height - 8 - fanIndicator.implicitHeight - (fanIndicator.visible ? parent.spacing : 0))
+                    visible: availableHeight >= 100 && !!root.mediaService
+                    media: root.mediaService
+                    visualizer: root.audioVisualizer
+                    ink: root.ink
+                    surfaceColor: root.card
+                    accent: root.pink
+                    fontFamily: root.uiFont
+                }
+            }
         }
 
         Divider {
@@ -1152,23 +1165,20 @@ Item {
 
     HoverHandler {
         id: autoHideHoverHandler
+        blocking: false
         margin: 4
         onHoveredChanged: root.autoHideHovering = hovered
     }
 
-    MouseArea {
+    HoverHandler {
         id: popoutHoverProbe
-        z: 25
-
-        anchors.fill: panelSurface
-        hoverEnabled: true
-        acceptedButtons: Qt.NoButton
-        onPositionChanged: event => root.updateHoverProbe(event.y)
-        onContainsMouseChanged: {
-            if (!containsMouse)
+        blocking: false
+        onPointChanged: if (hovered) root.updateHoverProbe(point.position.y)
+        onHoveredChanged: {
+            if (!hovered)
                 root.clearHoverProbe()
             else
-                root.updateHoverProbe(mouseY)
+                root.updateHoverProbe(point.position.y)
         }
     }
 
@@ -1348,6 +1358,7 @@ Item {
 
         MouseArea {
             anchors.fill: parent
+            enabled: false
             hoverEnabled: true
             acceptedButtons: Qt.LeftButton
             cursorShape: Qt.PointingHandCursor
@@ -1381,9 +1392,12 @@ Item {
     }
 
     component Divider: Rectangle {
-        height: 1
+        implicitHeight: 1
+        Layout.minimumHeight: 1
+        Layout.preferredHeight: 1
+        Layout.maximumHeight: 1
         radius: 1
-        color: root.darkSoft ? Qt.rgba(1, 1, 1, 0.08) : root.alpha(root.lilac, 0.22)
+        color: root.alpha(root.ink, 0.28)
     }
 
     component WorkspaceButton: Rectangle {
@@ -1510,17 +1524,16 @@ Item {
             id: toolIcon
 
             anchors {
-                left: parent.left
+                horizontalCenter: parent.horizontalCenter
                 verticalCenter: parent.verticalCenter
-                leftMargin: 4
             }
 
             width: Math.round(24 * root.uiScale * root.configuredIconScale)
             height: Math.round(24 * root.uiScale * root.configuredIconScale)
             iconName: row.iconName
-            lineColor: row.selected ? (root.softStyle ? root.pink : root.lilac) : root.inkSoft
-            opacity: root.configuredIconOpacity
-            layer.enabled: root.pywalStyle && (row.selected || row.hovered)
+            lineColor: root.ink
+            opacity: Math.max(0.88, root.configuredIconOpacity)
+            layer.enabled: false
             layer.effect: DropShadow {
                 transparentBorder: true
                 radius: 8
@@ -1540,6 +1553,7 @@ Item {
             }
 
             text: row.label
+            visible: row.label.length > 0
             color: row.selected ? root.pink : root.ink
             font.family: root.uiFont
             font.pixelSize: Math.round(11 * root.uiScale)
@@ -1551,6 +1565,7 @@ Item {
 
         MouseArea {
             anchors.fill: parent
+            enabled: row.clickable
             hoverEnabled: true
             acceptedButtons: Qt.LeftButton
             preventStealing: true
@@ -1584,11 +1599,11 @@ Item {
 
         property string iconName: "folder"
         property string command: ""
-        property color tint: root.lilac
         property bool hovered: false
         property bool selected: false
         property bool pressed: false
         property string hoverPopupType: ""
+        signal triggered()
 
         Layout.alignment: Qt.AlignHCenter
         Layout.preferredWidth: Math.round(34 * root.uiScale * root.configuredIconScale)
@@ -1601,17 +1616,18 @@ Item {
             NumberAnimation { duration: button.scale > 1 ? 110 : 140; easing.type: Easing.OutCubic }
         }
         radius: Math.round(8 * root.uiScale)
-        color: selected ? root.alpha(root.pink, 0.30) : (hovered ? root.alpha(root.card, 0.84) : root.alpha(root.card, 0.58))
+        color: root.alpha(root.ink, selected ? 0.18 : hovered ? 0.13 : 0.07)
         border.width: 1
-        border.color: selected ? root.alpha(root.pink, 0.34) : (root.darkSoft ? Qt.rgba(1, 1, 1, 0.14) : root.alpha(root.borderSoft, 0.76))
-        layer.enabled: true
-        layer.effect: DropShadow {
-            transparentBorder: true
-            radius: button.hovered ? 13 : 10
-            samples: button.hovered ? 27 : 21
-            horizontalOffset: 0
-            verticalOffset: button.hovered ? 5 : 3
-            color: root.alpha(root.theme ? root.theme.shadowColor : Qt.rgba(0.38, 0.25, 0.42, 1), button.hovered ? 0.13 : 0.08)
+        border.color: root.alpha(root.ink, selected ? 0.28 : 0.16)
+        Behavior on color { ColorAnimation { duration: 120 } }
+
+        ToolTip {
+            visible: button.hovered && !(button.iconName === "caffeine" && root.caffeineMenuOpen)
+                && !(button.iconName === "notes" && root.notesMenuOpen)
+            delay: 600
+            text: ({ caffeine: "Café · manter acordado", notes: "Notas", discord: "Discord" })[button.iconName] || button.iconName
+            x: root.rightSoft ? -width - 10 : button.width + 10
+            y: (button.height - height) / 2
         }
 
         Process {
@@ -1621,21 +1637,34 @@ Item {
             onExited: running = false
         }
 
-        Rectangle {
-            anchors.centerIn: parent
-            width: Math.round(26 * root.uiScale * root.configuredIconScale)
-            height: Math.round(26 * root.uiScale * root.configuredIconScale)
-            radius: Math.round(6 * root.uiScale)
-            color: button.iconName === "terminal" ? root.alpha(root.ink, 0.88) : (button.iconName === "discord" ? root.alpha(root.lilac, 0.20) : root.alpha(root.card, 0.18))
-        }
-
         VeloraIcon {
             anchors.centerIn: parent
             width: Math.round(26 * root.uiScale * root.configuredIconScale)
             height: Math.round(26 * root.uiScale * root.configuredIconScale)
+            visible: button.iconName !== "caffeine" && button.iconName !== "notes"
             iconName: button.iconName
-            lineColor: button.tint
-            opacity: root.configuredIconOpacity
+            lineColor: root.ink
+            opacity: Math.max(0.88, root.configuredIconOpacity)
+        }
+
+        Loader {
+            anchors.centerIn: parent
+            width: Math.round(26 * root.uiScale * root.configuredIconScale)
+            height: width
+            active: button.iconName === "caffeine" || button.iconName === "notes"
+            sourceComponent: button.iconName === "caffeine" ? coffeeGlyph : notesGlyph
+            Component {
+                id: coffeeGlyph
+                TopBar.CoffeeIcon {
+                    color: root.ink
+                    active: !!root.toolsService && root.toolsService.caffeineActive
+                    animate: true
+                }
+            }
+            Component {
+                id: notesGlyph
+                TopBar.BarIcon { name: "notes"; color: root.ink }
+            }
         }
 
         MouseArea {
@@ -1660,6 +1689,7 @@ Item {
                 }
                 if (button.command.length > 0 && !appProcess.running)
                     appProcess.running = true
+                button.triggered()
             }
             onPressed: button.pressed = true
             onReleased: button.pressed = false
@@ -1714,12 +1744,12 @@ Item {
             width: Math.round(26 * root.uiScale * root.configuredIconScale)
             height: Math.round(26 * root.uiScale * root.configuredIconScale)
             iconName: button.iconName
-            lineColor: button.selected ? (root.softStyle ? root.pink : root.lilac) : root.inkSoft
-            opacity: root.configuredIconOpacity
+            lineColor: root.ink
+            opacity: Math.max(0.88, root.configuredIconOpacity)
             value: button.iconName === "battery" ? root.normalizedBatteryLevel() : Math.max(0.08, Math.min(1, root.volume / 100))
             rotation: button.iconRotation
             transformOrigin: Item.Center
-            layer.enabled: root.pywalStyle && (button.selected || button.hovered)
+            layer.enabled: false
             layer.effect: DropShadow {
                 transparentBorder: true
                 radius: 9
@@ -2007,7 +2037,7 @@ Item {
             ctx.clearRect(0, 0, width, height)
             ctx.strokeStyle = lineColor
             ctx.fillStyle = lineColor
-            ctx.lineWidth = Math.max(1.5, Math.min(width, height) * 0.085)
+            ctx.lineWidth = Math.max(1.5, Math.min(width, height) * 0.075)
             ctx.lineCap = "round"
             ctx.lineJoin = "round"
         }
@@ -2040,21 +2070,20 @@ Item {
                 ctx.lineTo(cx + s * 0.32, cy + s * 0.32)
                 ctx.stroke()
             } else if (iconName === "folder") {
-                ctx.save()
-                ctx.fillStyle = colorString(lineColor, 0.78)
-                roundedRect(ctx, s * 0.16, s * 0.34, s * 0.68, s * 0.44, s * 0.08)
-                ctx.fill()
-                ctx.fillStyle = mixedColorString(lineColor, 1, 1, 1, 0.26, 0.86)
-                roundedRect(ctx, s * 0.18, s * 0.25, s * 0.31, s * 0.20, s * 0.06)
-                ctx.fill()
-                ctx.fillStyle = mixedColorString(lineColor, 1, 1, 1, 0.74, 0.34)
-                roundedRect(ctx, s * 0.23, s * 0.43, s * 0.50, s * 0.09, s * 0.04)
-                ctx.fill()
-                ctx.strokeStyle = mixedColorString(lineColor, 0, 0, 0, 0.28, 0.58)
-                ctx.lineWidth = Math.max(1, s * 0.045)
-                roundedRect(ctx, s * 0.16, s * 0.34, s * 0.68, s * 0.44, s * 0.08)
+                ctx.beginPath()
+                ctx.moveTo(s * 0.15, s * 0.34)
+                ctx.lineTo(s * 0.15, s * 0.24)
+                ctx.lineTo(s * 0.43, s * 0.24)
+                ctx.lineTo(s * 0.52, s * 0.34)
+                ctx.lineTo(s * 0.85, s * 0.34)
+                ctx.lineTo(s * 0.85, s * 0.77)
+                ctx.lineTo(s * 0.15, s * 0.77)
+                ctx.closePath()
                 ctx.stroke()
-                ctx.restore()
+                ctx.beginPath()
+                ctx.moveTo(s * 0.15, s * 0.41)
+                ctx.lineTo(s * 0.85, s * 0.41)
+                ctx.stroke()
             } else if (iconName === "terminal") {
                 ctx.save()
                 ctx.strokeStyle = "rgba(247, 244, 250, 0.92)"
@@ -2068,29 +2097,17 @@ Item {
                 ctx.stroke()
                 ctx.restore()
             } else if (iconName === "browser") {
-                ctx.save()
-                const grad = ctx.createLinearGradient(s * 0.22, s * 0.18, s * 0.82, s * 0.78)
-                grad.addColorStop(0, mixedColorString(lineColor, 1, 1, 1, 0.34, 0.94))
-                grad.addColorStop(0.48, colorString(lineColor, 0.90))
-                grad.addColorStop(1, colorString(root.lilac, 0.82))
-                ctx.fillStyle = grad
                 ctx.beginPath()
-                ctx.arc(cx, cy, s * 0.34, 0, Math.PI * 2, false)
-                ctx.fill()
-                ctx.fillStyle = mixedColorString(lineColor, 1, 1, 1, 0.58, 0.66)
+                ctx.arc(cx, cy, s * 0.36, 0, Math.PI * 2)
+                ctx.moveTo(s * 0.14, cy)
+                ctx.lineTo(s * 0.86, cy)
+                ctx.stroke()
                 ctx.beginPath()
-                ctx.arc(cx - s * 0.11, cy - s * 0.06, s * 0.20, Math.PI * 0.12, Math.PI * 1.62, false)
-                ctx.lineTo(cx + s * 0.16, cy - s * 0.16)
-                ctx.closePath()
-                ctx.fill()
-                ctx.fillStyle = colorString(root.lilac, 0.78)
-                ctx.beginPath()
-                ctx.arc(cx + s * 0.04, cy + s * 0.05, s * 0.16, 0, Math.PI * 2, false)
-                ctx.fill()
-                ctx.restore()
+                ctx.ellipse(s * 0.33, s * 0.14, s * 0.34, s * 0.72)
+                ctx.stroke()
             } else if (iconName === "discord") {
                 ctx.save()
-                ctx.fillStyle = mixedColorString(lineColor, 1, 1, 1, 0.26, 0.46)
+                ctx.fillStyle = colorString(lineColor, 0.08)
                 ctx.strokeStyle = colorString(lineColor, 0.84)
                 ctx.lineWidth = Math.max(1.4, s * 0.070)
                 ctx.beginPath()

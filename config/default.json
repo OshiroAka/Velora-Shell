@@ -26,13 +26,25 @@
     },
     "characterPywal": false
   },
+  "desktop": {
+    "widgetsEnabled": true,
+    "visualizerEnabled": true,
+    "wallpaperBlurEnabled": false,
+    "wallpaperBlurStrength": 0.35,
+    "wallpaperDimming": 0
+  },
   "bar": {
     "material": "glass",
+    "liquidStyle": "frosted",
+    "blurEnabled": true,
     "opacity": 0.52,
     "waveStrength": 0.28
   },
   "topbar": {
     "enabled": true,
+    "oneThingEnabled": true,
+    "notesEnabled": true,
+    "toolsOrder": ["caffeine", "timer", "thing", "notes", "battery", "paint", "monitor", "search", "controls", "clock"],
     "variant": "velora",
     "systemName": "Velora Shell",
     "height": 40,
@@ -168,6 +180,7 @@
     },
     "sharedWidgets": {
       "surfaceMode": "solid",
+      "blurEnabled": true,
       "layoutTemplate": "side-column",
       "layoutSeed": "velora-shell-default",
       "items": [

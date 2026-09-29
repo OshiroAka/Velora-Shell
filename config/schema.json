@@ -7,6 +7,17 @@
   "additionalProperties": false,
   "properties": {
     "schemaVersion": {"const": 8},
+    "desktop": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "widgetsEnabled": {"type": "boolean"},
+        "visualizerEnabled": {"type": "boolean"},
+        "wallpaperBlurEnabled": {"type": "boolean"},
+        "wallpaperBlurStrength": {"type": "number", "minimum": 0, "maximum": 1},
+        "wallpaperDimming": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    },
     "appearance": {
       "type": "object",
       "additionalProperties": false,
@@ -41,11 +52,28 @@
         "characterPywal": {"type": "boolean"}
       }
     },
+    "bar": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "material": {"enum": ["solid", "glass", "liquid"]},
+        "liquidStyle": {"enum": ["clear", "frosted"]},
+        "blurEnabled": {"type": "boolean"},
+        "opacity": {"type": "number", "minimum": 0.08, "maximum": 0.96},
+        "waveStrength": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    },
     "topbar": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "enabled": {"type": "boolean"},
+        "oneThingEnabled": {"type": "boolean"},
+        "notesEnabled": {"type": "boolean"},
+        "toolsOrder": {
+          "type": "array", "uniqueItems": true, "maxItems": 9,
+          "items": {"enum": ["caffeine", "timer", "thing", "notes", "battery", "paint", "monitor", "search", "controls", "clock"]}
+        },
         "variant": {"enum": ["velora", "end4-first"]},
         "systemName": {"type": "string", "minLength": 1, "maxLength": 80},
         "height": {"type": "number", "minimum": 36, "maximum": 52},
@@ -108,6 +136,8 @@
           "additionalProperties": false,
           "required": ["layoutTemplate", "layoutSeed", "items"],
           "properties": {
+            "surfaceMode": {"enum": ["solid", "bar"]},
+            "blurEnabled": {"type": "boolean"},
             "layoutTemplate": {
               "enum": ["side-column", "split-corners", "scattered", "gallery-top-right", "custom"]
             },

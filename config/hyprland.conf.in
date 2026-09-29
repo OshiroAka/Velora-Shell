@@ -18,6 +18,14 @@ layerrule = ignore_alpha 0.01, match:namespace ^velora-wallpaper-selector$
 bind = SUPER, K, exec, "@ROOT@/scripts/velora" ipc velora topWallpaper
 bind = SUPER, W, exec, "@ROOT@/scripts/velora" ipc velora search
 bind = SUPER, R, exec, "@ROOT@/scripts/velora" ipc velora settings
+unbind = , XF86AudioRaiseVolume
+unbind = , XF86AudioLowerVolume
+unbind = , XF86MonBrightnessUp
+unbind = , XF86MonBrightnessDown
+bindel = , XF86AudioRaiseVolume, exec, "@ROOT@/scripts/velora-rail-adjust" volume up
+bindel = , XF86AudioLowerVolume, exec, "@ROOT@/scripts/velora-rail-adjust" volume down
+bindel = , XF86MonBrightnessUp, exec, "@ROOT@/scripts/velora-rail-adjust" brightness up
+bindel = , XF86MonBrightnessDown, exec, "@ROOT@/scripts/velora-rail-adjust" brightness down
 # Visual lock; configure a separate authenticated locker when required.
 bind = SUPER, L, exec, "@ROOT@/scripts/velora-lock"
 bind = , Print, exec, "@ROOT@/scripts/velora-screenshot-select" full

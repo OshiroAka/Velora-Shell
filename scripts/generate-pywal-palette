@@ -3,8 +3,8 @@ set -euo pipefail
 
 palette_project_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 
-if [[ "$#" -lt 1 || "$#" -gt 3 ]]; then
-    printf 'usage: %s /absolute/path/to/image-or-video [dark|light] [preview]\n' "$0" >&2
+if [[ "$#" -lt 1 || "$#" -gt 4 ]]; then
+    printf 'usage: %s /absolute/path/to/image-or-video [dark|light] [preview] [restore|shuffle]\n' "$0" >&2
     exit 2
 fi
 
@@ -51,6 +51,12 @@ jq --arg wallpaper "$source_path" --arg tone "$palette_tone" \
     --argjson velora "$palette_accents" \
     '.wallpaper = $wallpaper | .tone = $tone | .velora = $velora' \
     "$palette_source" > "$palette_work/colors.json.next"
+"$palette_project_dir/scripts/velora-palette-surfaces" "$palette_input" \
+    "$palette_work/colors.json.next" "$source_path" "$palette_tone" "$palette_cache_root" "${4:-restore}"
 chmod 0644 "$palette_work/colors.json.next"
 mv -f -- "$palette_work/colors.json.next" "$palette_cache_root/colors.json"
 printf '%s\n' "$palette_cache_root/colors.json"
+
+if [[ "${4:-restore}" == "shuffle" ]]; then
+    python3 "$palette_project_dir/scripts/velora-pywal-theme.py" --no-ipc >/dev/null
+fi

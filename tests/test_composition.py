@@ -233,6 +233,12 @@ class CompositionStorageTests(unittest.TestCase):
             "gallery": [dict(entry) for entry in default["lockPreview"]["gallery"]],
             "galleryOrder": [0, 1, 2],
             "topbarLayout": [dict(item) for item in default["topbar"]["layout"]],
+            "topbar": {"toolsOrder": [
+                "timer", "thing", "clock", "caffeine", "wifi", "battery",
+                "controls", "search", "notes",
+            ]},
+            "sharedWidgets": dict(default["lockPreview"]["sharedWidgets"],
+                                  surfaceMode="bar", blurEnabled=False),
             "profile": {
                 "displayName": "Teste",
                 "greeting": "Olá",
@@ -312,6 +318,12 @@ class CompositionStorageTests(unittest.TestCase):
             self.assertEqual(custom["transform"]["rotation"], 12)
             self.assertEqual(profile["composition"]["topbarLayout"][5]["section"],
                              "center")
+            self.assertEqual(profile["composition"]["topbar"]["toolsOrder"],
+                             [item for tool in snapshot["topbar"]["toolsOrder"]
+                              for item in (["paint", "monitor"] if tool == "wifi" else [tool])])
+            self.assertEqual(profile["composition"]["sharedWidgets"]["surfaceMode"],
+                             "bar")
+            self.assertIs(profile["composition"]["sharedWidgets"]["blurEnabled"], False)
             self.assertEqual(profile["composition"]["appearance"]["lockDimmingMode"],
                              "both")
             self.assertEqual(profile["composition"]["appearance"]["lockDimmingAmount"],

@@ -191,7 +191,59 @@ Rectangle {
         Slider {
             id: slider; width: parent.width; from: 0; to: 1
             value: setting.value
-            onPressedChanged: if (!pressed) setting.committed(value)
+            onMoved: setting.committed(value)
+        }
+    }
+
+    component LiquidStylePicker: Column {
+        width: parent ? parent.width : 300
+        spacing: 8
+        Text { text: "Liquid Glass"; color: root.ink; font.pixelSize: 14; font.weight: Font.DemiBold }
+        Row {
+            spacing: 8
+            ActionButton {
+                objectName: "liquidClearChoice"
+                label: "Nítido"
+                selected: root.config.liquidGlassStyle === "clear"
+                onTriggered: root.config.setValue("bar.liquidStyle", "clear")
+            }
+            ActionButton {
+                objectName: "liquidFrostedChoice"
+                label: "Fosco"
+                selected: root.config.liquidGlassStyle === "frosted"
+                onTriggered: root.config.setValue("bar.liquidStyle", "frosted")
+            }
+        }
+        Text {
+            width: parent.width; wrapMode: Text.WordWrap
+            text: root.config.liquidGlassStyle === "frosted"
+                ? "Fundo suavizado para facilitar a leitura, com reflexos nas bordas."
+                : "Fundo nítido, com refração suave e reflexos nas bordas."
+            color: root.mutedInk; font.pixelSize: 11
+        }
+    }
+
+    component WallpaperAdjustments: Column {
+        width: parent ? parent.width : 300
+        spacing: 10
+        Text { text: "Wallpaper"; color: root.ink; font.pixelSize: 14; font.weight: Font.DemiBold }
+        ActionButton {
+            objectName: "wallpaperBlurToggle"
+            label: root.config.wallpaperBlurEnabled ? "Blur do wallpaper ligado" : "Blur do wallpaper desligado"
+            selected: root.config.wallpaperBlurEnabled
+            onTriggered: root.config.setValue("desktop.wallpaperBlurEnabled", !root.config.wallpaperBlurEnabled)
+        }
+        SettingSlider {
+            label: "Intensidade do blur · fraco → forte"
+            enabled: root.config.wallpaperBlurEnabled
+            opacity: enabled ? 1 : 0.46
+            value: root.config.wallpaperBlurStrength
+            onCommitted: value => root.config.setValue("desktop.wallpaperBlurStrength", value)
+        }
+        SettingSlider {
+            label: "Escurecer wallpaper"
+            value: root.config.wallpaperDimming
+            onCommitted: value => root.config.setValue("desktop.wallpaperDimming", value)
         }
     }
 
@@ -429,6 +481,7 @@ Rectangle {
                             ActionButton { required property var modelData; label: modelData.label; selected: root.config.barMaterial === modelData.id; onTriggered: root.config.setBarAppearance(modelData.id, root.config.barWaveStrength) }
                         }
                     }
+                    LiquidStylePicker { visible: root.config.barMaterial === "liquid" }
                     SettingSlider {
                         label: "Opacidade da barra"
                         value: root.config.barOpacity
@@ -436,6 +489,43 @@ Rectangle {
                         onCommitted: function(value) {
                             root.config.setBarOpacity(Math.max(0.08, value))
                         }
+                    }
+                    Text { visible: root.config.barMaterial === "glass"; text: "Desfoque das barras"; color: root.ink; font.pixelSize: 14; font.weight: Font.DemiBold }
+                    Row { spacing: 8; visible: root.config.barMaterial === "glass"
+                        ActionButton {
+                            objectName: "barBlurToggle"
+                            label: root.config.barBlurEnabled ? "Blur ligado" : "Blur desligado"
+                            selected: root.config.barBlurEnabled
+                            onTriggered: root.config.setValue("bar.blurEnabled", !root.config.barBlurEnabled)
+                        }
+                    }
+                    Text {
+                        width: parent.width; wrapMode: Text.WordWrap
+                        visible: root.config.barMaterial === "glass"
+                        text: root.config.barMaterial === "glass"
+                            ? "Desfoque real do fundo da barra superior e da lateral."
+                            : "O desfoque se aplica ao material Translúcido."
+                        color: root.mutedInk; font.pixelSize: 11
+                    }
+                    Text { text: "Itens opcionais da barra superior"; color: root.ink; font.pixelSize: 14; font.weight: Font.DemiBold }
+                    Row { spacing: 8
+                        ActionButton {
+                            objectName: "topbarMessageToggle"
+                            label: root.config.topbarOneThingEnabled ? "Mensagem visível" : "Mensagem oculta"
+                            selected: root.config.topbarOneThingEnabled
+                            onTriggered: root.config.setValue("topbar.oneThingEnabled", !root.config.topbarOneThingEnabled)
+                        }
+                        ActionButton {
+                            objectName: "topbarNotesToggle"
+                            label: root.config.topbarNotesEnabled ? "Notas visíveis" : "Notas ocultas"
+                            selected: root.config.topbarNotesEnabled
+                            onTriggered: root.config.setValue("topbar.notesEnabled", !root.config.topbarNotesEnabled)
+                        }
+                    }
+                    Text {
+                        width: parent.width; wrapMode: Text.WordWrap
+                        text: "Ocultar preserva a mensagem e as notas salvas."
+                        color: root.mutedInk; font.pixelSize: 11
                     }
                     Text { text: "Foto de perfil da barra"; color: root.ink; font.pixelSize: 14; font.weight: Font.DemiBold }
                     Rectangle {
@@ -487,8 +577,42 @@ Rectangle {
                         wrapMode: Text.WordWrap
                     }
                     Text { text: "Organização da parte superior"; color: root.ink; font.pixelSize: 14; font.weight: Font.DemiBold }
+                    ActionButton {
+                        label: "Arrastar itens no Desktop"
+                        onTriggered: root.controller.beginEditing("desktop")
+                    }
                     Repeater {
-                        model: root.config.topbarLayout
+                        model: root.config.topbarToolsOrder
+                        Rectangle {
+                            id: toolOrderRow
+                            required property string modelData
+                            required property int index
+                            width: pageColumn.width; height: 44; radius: 11
+                            color: Qt.rgba(1, 1, 1, 0.06)
+                            Text {
+                                x: 13; anchors.verticalCenter: parent.verticalCenter
+                                text: root.config.topbarToolLabel(toolOrderRow.modelData)
+                                color: root.ink; font.pixelSize: 12
+                            }
+                            Row {
+                                anchors.right: parent.right; anchors.rightMargin: 6
+                                anchors.verticalCenter: parent.verticalCenter; spacing: 5
+                                ActionButton {
+                                    implicitWidth: 42; label: "←"
+                                    enabled: toolOrderRow.index > 0
+                                    onTriggered: root.config.stepTopbarTool(toolOrderRow.modelData, -1)
+                                }
+                                ActionButton {
+                                    implicitWidth: 42; label: "→"
+                                    enabled: toolOrderRow.index < root.config.topbarToolsOrder.length - 1
+                                    onTriggered: root.config.stepTopbarTool(toolOrderRow.modelData, 1)
+                                }
+                            }
+                        }
+                    }
+                    Text { text: "Esquerda e centro"; color: root.ink; font.pixelSize: 14; font.weight: Font.DemiBold }
+                    Repeater {
+                        model: root.config.referenceAppearance ? root.config.topbarLayout.filter(item => item.section !== "right") : root.config.topbarLayout
                         Rectangle {
                             id: barRow; required property var modelData
                             width: pageColumn.width; height: 48; radius: 13
@@ -510,6 +634,12 @@ Rectangle {
                     width: parent.width; spacing: 10
                     visible: root.page === "desktop" || root.page === "lock"
                     ActionButton { label: root.page === "desktop" ? "Editar Desktop" : "Editar Lock"; primary: true; onTriggered: root.controller.beginEditing(root.page) }
+                    Text {
+                        visible: root.page === "desktop"
+                        width: parent.width; wrapMode: Text.WordWrap
+                        text: "No editor, arraste também os itens da barra superior para mudar a ordem."
+                        color: root.mutedInk; font.pixelSize: 11
+                    }
                     Text { text: "Superfície dos widgets"; color: root.ink; font.pixelSize: 14; font.weight: Font.DemiBold }
                     Row { spacing: 8
                         ActionButton {
@@ -531,7 +661,29 @@ Rectangle {
                         color: root.mutedInk; font.pixelSize: 11
                         wrapMode: Text.WordWrap
                     }
+                    ActionButton {
+                        objectName: "desktopWidgetsToggle"
+                        visible: root.page === "desktop"
+                        label: root.config.desktopWidgetsEnabled ? "Ocultar todos os widgets" : "Mostrar todos os widgets"
+                        selected: root.config.desktopWidgetsEnabled
+                        onTriggered: root.config.setValue("desktop.widgetsEnabled", !root.config.desktopWidgetsEnabled)
+                    }
+                    ActionButton {
+                        objectName: "desktopVisualizerToggle"
+                        visible: root.page === "desktop"
+                        label: root.config.desktopVisualizerEnabled ? "Visualizador do desktop ligado" : "Visualizador do desktop desligado"
+                        selected: root.config.desktopVisualizerEnabled
+                        onTriggered: root.config.setValue("desktop.visualizerEnabled", !root.config.desktopVisualizerEnabled)
+                    }
+                    WallpaperAdjustments { visible: root.page === "desktop" }
+                    LiquidStylePicker { visible: root.config.widgetSurfaceMode === "bar" && root.config.barMaterial === "liquid" }
                     Text { text: "Elementos visíveis"; color: root.ink; font.pixelSize: 14; font.weight: Font.DemiBold }
+                    ActionButton {
+                        visible: root.config.widgetSurfaceMode === "bar" && root.config.barMaterial === "glass"
+                        label: root.config.widgetBlurEnabled ? "Blur dos widgets ligado" : "Blur dos widgets desligado"
+                        selected: root.config.widgetBlurEnabled
+                        onTriggered: root.config.setValue("lockPreview.sharedWidgets.blurEnabled", !root.config.widgetBlurEnabled)
+                    }
                     Repeater {
                         model: root.config.sharedWidgets
                         Rectangle {
@@ -585,6 +737,7 @@ Rectangle {
 
                 Column {
                     width: parent.width; spacing: 12; visible: root.page === "wallpapers"
+                    WallpaperAdjustments {}
                     ActionButton { label: "Escolher wallpaper"; primary: true; onTriggered: root.controller.chooseWallpaper() }
                     Rectangle {
                         width: pageColumn.width; height: 68; radius: 15
