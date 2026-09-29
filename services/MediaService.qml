@@ -18,6 +18,22 @@ Scope {
         || homeDir + "/.config"
     readonly property string historyPath: configHome
         + "/velora-shell/media-history.json"
+    readonly property string cacheHome: Quickshell.env("XDG_CACHE_HOME")
+    || homeDir + "/.cache"
+
+readonly property string spotifyQueuePath:
+    cacheHome + "/velora-shell/spotify-queue.json"
+
+property var spotifyQueue: []
+property var spotifyCurrent: null
+property string spotifyQueueRevision: ""
+
+readonly property bool spotifyQueueAvailable:
+    spotifyQueue.length > 0
+        && identity.toLowerCase().indexOf("spotify") >= 0
+
+readonly property int spotifyQueueCount:
+    spotifyQueue.length
     property var historyEntries: []
     readonly property var players: Mpris.players.values
     readonly property var player: choosePlayer(playersRevision, players.length)
@@ -153,6 +169,57 @@ Scope {
         onTriggered: root.refreshPosition()
     }
 
+    function loadSpotifyQueue(text) {
+    try {
+        const document = JSON.parse(text || "{}")
+
+        spotifyQueue = Array.isArray(document.next)
+            ? document.next.filter(entry =>
+                entry && typeof entry === "object")
+            : []
+
+        spotifyCurrent =
+            document.current
+            && typeof document.current === "object"
+                ? document.current
+                : null
+
+        spotifyQueueRevision =
+            String(document.revision || "")
+
+    } catch (error) {
+        console.warn(
+            "Ignoring invalid Spotify queue:",
+            String(error)
+        )
+
+        spotifyQueue = []
+        spotifyCurrent = null
+        spotifyQueueRevision = ""
+    }
+}
+
+FileView {
+    id: spotifyQueueFile
+
+    path: root.spotifyQueuePath
+    watchChanges: true
+    printErrors: false
+
+    onLoaded:
+        root.loadSpotifyQueue(text())
+
+    onFileChanged:
+        reload()
+
+    onLoadFailed: function(errorCode) {
+        if (errorCode === FileViewError.FileNotFound) {
+            root.spotifyQueue = []
+            root.spotifyCurrent = null
+            root.spotifyQueueRevision = ""
+        }
+    }
+}
     FileView {
         id: historyFile
         path: root.historyPath

@@ -23,6 +23,9 @@ Item {
     signal bluetoothHoverChanged(bool inside, real centerY)
     property bool notificationMenuOpen: false
     property bool wifiMenuOpen: false
+    property bool mediaMenuOpen: false
+    signal mediaMenuRequested(real centerY)
+    signal mediaHoverChanged(bool inside, real centerY)
     signal notificationMenuRequested(real centerY)
     signal notificationHoverChanged(bool inside, real centerY)
     signal wifiMenuRequested(real centerY)
@@ -1136,15 +1139,52 @@ Item {
                     borderColor: root.alpha(root.ink, 0.16)
                 }
                 VeloraRailMedia {
-                    width: Math.min(44, root.width - 4)
-                    availableHeight: Math.max(0, parent.parent.height - 8 - fanIndicator.implicitHeight - (fanIndicator.visible ? parent.spacing : 0))
-                    visible: availableHeight >= 100 && !!root.mediaService
-                    media: root.mediaService
-                    visualizer: root.audioVisualizer
-                    ink: root.ink
-                    surfaceColor: root.card
-                    accent: root.pink
-                    fontFamily: root.uiFont
+    id: railMedia
+
+    width: Math.min(
+        44,
+        root.width - 4
+    )
+
+    availableHeight: Math.max(
+        0,
+        parent.parent.height
+            - 8
+            - fanIndicator.implicitHeight
+            - (
+                fanIndicator.visible
+                    ? parent.spacing
+                    : 0
+            )
+    )
+
+    visible:
+        availableHeight >= 100
+        && !!root.mediaService
+
+    media: root.mediaService
+    visualizer: root.audioVisualizer
+
+    ink: root.ink
+    surfaceColor: root.card
+    accent: root.pink
+    fontFamily: root.uiFont
+
+    selected:
+        root.mediaMenuOpen
+
+                    onTriggerHoverChanged: inside => {
+                        root.mediaHoverChanged(
+                            inside,
+                            root.itemCenterY(railMedia)
+                        )
+                    }
+
+                    onActivated: {
+                        root.mediaMenuRequested(
+                            root.itemCenterY(railMedia)
+                        )
+                    }
                 }
             }
         }

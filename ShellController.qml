@@ -8703,6 +8703,7 @@ Scope {
                 Region { item: coffeePopover.maskItem }
                 Region { item: notesPopover.maskItem }
                 Region { item: bluetoothPopover.maskItem }
+                Region { item: mediaPopover.maskItem }
                 Region { item: bluetoothPopover.nameMask }
                 Region { item: notificationsPopover.maskItem }
                 Region { item: wifiPopover.maskItem }
@@ -10849,6 +10850,15 @@ Scope {
                 bluetoothMenuOpen: bluetoothPopover.opened
                 notificationMenuOpen: notificationsPopover.opened
                 wifiMenuOpen: wifiPopover.opened
+                mediaMenuOpen: mediaPopover.opened
+                onMediaHoverChanged: (inside, centerY) => {
+                    mediaPopover.anchorY = barRoot.y + centerY
+                    mediaPopover.triggerHovered = inside
+                }
+                onMediaMenuRequested: centerY => {
+                    mediaPopover.anchorY = barRoot.y + centerY
+                    mediaPopover.toggle()
+                }
                 onBluetoothMenuRequested: centerY => {
                     bluetoothPopover.anchorY = barRoot.y + centerY
                     bluetoothPopover.toggle()
@@ -10962,7 +10972,7 @@ Scope {
                 brightnessOpen: root.brightnessControlOpen
                 refreshSerial: root.railFeedbackSerial
                 batteryOpen: root.batteryControlOpen
-                extraPanel: wifiPopover.opened ? wifiPopover.outline : notificationsPopover.opened ? notificationsPopover.outline : bluetoothPopover.opened ? bluetoothPopover.outline : notesPopover.opened ? notesPopover.outline : coffeePopover.opened ? coffeePopover.outline : wifiPopover.mounted ? wifiPopover.outline : notificationsPopover.mounted ? notificationsPopover.outline : bluetoothPopover.mounted ? bluetoothPopover.outline : notesPopover.mounted ? notesPopover.outline : coffeePopover.outline
+                extraPanel: mediaPopover.opened ? mediaPopover.outline : wifiPopover.opened ? wifiPopover.outline : notificationsPopover.opened ? notificationsPopover.outline : bluetoothPopover.opened ? bluetoothPopover.outline : notesPopover.opened ? notesPopover.outline : coffeePopover.opened ? coffeePopover.outline : mediaPopover.mounted ? mediaPopover.outline : wifiPopover.mounted ? wifiPopover.outline : notificationsPopover.mounted ? notificationsPopover.outline : bluetoothPopover.mounted ? bluetoothPopover.outline : notesPopover.mounted ? notesPopover.outline : coffeePopover.outline
                 onPanelHoverChanged: hovered => {
                     root.railControlPanelHovered = hovered
                     if (hovered) railControlCloseTimer.stop()
@@ -10983,7 +10993,7 @@ Scope {
                 system: root.composition ? root.composition.topbarTools : null
                 rightSide: root.barOnRight
                 railWidth: root.sidebarVisualWidth
-                onOpening: { bluetoothPopover.close(); notesPopover.close(); notificationsPopover.close(); wifiPopover.close(); root.activeRailControl = ""; root.closeQuickPopup(); if (root.composition) root.composition.closeTopbarTool() }
+                onOpening: { bluetoothPopover.close(); notesPopover.close(); notificationsPopover.close(); wifiPopover.close(); mediaPopover.close(); root.activeRailControl = ""; root.closeQuickPopup(); if (root.composition) root.composition.closeTopbarTool() }
                 onShapeChanged: Qt.callLater(unifiedFrameCanvas.requestPaint)
             }
             VeloraRailNotes {
@@ -10995,7 +11005,7 @@ Scope {
                 system: root.composition ? root.composition.topbarTools : null
                 rightSide: root.barOnRight
                 railWidth: root.sidebarVisualWidth
-                onOpening: { bluetoothPopover.close(); coffeePopover.close(); notificationsPopover.close(); wifiPopover.close(); root.activeRailControl = ""; root.closeQuickPopup(); if (root.composition) root.composition.closeTopbarTool() }
+                onOpening: { bluetoothPopover.close(); coffeePopover.close(); notificationsPopover.close(); wifiPopover.close(); mediaPopover.close(); root.activeRailControl = ""; root.closeQuickPopup(); if (root.composition) root.composition.closeTopbarTool() }
                 onShapeChanged: Qt.callLater(unifiedFrameCanvas.requestPaint)
             }
             VeloraRailBluetooth {
@@ -11010,7 +11020,7 @@ Scope {
                 accent: barRoot.pink
                 uiFont: barRoot.uiFont
                 handoffSource: panel.activeRailSystemPopover
-                onOpening: { panel.activeRailSystemPopover = bluetoothPopover; coffeePopover.close(); notesPopover.close(); notificationsPopover.close(); wifiPopover.close(); root.activeRailControl = ""; root.closeQuickPopup(); if (root.composition) root.composition.closeTopbarTool() }
+                onOpening: { panel.activeRailSystemPopover = bluetoothPopover; coffeePopover.close(); notesPopover.close(); notificationsPopover.close(); wifiPopover.close(); mediaPopover.close(); root.activeRailControl = ""; root.closeQuickPopup(); if (root.composition) root.composition.closeTopbarTool() }
                 onShapeChanged: Qt.callLater(unifiedFrameCanvas.requestPaint)
             }
             VeloraRailNotifications {
@@ -11029,7 +11039,7 @@ Scope {
                 handoffSource: panel.activeRailSystemPopover
                 onDismissRequested: id => root.dismissNotificationHistory(id)
                 onClearRequested: root.clearTrackedNotificationHistory()
-                onOpening: { panel.activeRailSystemPopover = notificationsPopover; coffeePopover.close(); notesPopover.close(); bluetoothPopover.close(); wifiPopover.close(); root.activeRailControl = ""; root.closeQuickPopup() }
+                onOpening: { panel.activeRailSystemPopover = notificationsPopover; coffeePopover.close(); notesPopover.close(); bluetoothPopover.close(); wifiPopover.close(); mediaPopover.close(); root.activeRailControl = ""; root.closeQuickPopup() }
                 onShapeChanged: Qt.callLater(unifiedFrameCanvas.requestPaint)
             }
             VeloraRailWifi {
@@ -11045,21 +11055,47 @@ Scope {
                 ink: barRoot.ink
                 uiFont: barRoot.uiFont
                 handoffSource: panel.activeRailSystemPopover
-                onOpening: { panel.activeRailSystemPopover = wifiPopover; coffeePopover.close(); notesPopover.close(); bluetoothPopover.close(); notificationsPopover.close(); root.activeRailControl = ""; root.closeQuickPopup() }
+                onOpening: { panel.activeRailSystemPopover = wifiPopover; coffeePopover.close(); notesPopover.close(); bluetoothPopover.close(); notificationsPopover.close(); mediaPopover.close(); root.activeRailControl = ""; root.closeQuickPopup() }
                 onShapeChanged: Qt.callLater(unifiedFrameCanvas.requestPaint)
+            }
+            VeloraRailMediaPopover {
+                id: mediaPopover
+                anchors.fill: parent
+                z: 12
+                enabled: root.sideBarLayoutEnabled && !!root.composition && !!root.composition.mediaService
+                theme: root.composition ? root.composition.topbarTheme : null
+                media: root.composition ? root.composition.mediaService : null
+                rightSide: root.barOnRight
+                railWidth: root.sidebarVisualWidth
+                handoffSource: panel.activeRailSystemPopover
+                onOpening: {
+                    panel.activeRailSystemPopover = mediaPopover
+                    coffeePopover.close()
+                    notesPopover.close()
+                    bluetoothPopover.close()
+                    notificationsPopover.close()
+                    wifiPopover.close()
+                    root.activeRailControl = ""
+                    root.closeQuickPopup()
+                    if (root.composition)
+                        root.composition.closeTopbarTool()
+                }
+                onShapeChanged: {
+                    Qt.callLater(unifiedFrameCanvas.requestPaint)
+                }
             }
             MouseArea {
                 id: railToolOutsideInput
                 z: 9
                 width: panel.width
-                height: coffeePopover.mounted || notesPopover.mounted || bluetoothPopover.mounted || notificationsPopover.mounted || wifiPopover.mounted ? panel.height : 0
+                height: coffeePopover.mounted || notesPopover.mounted || bluetoothPopover.mounted || notificationsPopover.mounted || wifiPopover.mounted || mediaPopover.mounted ? panel.height : 0
                 acceptedButtons: Qt.AllButtons
-                onPressed: { coffeePopover.close(); notesPopover.close(); bluetoothPopover.close(); notificationsPopover.close(); wifiPopover.close() }
+                onPressed: { coffeePopover.close(); notesPopover.close(); bluetoothPopover.close(); notificationsPopover.close(); wifiPopover.close(); mediaPopover.close() }
             }
             Connections {
                 target: root
-                function onActiveRailControlChanged() { if (root.activeRailControl) { coffeePopover.close(); notesPopover.close(); bluetoothPopover.close(); notificationsPopover.close(); wifiPopover.close() } }
-                function onQuickPopupTypeChanged() { if (root.quickPopupType) { coffeePopover.close(); notesPopover.close(); bluetoothPopover.close(); notificationsPopover.close(); wifiPopover.close() } }
+                function onActiveRailControlChanged() { if (root.activeRailControl) { coffeePopover.close(); notesPopover.close(); bluetoothPopover.close(); notificationsPopover.close(); wifiPopover.close(); mediaPopover.close() } }
+                function onQuickPopupTypeChanged() { if (root.quickPopupType) { coffeePopover.close(); notesPopover.close(); bluetoothPopover.close(); notificationsPopover.close(); wifiPopover.close(); mediaPopover.close() } }
             }
 
             Item {
