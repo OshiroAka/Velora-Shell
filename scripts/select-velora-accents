@@ -1,0 +1,137 @@
+#!/usr/bin/env python3
+"""Choose a harmonious secondary accent using the wallpaper's visible area."""
+
+from __future__ import annotations
+
+import colorsys
+import json
+import math
+import pathlib
+import sys
+from typing import NoReturn
+
+from PIL import Image
+
+
+def fail(message: str) -> NoReturn:
+    print(message, file=sys.stderr)
+    raise SystemExit(2)
+
+
+def parse_hex(value: str) -> tuple[float, float, float]:
+    text = str(value or "").lstrip("#")
+    if len(text) != 6:
+        raise ValueError(f"invalid color: {value}")
+    return tuple(int(text[index:index + 2], 16) / 255 for index in (0, 2, 4))
+
+
+def hue(value: str) -> float:
+    return colorsys.rgb_to_hsv(*parse_hex(value))[0] * 360
+
+
+def hue_distance(first: float, second: float) -> float:
+    return abs((first - second + 180) % 360 - 180)
+
+
+def visible_samples(image_path: pathlib.Path) -> list[tuple[float, float]]:
+    with Image.open(image_path) as source:
+        try:
+            source.seek(0)
+        except EOFError:
+            pass
+        image = source.convert("RGB")
+        image.thumbnail((192, 192), Image.Resampling.LANCZOS)
+
+    width, height = image.size
+    samples: list[tuple[float, float]] = []
+    for y in range(height):
+        vertical = y / max(1, height - 1)
+        for x in range(width):
+            red, green, blue = (channel / 255 for channel in image.getpixel((x, y)))
+            sample_hue, saturation, value = colorsys.rgb_to_hsv(red, green, blue)
+            # Near-black and nearly achromatic pixels make good surfaces, but
+            # poor accents. Saturation is capped so a tiny neon detail cannot
+            # outweigh a large muted subject or background region.
+            if value < 0.24 or saturation < 0.07:
+                continue
+            horizontal = x / max(1, width - 1)
+            centre_distance = min(1.0, math.hypot(
+                (horizontal - 0.5) / 0.72,
+                (vertical - 0.5) / 0.92,
+            ))
+            area_weight = (0.72 + 0.28 * (1.0 - centre_distance))
+            area_weight *= 0.25 + min(saturation, 0.50)
+            area_weight *= 0.35 + value
+            samples.append((sample_hue * 360, area_weight))
+    return samples
+
+
+def support(candidate_hue: float, samples: list[tuple[float, float]]) -> float:
+    total = 0.0
+    for sample_hue, weight in samples:
+        proximity = max(0.0, 1.0 - hue_distance(candidate_hue, sample_hue) / 70.0)
+        total += weight * proximity * proximity
+    return total
+
+
+def main() -> int:
+    if len(sys.argv) != 3:
+        fail(f"usage: {sys.argv[0]} /path/to/image /path/to/pywal.json")
+
+    image_path = pathlib.Path(sys.argv[1])
+    palette_path = pathlib.Path(sys.argv[2])
+    if not image_path.is_file():
+        fail(f"image does not exist: {image_path}")
+    if not palette_path.is_file():
+        fail(f"palette does not exist: {palette_path}")
+
+    document = json.loads(palette_path.read_text())
+    colors = document.get("colors", {})
+    primary = colors.get("color12") or colors.get("color4") or "#b99cff"
+    soft = colors.get("color14") or colors.get("color13") or primary
+    samples = visible_samples(image_path)
+    # Rank actual wallpaper hues instead of always picking the bright blue
+    # ANSI slot. Both saturated and muted artwork should retain their hue.
+    def rank(value):
+        h, saturation, brightness = colorsys.rgb_to_hsv(*parse_hex(value))
+        visibility = max(0.0, 1.0 - abs(brightness - 0.76))
+        return support(h * 360, samples) * (0.18 + saturation) * visibility
+
+    usable = [colors[f"color{i}"] for i in (*range(1, 7), *range(9, 15))
+              if f"color{i}" in colors]
+    if usable and samples:
+        primary = max(usable, key=rank)
+    primary_hue = hue(primary)
+
+    candidates: list[tuple[float, float, str]] = []
+    for index in range(9, 15):
+        value = colors.get(f"color{index}")
+        if not value or value.lower() == primary.lower():
+            continue
+        candidate_hue = hue(value)
+        distance = hue_distance(primary_hue, candidate_hue)
+        # Editorial Glass uses two related accents, not complementary neon.
+        # Requiring a small separation keeps the split visible while the upper
+        # bound rejects unrelated low-area outliers such as the previous green.
+        if distance < 9.0 or distance > 75.0:
+            continue
+        candidate_support = support(candidate_hue, samples)
+        harmony = 1.0 - distance / 300.0
+        candidates.append((candidate_support * harmony, candidate_support, value))
+
+    if candidates:
+        secondary = max(candidates)[2]
+    else:
+        secondary = colors.get("color11") or colors.get("color13") or primary
+
+    print(json.dumps({
+        "primary": primary,
+        "secondary": secondary,
+        "soft": "#" + "".join(f"{round((c * 0.65 + 0.35) * 255):02x}"
+                              for c in parse_hex(primary)),
+    }, separators=(",", ":")))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

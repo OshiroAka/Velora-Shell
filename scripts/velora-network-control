@@ -1,0 +1,286 @@
+#!/usr/bin/env bash
+set -u
+
+cmd="${1:-status}"
+shift || true
+
+clean_field() {
+  printf '%s' "${1:-}" | tr '\n\r|' '   ' | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//'
+}
+
+fail() {
+  local action="${1:-unknown}"
+  shift || true
+  printf 'ERR|%s|%s\n' "$action" "$(clean_field "$*")"
+  exit 1
+}
+
+ok() {
+  local action="${1:-unknown}"
+  shift || true
+  printf 'OK|%s|%s\n' "$action" "$(clean_field "$*")"
+}
+
+require_nmcli() {
+  command -v nmcli >/dev/null 2>&1 || fail "$cmd" "nmcli not found"
+}
+
+active_wifi_device() {
+  nmcli -t -f DEVICE,TYPE,STATE dev status 2>/dev/null \
+    | awk -F: '$2 == "wifi" && $3 == "connected" { print $1; exit }'
+}
+
+first_wifi_device() {
+  nmcli -t -f DEVICE,TYPE dev status 2>/dev/null \
+    | awk -F: '$2 == "wifi" { print $1; exit }'
+}
+
+active_wifi_ssid() {
+  nmcli -t -f ACTIVE,SSID dev wifi list 2>/dev/null \
+    | awk -F: '$1 == "yes" { print $2; exit }'
+}
+
+saved_wifi_connections() {
+  local uuid type ssid
+  while IFS=: read -r uuid type; do
+    [ "$type" = "802-11-wireless" ] || continue
+    ssid="$(nmcli -g 802-11-wireless.ssid connection show uuid "$uuid" 2>/dev/null | head -n 1)"
+    [ -n "$ssid" ] && printf '%s|%s\n' "$uuid" "$ssid"
+  done < <(nmcli -t -f UUID,TYPE connection show 2>/dev/null)
+}
+
+saved_wifi_uuid_for_ssid() {
+  local wanted="${1:-}"
+  saved_wifi_connections | awk -F'|' -v wanted="$wanted" '$2 == wanted { print $1; exit }'
+}
+
+wifi_security_for_ssid() {
+  local wanted="${1:-}"
+  nmcli -t --escape no -f SSID,SECURITY dev wifi list 2>/dev/null \
+    | awk -F: -v wanted="$wanted" '$1 == wanted { print $2; exit }'
+}
+
+wifi_ip_for() {
+  local dev="${1:-}"
+  [ -n "$dev" ] || return 0
+  nmcli -g IP4.ADDRESS dev show "$dev" 2>/dev/null | head -n 1 | cut -d/ -f1
+}
+
+connectivity_state() {
+  nmcli networking connectivity 2>/dev/null || printf 'unknown\n'
+}
+
+emit_status() {
+  require_nmcli
+
+  local radio dev ssid ip connectivity state
+  radio="$(nmcli -t -f WIFI radio 2>/dev/null || printf 'disabled\n')"
+  dev="$(active_wifi_device)"
+  ssid="$(active_wifi_ssid)"
+  ip="$(wifi_ip_for "$dev")"
+  connectivity="$(connectivity_state)"
+
+  if [ "$radio" != "enabled" ]; then
+    state="disabled"
+  elif [ -n "$dev" ] && [ -n "$ssid" ]; then
+    case "$connectivity" in
+      full) state="connected" ;;
+      limited|portal|none) state="no-internet" ;;
+      *) state="connected" ;;
+    esac
+  else
+    state="disconnected"
+  fi
+
+  printf 'RADIO|%s\n' "$(clean_field "$radio")"
+  printf 'STATUS|%s|%s|%s|%s|%s\n' "$(clean_field "$state")" "$(clean_field "$ssid")" "$(clean_field "$dev")" "$(clean_field "$ip")" "$(clean_field "$connectivity")"
+  while IFS='|' read -r uuid saved_ssid; do
+    [ -n "${uuid:-}" ] && [ -n "${saved_ssid:-}" ] \
+      && printf 'SAVED|%s|%s\n' "$(clean_field "$saved_ssid")" "$(clean_field "$uuid")"
+  done < <(saved_wifi_connections)
+  nmcli -t --escape no -f ACTIVE,SSID,SIGNAL,SECURITY dev wifi list 2>/dev/null \
+    | awk -F: '
+        NF >= 3 && $2 != "" {
+          key = $2
+          score = ($1 == "yes" ? 1000 : 0) + ($3 + 0)
+          if (!(key in best) || score > best[key]) {
+            best[key] = score
+            active[key] = $1
+            signal[key] = $3
+            security[key] = $4
+            if (!(key in seen)) {
+              order[++count] = key
+              seen[key] = 1
+            }
+          }
+        }
+        END {
+          for (i = 1; i <= count; ++i) {
+            key = order[i]
+            if (active[key] == "yes")
+              print "NETWORK|" active[key] "|" key "|" signal[key] "|" security[key]
+          }
+          for (i = 1; i <= count; ++i) {
+            key = order[i]
+            if (active[key] != "yes")
+              print "NETWORK|" active[key] "|" key "|" signal[key] "|" security[key]
+          }
+        }'
+}
+
+set_wifi_radio() {
+  require_nmcli
+  local value="${1:-}"
+  case "$value" in
+    on|off) ;;
+    *) fail "radio" "expected on or off" ;;
+  esac
+  nmcli radio wifi "$value" >/dev/null 2>&1 || fail "radio" "failed to switch Wi-Fi $value"
+  ok "radio" "$value"
+}
+
+connect_wifi() {
+  require_nmcli
+  local ssid="${1:-}" uuid
+  [ -n "$ssid" ] || fail "connect" "missing ssid"
+
+  nmcli radio wifi on >/dev/null 2>&1 || true
+  nmcli dev wifi rescan >/dev/null 2>&1 || true
+
+  uuid="$(saved_wifi_uuid_for_ssid "$ssid")"
+  if [ -n "$uuid" ]; then
+    nmcli --wait 30 connection up uuid "$uuid" >/dev/null 2>&1 \
+      || nmcli --wait 30 dev wifi connect "$ssid" >/dev/null 2>&1 \
+      || fail "connect" "failed to connect to $ssid"
+  else
+    nmcli --wait 30 dev wifi connect "$ssid" >/dev/null 2>&1 \
+      || fail "connect" "password or setup required for $ssid"
+  fi
+
+  local active
+  active="$(active_wifi_ssid)"
+  [ "$active" = "$ssid" ] || fail "connect" "connection command finished but $ssid is not active"
+  ok "connect" "$ssid"
+}
+
+connect_wifi_with_secret() {
+  require_nmcli
+  local ssid="${1:-}" hidden="${2:-no}" password="" active security
+  [ -n "$ssid" ] || fail "connect-secret" "missing ssid"
+  case "$hidden" in
+    yes|no) ;;
+    *) fail "connect-secret" "hidden must be yes or no" ;;
+  esac
+
+  IFS= read -r password || true
+  [ -n "$password" ] || fail "connect-secret" "password is required"
+
+  nmcli radio wifi on >/dev/null 2>&1 || true
+  if [ "$hidden" = "no" ]; then
+    nmcli dev wifi rescan >/dev/null 2>&1 || true
+    security="$(wifi_security_for_ssid "$ssid")"
+  else
+    security="secured"
+  fi
+
+  if [ -z "$security" ] || [ "$security" = "--" ]; then
+    connect_wifi "$ssid"
+    return
+  fi
+
+  if ! printf '%s\n' "$password" \
+      | nmcli --ask --wait 30 dev wifi connect "$ssid" hidden "$hidden" >/dev/null 2>&1; then
+    fail "connect-secret" "authentication failed"
+  fi
+
+  password=""
+  active="$(active_wifi_ssid)"
+  [ "$active" = "$ssid" ] || fail "connect-secret" "connection finished but network is not active"
+  ok "connect-secret" "$ssid"
+}
+
+forget_wifi() {
+  require_nmcli
+  local uuid="${1:-}" type
+  [ -n "$uuid" ] || fail "forget" "missing connection uuid"
+  type="$(nmcli -g connection.type connection show uuid "$uuid" 2>/dev/null || true)"
+  [ "$type" = "802-11-wireless" ] || fail "forget" "connection is not Wi-Fi"
+  nmcli connection delete uuid "$uuid" >/dev/null 2>&1 || fail "forget" "failed to delete saved network"
+  ok "forget" "$uuid"
+}
+
+disconnect_wifi() {
+  require_nmcli
+  local dev
+  dev="$(active_wifi_device)"
+  [ -n "$dev" ] || {
+    ok "disconnect" "already disconnected"
+    return 0
+  }
+  nmcli dev disconnect "$dev" >/dev/null 2>&1 || fail "disconnect" "failed to disconnect $dev"
+  ok "disconnect" "$dev"
+}
+
+reconnect_wifi() {
+  require_nmcli
+  local ssid="${1:-}"
+  if [ -z "$ssid" ]; then
+    ssid="$(active_wifi_ssid)"
+  fi
+  [ -n "$ssid" ] || fail "reconnect" "no active ssid"
+  disconnect_wifi >/dev/null 2>&1 || true
+  connect_wifi "$ssid"
+}
+
+monitor_traffic() {
+  require_nmcli
+  local dev previous_dev="" rx_file tx_file previous_rx=0 previous_tx=0 current_rx current_tx delta_rx delta_tx
+  while :; do
+    dev="$(active_wifi_device)"
+    [ -n "$dev" ] || dev="$(first_wifi_device)"
+    if [ -z "$dev" ]; then
+      printf 'TRAFFIC|0|0|\n'
+      previous_dev=""
+      sleep 1
+      continue
+    fi
+
+    rx_file="/sys/class/net/$dev/statistics/rx_bytes"
+    tx_file="/sys/class/net/$dev/statistics/tx_bytes"
+    if [ ! -r "$rx_file" ] || [ ! -r "$tx_file" ]; then
+      printf 'TRAFFIC|0|0|%s\n' "$(clean_field "$dev")"
+      previous_dev=""
+      sleep 1
+      continue
+    fi
+
+    current_rx="$(<"$rx_file")"
+    current_tx="$(<"$tx_file")"
+    if [ "$dev" != "$previous_dev" ]; then
+      delta_rx=0
+      delta_tx=0
+    else
+      delta_rx=$((current_rx - previous_rx))
+      delta_tx=$((current_tx - previous_tx))
+      (( delta_rx < 0 )) && delta_rx=0
+      (( delta_tx < 0 )) && delta_tx=0
+    fi
+    printf 'TRAFFIC|%s|%s|%s\n' "$delta_rx" "$delta_tx" "$(clean_field "$dev")"
+    previous_dev="$dev"
+    previous_rx="$current_rx"
+    previous_tx="$current_tx"
+    sleep 1
+  done
+}
+
+case "$cmd" in
+  status) emit_status ;;
+  monitor) monitor_traffic ;;
+  radio) set_wifi_radio "${1:-}" ;;
+  connect) connect_wifi "${1:-}" ;;
+  connect-secret) connect_wifi_with_secret "${1:-}" "${2:-no}" ;;
+  forget) forget_wifi "${1:-}" ;;
+  disconnect) disconnect_wifi ;;
+  reconnect) reconnect_wifi "${1:-}" ;;
+  *) fail "$cmd" "unknown command" ;;
+esac

@@ -1,0 +1,239 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+wallpaper_path=${1:-}
+[ -n "$wallpaper_path" ] || { printf 'wallpaper path is required\n' >&2; exit 2; }
+[ -f "$wallpaper_path" ] || { printf 'wallpaper not found: %s\n' "$wallpaper_path" >&2; exit 2; }
+
+runtime_dir=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+state_dir=${XDG_CACHE_HOME:-$HOME/.cache}/velora-shell
+state_file=$state_dir/current_wallpaper
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+controller=$script_dir/velora-mpvpaper-control
+transition_duration=0.26
+color_options="video-output-levels=full target-colorspace-hint=no target-prim=bt.709 target-trc=srgb saturation=0 brightness=0 contrast=0 gamma=0"
+
+case "${wallpaper_path,,}" in
+  *.mp4|*.webm|*.mkv|*.mov) wallpaper_kind=live ;;
+  *) wallpaper_kind=static ;;
+esac
+
+mkdir -p "$state_dir" "$runtime_dir/velora-shell"
+
+write_state() {
+  local preview=${2:-$1}
+  local temporary=$state_file.$$
+  printf '%s|%s|%s\n' "$wallpaper_kind" "$1" "$preview" > "$temporary"
+  mv -f "$temporary" "$state_file"
+}
+
+unit_safe_name() {
+  printf '%s' "$1" | tr -c 'A-Za-z0-9_' '-'
+}
+
+wallpaper_socket() {
+  printf '%s/velora-shell/mpvpaper-%s.sock\n' \
+    "$runtime_dir" "$(unit_safe_name "$1")"
+}
+
+wallpaper_fingerprint() {
+  local file=$1
+  local size middle last
+  size=$(stat -c '%s' "$file" 2>/dev/null || printf '0')
+  if [ "$size" -le 262144 ]; then
+    sha256sum "$file" | awk '{print $1}'
+    return
+  fi
+  middle=$((size / 131072))
+  last=$((size / 65536 - 1))
+  {
+    printf '%s|' "$size"
+    dd if="$file" bs=65536 count=1 status=none
+    dd if="$file" bs=65536 skip="$middle" count=1 status=none
+    dd if="$file" bs=65536 skip="$last" count=1 status=none
+  } | sha256sum | awk '{print $1}'
+}
+
+equivalent_to_current() {
+  local current_kind current_path current_preview
+  [ -s "$state_file" ] || return 1
+  IFS='|' read -r current_kind current_path current_preview < "$state_file" || return 1
+  [ "$current_kind" = "$wallpaper_kind" ] || return 1
+  [ -f "$current_path" ] || return 1
+  [ "$(wallpaper_fingerprint "$current_path")" \
+      = "$(wallpaper_fingerprint "$wallpaper_path")" ]
+}
+
+monitors() {
+  local discovered
+  discovered=$(hyprctl monitors -j 2>/dev/null \
+    | jq -r '.[] | select(.name != null and .name != "") | .name' \
+    2>/dev/null || true)
+  if [ -n "$discovered" ]; then
+    printf '%s\n' "$discovered"
+  else
+    printf 'eDP-1\n'
+  fi
+}
+
+start_awww() {
+  local attempt
+  if pgrep -x awww-daemon >/dev/null 2>&1; then
+    return 0
+  fi
+  if command -v systemd-run >/dev/null 2>&1; then
+    systemctl --user reset-failed velora-shell-awww.service >/dev/null 2>&1 || true
+    systemd-run --user --collect --quiet --unit=velora-shell-awww \
+      --setenv="XDG_RUNTIME_DIR=$runtime_dir" \
+      --setenv="WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-wayland-1}" \
+      "$(command -v awww-daemon)" -q >/dev/null 2>&1 || true
+  else
+    nohup awww-daemon -q >/tmp/velora-shell-awww.log 2>&1 9>&- &
+  fi
+  for attempt in 1 2 3 4 5 6 7 8; do
+    pgrep -x awww-daemon >/dev/null 2>&1 && return 0
+    sleep 0.04
+  done
+  return 1
+}
+
+stop_static_backend() {
+  if pgrep -x awww-daemon >/dev/null 2>&1; then
+    awww kill >/dev/null 2>&1 || true
+  fi
+  if pgrep -x swww-daemon >/dev/null 2>&1; then
+    swww kill >/dev/null 2>&1 || true
+  fi
+}
+
+stop_live_backend() {
+  local monitor unit socket_path
+  while IFS= read -r monitor; do
+    unit=velora-mpvpaper-$(unit_safe_name "$monitor")
+    socket_path=$(wallpaper_socket "$monitor")
+    systemctl --user stop --no-block "$unit.service" >/dev/null 2>&1 || true
+    rm -f "$socket_path"
+  done < <(monitors)
+}
+
+apply_static() {
+  if command -v awww >/dev/null 2>&1 && command -v awww-daemon >/dev/null 2>&1; then
+    start_awww
+    awww img "$wallpaper_path" --transition-type fade \
+      --transition-duration "$transition_duration" --transition-fps 60
+    # awww owns the prepared frame now. Retire only our persistent live units;
+    # the old wallpaper remains visible until the replacement is committed.
+    sleep 0.04
+    stop_live_backend
+    write_state "$wallpaper_path"
+    return 0
+  fi
+
+  if command -v swww >/dev/null 2>&1; then
+    if ! pgrep -x swww-daemon >/dev/null 2>&1; then
+      nohup swww-daemon >/tmp/velora-shell-swww.log 2>&1 9>&- &
+      sleep 0.12
+    fi
+    swww img "$wallpaper_path" --transition-type fade \
+      --transition-duration "$transition_duration"
+    sleep 0.04
+    stop_live_backend
+    write_state "$wallpaper_path"
+    return 0
+  fi
+
+  printf 'no static wallpaper backend was found\n' >&2
+  return 3
+}
+
+start_live_unit() {
+  local monitor=$1
+  local unit socket_path options
+  unit=velora-mpvpaper-$(unit_safe_name "$monitor")
+  socket_path=$(wallpaper_socket "$monitor")
+  options="no-audio loop-file=inf image-display-duration=inf panscan=1.0 video-unscaled=no hwdec=auto-safe scale=bilinear cscale=bilinear dscale=bilinear interpolation=no deband=no $color_options input-ipc-server=$socket_path"
+
+  systemctl --user stop "$unit.service" >/dev/null 2>&1 || true
+  systemctl --user reset-failed "$unit.service" >/dev/null 2>&1 || true
+  rm -f "$socket_path"
+  systemd-run --user --collect --quiet --unit="$unit" \
+    --setenv="XDG_RUNTIME_DIR=$runtime_dir" \
+    --setenv="WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-wayland-1}" \
+    --setenv="DBUS_SESSION_BUS_ADDRESS=${DBUS_SESSION_BUS_ADDRESS:-unix:path=$runtime_dir/bus}" \
+    --property=StandardOutput=null --property=StandardError=null \
+    "$(command -v mpvpaper)" -o "$options" "$monitor" "$wallpaper_path" \
+    >/dev/null 2>&1
+}
+
+apply_live() {
+  local monitor socket_path all_ready
+  local -a monitor_list=()
+  local -a sockets=()
+
+  command -v mpvpaper >/dev/null 2>&1 || {
+    printf 'mpvpaper is required for live wallpapers\n' >&2
+    return 3
+  }
+  command -v systemd-run >/dev/null 2>&1 || {
+    printf 'systemd-run is required for persistent live wallpapers\n' >&2
+    return 3
+  }
+
+  while IFS= read -r monitor; do
+    monitor_list+=("$monitor")
+    socket_path=$(wallpaper_socket "$monitor")
+    sockets+=("$socket_path")
+  done < <(monitors)
+
+  # The normal path never creates a second decoder. libmpv keeps rendering the
+  # current frame while loadfile prepares the replacement in the same process.
+  if [ -x "$controller" ] && [ "${#sockets[@]}" -gt 0 ]; then
+    all_ready=1
+    for socket_path in "${sockets[@]}"; do
+      [ -S "$socket_path" ] || all_ready=0
+    done
+    if [ "$all_ready" -eq 1 ] \
+        && python3 "$controller" --load "$wallpaper_path" \
+             --timeout 1.60 "${sockets[@]}" >/dev/null 2>&1; then
+      stop_static_backend
+      write_state "$wallpaper_path" "$wallpaper_path"
+      return 0
+    fi
+  fi
+
+  # Cold start: leave the current static backend alive until every monitor has
+  # decoded a video frame, mirroring Caelestia's ready-before-commit handoff.
+  for monitor in "${monitor_list[@]}"; do
+    start_live_unit "$monitor"
+  done
+  if [ -x "$controller" ]; then
+    python3 "$controller" --wait-ready --timeout 2.20 \
+      "${sockets[@]}" >/dev/null 2>&1
+  else
+    sleep 0.35
+  fi
+  stop_static_backend
+  write_state "$wallpaper_path" "$wallpaper_path"
+}
+
+if equivalent_to_current; then
+  # Composition profiles copy their assets into isolated directories. Two
+  # profiles can therefore point at byte-identical 4K videos under different
+  # paths; do not make libmpv decode the same 118 MiB stream again.
+  if [ "$wallpaper_kind" = live ] && [ -x "$controller" ]; then
+    live_sockets=()
+    while IFS= read -r monitor; do
+      socket_path=$(wallpaper_socket "$monitor")
+      [ -S "$socket_path" ] && live_sockets+=("$socket_path")
+    done < <(monitors)
+    if [ "${#live_sockets[@]}" -gt 0 ]; then
+      python3 "$controller" --normalize-color --timeout 1.20 \
+        "${live_sockets[@]}" >/dev/null 2>&1 || true
+    fi
+  fi
+  write_state "$wallpaper_path" "$wallpaper_path"
+elif [ "$wallpaper_kind" = live ]; then
+  apply_live
+else
+  apply_static
+fi

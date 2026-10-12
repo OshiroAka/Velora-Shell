@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+project_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+python3 "$project_dir/scripts/native-blur" load "${1:?Pass the compiled compositor plugin path}"
+qs ipc -p "$project_dir" call composition opticsResync >/dev/null 2>&1 || true

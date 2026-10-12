@@ -1,0 +1,102 @@
+#!/usr/bin/env python3
+"""Read or persist Hyprland's global background blur switch."""
+
+import json
+import os
+import shutil
+import stat
+import subprocess
+import sys
+import tempfile
+from datetime import datetime
+from pathlib import Path
+
+
+def effective_blur() -> bool:
+    result = subprocess.run(
+        ["hyprctl", "-j", "getoption", "decoration:blur:enabled"],
+        check=True, capture_output=True, text=True, timeout=5,
+    )
+    data = json.loads(result.stdout)
+    return bool(data.get("int", data.get("set", False)))
+
+
+def atomic_write(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent,
+                                     delete=False) as temporary:
+        temporary.write(content)
+        temporary.flush()
+        os.fsync(temporary.fileno())
+        name = Path(temporary.name)
+    if path.exists():
+        name.chmod(stat.S_IMODE(path.stat().st_mode))
+    os.replace(name, path)
+
+
+def set_blur(enabled: bool) -> None:
+    previous = effective_blur()
+    config = Path(os.environ.get("HYPRLAND_CONFIG") or
+                  Path.home() / ".config/hypr/hyprland.conf").expanduser()
+    if not config.is_file():
+        raise RuntimeError("Arquivo principal do Hyprland não encontrado.")
+    config = config.resolve()
+    override = config.parent / "velora-blur.conf"
+    source_line = f"source = {override}"
+    text = config.read_text(encoding="utf-8")
+    override_existed = override.exists()
+    previous_override = override.read_text(encoding="utf-8") if override_existed else ""
+    source_added = False
+
+    try:
+        atomic_write(override, "# Global blur controlled by Velora Settings\n"
+                     "decoration {\n    blur {\n"
+                     f"        enabled = {'true' if enabled else 'false'}\n"
+                     "    }\n}\n")
+        if source_line not in text.splitlines():
+            stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            shutil.copy2(config, config.with_name(config.name + f".bak-velora-blur-{stamp}"))
+            atomic_write(config, text.rstrip("\n") + "\n\n"
+                         "# Velora global blur setting\n" + source_line + "\n")
+            source_added = True
+        subprocess.run(["hyprctl", "keyword", "decoration:blur:enabled",
+                        "1" if enabled else "0"], check=True,
+                       capture_output=True, text=True, timeout=5)
+        if effective_blur() != enabled:
+            raise RuntimeError("Hyprland não confirmou a alteração do desfoque.")
+    except Exception:
+        if source_added:
+            atomic_write(config, text)
+        if override_existed:
+            atomic_write(override, previous_override)
+        else:
+            override.unlink(missing_ok=True)
+        try:
+            subprocess.run(["hyprctl", "keyword", "decoration:blur:enabled",
+                            "1" if previous else "0"], capture_output=True,
+                           text=True, timeout=5)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        raise
+
+
+def main() -> int:
+    try:
+        if sys.argv[1:] == ["get"]:
+            print("on" if effective_blur() else "off")
+        elif len(sys.argv) == 3 and sys.argv[1] == "set" \
+                and sys.argv[2] in {"on", "off"}:
+            set_blur(sys.argv[2] == "on")
+            print("on" if effective_blur() else "off")
+        else:
+            print("usage: hyprland-blur get|set on|off", file=sys.stderr)
+            return 2
+    except (OSError, ValueError, subprocess.CalledProcessError,
+            subprocess.TimeoutExpired, RuntimeError) as error:
+        print(f"Não foi possível alterar o blur do Hyprland: {error}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

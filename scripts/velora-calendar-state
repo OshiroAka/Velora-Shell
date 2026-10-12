@@ -1,0 +1,185 @@
+#!/usr/bin/env python3
+"""Read local iCalendar files without a daemon or external dependency."""
+
+from __future__ import annotations
+
+import argparse
+import calendar
+import datetime as dt
+import json
+import os
+from pathlib import Path
+from typing import Iterable
+
+
+def unescape(value: str) -> str:
+    return (value.replace("\\n", "\n").replace("\\N", "\n")
+            .replace("\\,", ",").replace("\\;", ";").replace("\\\\", "\\"))
+
+
+def parse_datetime(value: str) -> tuple[dt.datetime, bool] | None:
+    value = value.strip()
+    formats = [
+        ("%Y%m%d", True),
+        ("%Y%m%dT%H%M%S", False),
+        ("%Y%m%dT%H%M", False),
+        ("%Y%m%dT%H%M%SZ", False),
+    ]
+    for pattern, all_day in formats:
+        try:
+            parsed = dt.datetime.strptime(value, pattern)
+            if value.endswith("Z"):
+                parsed = parsed.replace(tzinfo=dt.timezone.utc).astimezone().replace(tzinfo=None)
+            return parsed, all_day
+        except ValueError:
+            pass
+    return None
+
+
+def iso(value: dt.datetime, all_day: bool) -> str:
+    return value.date().isoformat() if all_day else value.isoformat(timespec="minutes")
+
+
+def add_months(value: dt.datetime, amount: int) -> dt.datetime:
+    month = value.month - 1 + amount
+    year = value.year + month // 12
+    month = month % 12 + 1
+    day = min(value.day, calendar.monthrange(year, month)[1])
+    return value.replace(year=year, month=month, day=day)
+
+
+def recurrence_dates(start: dt.datetime, rule: str,
+                     range_start: dt.datetime, range_end: dt.datetime) -> Iterable[dt.datetime]:
+    fields = {}
+    for part in rule.split(";"):
+        if "=" in part:
+            key, value = part.split("=", 1)
+            fields[key.upper()] = value
+    frequency = fields.get("FREQ", "").upper()
+    interval = max(1, int(fields.get("INTERVAL", "1") or 1))
+    count = min(2048, int(fields.get("COUNT", "2048") or 2048))
+    until_value = parse_datetime(fields.get("UNTIL", ""))
+    until = until_value[0] if until_value else range_end
+    current = start
+    emitted = 0
+    while current <= range_end and current <= until and emitted < count:
+        if current >= range_start:
+            yield current
+        emitted += 1
+        if frequency == "DAILY":
+            current += dt.timedelta(days=interval)
+        elif frequency == "WEEKLY":
+            current += dt.timedelta(weeks=interval)
+        elif frequency == "MONTHLY":
+            current = add_months(current, interval)
+        elif frequency == "YEARLY":
+            current = add_months(current, interval * 12)
+        else:
+            break
+
+
+def discover() -> list[Path]:
+    home = Path.home()
+    roots = [
+        Path(os.environ.get("XDG_DATA_HOME", home / ".local/share")),
+        Path(os.environ.get("XDG_CONFIG_HOME", home / ".config")),
+        home / "Documents",
+    ]
+    result: list[Path] = []
+    for root in roots:
+        if not root.is_dir():
+            continue
+        for current, dirs, files in os.walk(root):
+            relative_depth = len(Path(current).relative_to(root).parts)
+            if relative_depth > 5:
+                dirs[:] = []
+                continue
+            dirs[:] = [name for name in dirs if not name.startswith(".")
+                       or name in {"evolution", "local"}]
+            for name in files:
+                if name.lower().endswith(".ics"):
+                    path = Path(current) / name
+                    try:
+                        if path.stat().st_size <= 4 * 1024 * 1024:
+                            result.append(path)
+                    except OSError:
+                        pass
+                    if len(result) >= 128:
+                        return result
+    return result
+
+
+def parse_file(path: Path, range_start: dt.datetime,
+               range_end: dt.datetime) -> list[dict]:
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    lines: list[str] = []
+    for raw in text.splitlines():
+        if raw.startswith((" ", "\t")) and lines:
+            lines[-1] += raw[1:]
+        else:
+            lines.append(raw.rstrip("\r"))
+    events: list[dict] = []
+    current: dict[str, str] | None = None
+    for line in lines:
+        if line == "BEGIN:VEVENT":
+            current = {}
+            continue
+        if line == "END:VEVENT":
+            if current:
+                start_data = parse_datetime(current.get("DTSTART", ""))
+                if start_data:
+                    start, all_day = start_data
+                    end_data = parse_datetime(current.get("DTEND", ""))
+                    end = end_data[0] if end_data else start + (
+                        dt.timedelta(days=1) if all_day else dt.timedelta(hours=1))
+                    duration = end - start
+                    occurrences = recurrence_dates(start, current.get("RRULE", ""),
+                        range_start, range_end) if current.get("RRULE") else [start]
+                    for occurrence in occurrences:
+                        if occurrence <= range_end and occurrence + duration >= range_start:
+                            uid = current.get("UID", "") or f"{path}:{len(events)}"
+                            events.append({
+                                "id": f"ics:{uid}:{occurrence.isoformat()}",
+                                "title": unescape(current.get("SUMMARY", "Evento")),
+                                "start": iso(occurrence, all_day),
+                                "end": iso(occurrence + duration, all_day),
+                                "allDay": all_day,
+                                "notes": unescape(current.get("DESCRIPTION", "")),
+                                "location": unescape(current.get("LOCATION", "")),
+                                "source": str(path),
+                                "readOnly": True,
+                            })
+            current = None
+            continue
+        if current is None or ":" not in line:
+            continue
+        raw_key, value = line.split(":", 1)
+        key = raw_key.split(";", 1)[0].upper()
+        if key in {"UID", "SUMMARY", "DTSTART", "DTEND", "DESCRIPTION", "LOCATION", "RRULE"}:
+            current[key] = value
+    return events
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--days", type=int, default=180)
+    args = parser.parse_args()
+    today = dt.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    span = max(31, min(730, args.days))
+    range_start = today - dt.timedelta(days=span)
+    range_end = today + dt.timedelta(days=span)
+    sources = discover()
+    events: list[dict] = []
+    for path in sources:
+        events.extend(parse_file(path, range_start, range_end))
+    events.sort(key=lambda item: (item["start"], item["title"]))
+    print(json.dumps({"events": events[:4096], "sources": [str(path) for path in sources],
+                      "error": ""}, ensure_ascii=False, separators=(",", ":")))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,692 @@
+#!/usr/bin/env python3
+"""Spatial, multi-terminal Spotify lyrics for Velora + Infinite Desktop.
+
+Run this command in one or more floating Kitty windows in the same workspace.
+A small local daemon owns the Spotify/LRCLIB polling; clients only render the
+line addressed to their terminal. Infinite Desktop follows the active lyric
+only when at least three terminals participate. Each terminal renders its lyric
+with the active CAVA gradient generated from Velora pywal; Kitty remains
+responsible for the window's transparency and background.
+"""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import concurrent.futures
+import fcntl
+import json
+import os
+import select
+import shutil
+import socket
+import struct
+import subprocess
+import sys
+import termios
+import textwrap
+import time
+from pathlib import Path
+from typing import Any
+
+
+RUNTIME_DIR = Path(os.environ.get("XDG_RUNTIME_DIR", f"/tmp/velyrics-{os.getuid()}"))
+SOCKET_PATH = RUNTIME_DIR / "velyrics.sock"
+LOCK_PATH = RUNTIME_DIR / "velyrics.lock"
+DISABLED_PATH = RUNTIME_DIR / "velyrics.disabled"
+POLL_INTERVAL = 0.10
+LYRICS_POLL_INTERVAL = 0.12
+HYPRLAND_POLL_INTERVAL = 0.30
+CLIENT_TIMEOUT = 4.0
+DAEMON_START_TIMEOUT = 1.5
+PIXELON_FONT = Path("/usr/share/fonts/pixelon.regular.ttf")
+PYWAL_COLORS = Path.home() / ".cache/wal/colors.json"
+CAVA_THEME = Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config"))) / "cava/themes/velora-pywal16"
+VELYRICS_SETTINGS = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "velora-shell/velyrics.json"
+WORD_IMAGE = RUNTIME_DIR / f"velyrics-word-{os.getpid()}.png"
+KITTY_IMAGE_ID = 700000 + (os.getpid() % 900000)
+_settings_cache: dict[str, Any] = {"mtime": -1, "mode": "line", "wordsPerTerminal": 4, "fontScale": 1.0, "fontFamily": "Pixelon", "syncOffsetMs": 500.0}
+
+
+def run(args: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(args, text=True, capture_output=True, check=False)
+
+
+def hyprctl_json(command: str) -> Any:
+    result = run(["hyprctl", "-j", command])
+    if result.returncode:
+        return None
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return None
+
+
+def active_terminal() -> dict[str, Any] | None:
+    window = hyprctl_json("activewindow")
+    if not isinstance(window, dict) or not window.get("address"):
+        return None
+    workspace = window.get("workspace") or {}
+    return {
+        "address": str(window["address"]),
+        "workspace": workspace.get("id"),
+        "pid": os.getpid(),
+    }
+
+
+def canvas_enabled() -> bool:
+    uid = os.getuid()
+    runtime = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp"))
+    return (runtime / f"infinite-desktop-{uid}.enabled").exists() or (Path("/tmp") / f"infinite-desktop-{uid}.enabled").exists()
+
+
+def is_disabled() -> bool:
+    return DISABLED_PATH.exists()
+
+
+def set_disabled(value: bool) -> None:
+    RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+    if value:
+        DISABLED_PATH.touch(exist_ok=True)
+    else:
+        DISABLED_PATH.unlink(missing_ok=True)
+
+
+def toggle() -> int:
+    set_disabled(not is_disabled())
+    print("velyrics: sincronização desativada" if is_disabled() else "velyrics: sincronização ativada")
+    return 0
+
+
+def request(payload: dict[str, Any]) -> dict[str, Any] | None:
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+            client.settimeout(0.80)
+            client.connect(str(SOCKET_PATH))
+            client.sendall((json.dumps(payload, separators=(",", ":")) + "\n").encode())
+            raw = client.recv(16384)
+    except OSError:
+        return None
+    try:
+        return json.loads(raw.decode("utf-8", "replace"))
+    except json.JSONDecodeError:
+        return None
+
+
+def start_daemon() -> bool:
+    RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+    if request({"op": "ping"}) is not None:
+        return True
+    subprocess.Popen(
+        [sys.executable, str(Path(__file__).resolve()), "--daemon"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    deadline = time.monotonic() + DAEMON_START_TIMEOUT
+    while time.monotonic() < deadline:
+        if request({"op": "ping"}) is not None:
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def terminal_geometry() -> tuple[int, int, int, int]:
+    columns, rows = shutil.get_terminal_size((80, 24))
+    pixel_width = columns * 10
+    pixel_height = rows * 22
+    try:
+        packed = fcntl.ioctl(sys.stdout.fileno(), termios.TIOCGWINSZ, struct.pack("HHHH", 0, 0, 0, 0))
+        ioctl_rows, ioctl_columns, ioctl_width, ioctl_height = struct.unpack("HHHH", packed)
+        rows = ioctl_rows or rows
+        columns = ioctl_columns or columns
+        pixel_width = ioctl_width or pixel_width
+        pixel_height = ioctl_height or pixel_height
+    except (OSError, ValueError):
+        pass
+    return columns, rows, pixel_width, pixel_height
+
+
+def valid_hex(value: Any, fallback: str = "") -> str:
+    candidate = str(value or "").strip()
+    if len(candidate) == 7 and candidate.startswith("#"):
+        try:
+            int(candidate[1:], 16)
+            return candidate.lower()
+        except ValueError:
+            pass
+    return fallback
+
+
+def pywal_lyrics_gradient() -> list[str]:
+    fallback = ["#c98668", "#42a0bd", "#d8707c", "#6292bd"]
+    theme_path = Path(__file__).resolve().parents[1] / "themes" / "pywal16.json"
+    try:
+        theme = json.loads(theme_path.read_text(encoding="utf-8"))
+        base = [valid_hex(theme.get(key)) for key in ("lyricsColor", "accentPrimary", "accentSecondary", "accentTertiary", "textPrimary")]
+        base = [color for color in base if color]
+        if len(base) >= 2:
+            return base
+    except (OSError, json.JSONDecodeError):
+        pass
+    try:
+        colors = json.loads(PYWAL_COLORS.read_text(encoding="utf-8"))
+        palette = [valid_hex((colors.get("colors") or {}).get(f"color{index}")) for index in range(1, 8)]
+        palette = [color for color in palette if color]
+        if len(palette) >= 2:
+            return palette
+    except (OSError, json.JSONDecodeError):
+        pass
+    return fallback
+
+
+def cava_gradient_stops(prefix: str) -> list[str]:
+    """Read CAVA's generated pywal stops in their numeric order."""
+    stops: dict[int, str] = {}
+    try:
+        for line in CAVA_THEME.read_text(encoding="utf-8").splitlines():
+            key, separator, value = line.partition("=")
+            key = key.strip()
+            if not separator or not key.startswith(prefix):
+                continue
+            try:
+                index = int(key.removeprefix(prefix))
+            except ValueError:
+                continue
+            color = valid_hex(value.strip().strip("'\""))
+            if color:
+                stops[index] = color
+    except OSError:
+        pass
+    return [stops[index] for index in sorted(stops)]
+
+
+def cava_lyrics_gradients() -> tuple[list[str], list[str]]:
+    """Mirror the vertical + horizontal gradients generated for CAVA."""
+    fallback = pywal_lyrics_gradient()
+    vertical = cava_gradient_stops("gradient_color_")
+    horizontal = cava_gradient_stops("horizontal_gradient_color_")
+    return (
+        vertical if len(vertical) >= 2 else fallback,
+        horizontal if len(horizontal) >= 2 else fallback,
+    )
+
+
+def load_velyrics_settings() -> dict[str, Any]:
+    try:
+        mtime = VELYRICS_SETTINGS.stat().st_mtime_ns
+    except OSError:
+        mtime = 0
+    if mtime == _settings_cache.get("mtime"):
+        return _settings_cache
+    try:
+        data = json.loads(VELYRICS_SETTINGS.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        data = {}
+    mode = str(data.get("mode", "line"))
+    try:
+        words = max(1, min(12, int(round(float(data.get("wordsPerTerminal", 4))))))
+    except (TypeError, ValueError):
+        words = 4
+    try:
+        scale = max(0.5, min(3.0, float(data.get("fontScale", 1.0))))
+    except (TypeError, ValueError):
+        scale = 1.0
+    try:
+        sync_offset = max(0.0, min(1500.0, float(data.get("syncOffsetMs", 500.0))))
+    except (TypeError, ValueError):
+        sync_offset = 500.0
+    font_family = str(data.get("fontFamily", "Pixelon")).replace("\n", " ").strip()[:160] or "Pixelon"
+    _settings_cache.update({"mtime": mtime, "mode": mode if mode in {"line", "words"} else "line", "wordsPerTerminal": words, "fontScale": scale, "fontFamily": font_family, "syncOffsetMs": sync_offset})
+    return _settings_cache
+
+
+def clear_graphics() -> None:
+    if os.environ.get("KITTY_WINDOW_ID"):
+        sys.stdout.write(f"\033_Ga=d,d=i,i={KITTY_IMAGE_ID},q=2\033\\")
+        sys.stdout.flush()
+
+
+def show_kitty_image(path: Path, columns: int, rows: int) -> bool:
+    try:
+        encoded = base64.standard_b64encode(path.read_bytes()).decode("ascii")
+    except OSError:
+        return False
+    chunks = [encoded[index:index + 4096] for index in range(0, len(encoded), 4096)]
+    if not chunks:
+        return False
+    for index, chunk in enumerate(chunks):
+        more = 1 if index + 1 < len(chunks) else 0
+        if index == 0:
+            control = f"a=T,f=100,t=d,q=2,i={KITTY_IMAGE_ID},c={columns},r={rows},C=1,m={more}"
+        else:
+            control = f"q=2,i={KITTY_IMAGE_ID},m={more}"
+        sys.stdout.write(f"\033_G{control};{chunk}\033\\")
+    sys.stdout.flush()
+    return True
+
+
+def render_fallback(word: str) -> None:
+    columns, rows = shutil.get_terminal_size((80, 24))
+    display = (word or "").upper()
+    padding = max(0, (columns - len(display)) // 2)
+    vertical = max(0, rows // 2 - 1)
+    sys.stdout.write("\033[2J\033[H" + "\n" * vertical + " " * padding + display + "\n")
+    sys.stdout.flush()
+
+
+def render(word: str, font_scale: float = 1.0, font_family: str = "Pixelon") -> None:
+    display = (word or "").upper()
+    columns, rows, pixel_width, pixel_height = terminal_geometry()
+    magick = shutil.which("magick")
+    if not display or not magick or not os.environ.get("KITTY_WINDOW_ID"):
+        render_fallback(display)
+        return
+
+    usable_width = max(320, int(pixel_width * 0.92))
+    usable_height = max(180, int(pixel_height * 0.82))
+    wrapped = textwrap.wrap(display, width=24, break_long_words=False, break_on_hyphens=False) or [display]
+    wrapped = wrapped[:3]
+    longest_line = max(len(line) for line in wrapped)
+    line_count = len(wrapped)
+    width_limited_size = int((usable_width * 0.78) / max(1.0, longest_line * 0.52))
+    height_limited_size = int((usable_height * 0.62) / max(1.0, line_count * 0.72))
+    point_size = max(36, int(max(54, min(height_limited_size, width_limited_size)) * max(0.5, min(3.0, font_scale))))
+    safe_display = "\n".join(wrapped).replace("%", "%%")
+    RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+    vertical_colors, horizontal_colors = cava_lyrics_gradients()
+
+    def generate(selected_font: str) -> subprocess.CompletedProcess[bytes]:
+        font_argument = str(PIXELON_FONT) if selected_font == "Pixelon" and PIXELON_FONT.exists() else selected_font
+        horizontal_segments = max(1, len(horizontal_colors) - 1)
+        horizontal_width = max(1, (pixel_width + horizontal_segments - 1) // horizontal_segments)
+        vertical_segments = max(1, len(vertical_colors) - 1)
+        vertical_height = max(1, (pixel_height + vertical_segments - 1) // vertical_segments)
+        command = [magick, "("]
+        for index in range(horizontal_segments):
+            command.extend([
+                "-size", f"1x{horizontal_width}",
+                f"gradient:{horizontal_colors[index]}-{horizontal_colors[index + 1]}",
+                "-rotate", "-90",
+            ])
+        command.extend([
+            "+append",
+            "-resize", f"{pixel_width}x{pixel_height}!",
+            "-alpha", "opaque",
+            ")",
+            "(",
+        ])
+        for index in range(vertical_segments):
+            command.extend([
+                "-size", f"{pixel_width}x{vertical_height}",
+                f"gradient:{vertical_colors[index]}-{vertical_colors[index + 1]}",
+            ])
+        command.extend([
+            "-append",
+            "-resize", f"{pixel_width}x{pixel_height}!",
+            "-alpha", "off",
+            "(",
+            "-size", f"{pixel_width}x{pixel_height}",
+            "gradient:white-none",
+            ")",
+            "-compose", "CopyOpacity",
+            "-composite",
+            ")",
+            "-compose", "Over",
+            "-composite",
+            "(",
+            "-size", f"{pixel_width}x{pixel_height}",
+            "xc:none",
+            "-font", font_argument,
+            "-fill", "#ffffff",
+            "-pointsize", str(point_size),
+            "-gravity", "center",
+            "-annotate", "+0+0", safe_display,
+            ")",
+            "-compose", "Dst_In",
+            "-composite",
+            str(WORD_IMAGE),
+        ])
+        return subprocess.run(
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+
+    selected_font = str(font_family or "Pixelon").strip() or "Pixelon"
+    generated = generate(selected_font)
+    if generated.returncode != 0 and selected_font != "Pixelon":
+        generated = generate("Pixelon")
+    if generated.returncode != 0:
+        render_fallback(display)
+        return
+
+    sys.stdout.write("\033[2J\033[H")
+    sys.stdout.flush()
+    clear_graphics()
+    if not show_kitty_image(WORD_IMAGE, columns, rows):
+        render_fallback(display)
+
+
+def render_status(status: str) -> None:
+    """Keep non-active Velyrics terminals visually neutral."""
+    clear_graphics()
+    sys.stdout.write("\033[2J\033[H")
+    sys.stdout.flush()
+
+
+def client() -> int:
+    terminal = active_terminal()
+    if terminal is None:
+        print("velyrics: abra o comando em uma janela Hyprland ativa", file=sys.stderr)
+        return 1
+    if not start_daemon():
+        print("velyrics: não foi possível iniciar o coordenador", file=sys.stderr)
+        return 1
+
+    last_sequence = -1
+    last_status = ""
+    last_font_scale = -1.0
+    last_font_family = ""
+    try:
+        while True:
+            payload = request({"op": "register", **terminal})
+            if payload is None:
+                start_daemon()
+                time.sleep(POLL_INTERVAL)
+                continue
+            status = str(payload.get("status", "waiting"))
+            sequence = int(payload.get("sequence", 0))
+            font_scale = float(payload.get("fontScale", 1.0))
+            font_family = str(payload.get("fontFamily", "Pixelon"))
+            if payload.get("target") == terminal["address"] and (sequence != last_sequence or abs(font_scale - last_font_scale) > 0.001 or font_family != last_font_family):
+                render(str(payload.get("word", "")), font_scale, font_family)
+                last_sequence = sequence
+                last_font_scale = font_scale
+                last_font_family = font_family
+                last_status = "active"
+            elif status == "active" and sequence != last_sequence and int(payload.get("centeredSequence", sequence)) >= sequence:
+                render_status(status)
+                last_sequence = sequence
+                last_status = "active"
+            elif status not in {"active", "paused"} and status != last_status:
+                render_status(status)
+                last_status = status
+            time.sleep(POLL_INTERVAL)
+    except KeyboardInterrupt:
+        request({"op": "unregister", "address": terminal["address"]})
+        clear_graphics()
+        WORD_IMAGE.unlink(missing_ok=True)
+        sys.stdout.write("\033[0m\n")
+        return 0
+
+
+class Coordinator:
+    def __init__(self) -> None:
+        self.participants: dict[str, dict[str, Any]] = {}
+        self.workspace: int | None = None
+        self.order = 0
+        self.sequence = 0
+        self.cursor = 0
+        self.last_event = ""
+        self.track_key = ""
+        self.target = ""
+        self.word = ""
+        self.font_scale = 1.0
+        self.font_family = "Pixelon"
+        self.status = "waiting"
+        self.last_poll = 0.0
+        self.last_hyprland_poll = 0.0
+        self.eligible_cache: list[dict[str, Any]] = []
+        self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="velyrics")
+        self.lyrics_future: concurrent.futures.Future[dict[str, Any]] | None = None
+        self.center_process: subprocess.Popen[bytes] | None = None
+        self.centering_sequence = 0
+        self.centered_sequence = 0
+        self.pending_center: tuple[str, int] | None = None
+
+    def response(self) -> dict[str, Any]:
+        return {"status": self.status, "sequence": self.sequence, "target": self.target, "word": self.word, "fontScale": self.font_scale, "fontFamily": self.font_family, "workspace": self.workspace, "centeredSequence": self.centered_sequence}
+
+    def prune(self) -> None:
+        now = time.monotonic()
+        self.participants = {address: item for address, item in self.participants.items() if now - float(item.get("seen", 0)) <= CLIENT_TIMEOUT}
+        if not self.participants:
+            self.workspace = None
+            self.cursor = 0
+            self.last_event = ""
+            self.track_key = ""
+            self.eligible_cache = []
+
+    def eligible(self) -> list[dict[str, Any]]:
+        clients = hyprctl_json("clients")
+        active = hyprctl_json("activeworkspace")
+        if not canvas_enabled():
+            self.status = "canvas-off"
+            return []
+        if not isinstance(active, dict) or active.get("id") != self.workspace:
+            self.status = "wrong-workspace"
+            return []
+        if not isinstance(clients, list):
+            self.status = "waiting"
+            return []
+        client_map = {str(item.get("address")): item for item in clients}
+        eligible: list[dict[str, Any]] = []
+        for item in self.participants.values():
+            window = client_map.get(item["address"])
+            if not window:
+                continue
+            if not window.get("floating") or window.get("pinned"):
+                continue
+            if (window.get("workspace") or {}).get("id") != self.workspace:
+                continue
+            eligible.append(item)
+        eligible.sort(key=lambda item: int(item["order"]))
+        if not eligible:
+            self.status = "waiting"
+            return []
+        return eligible
+
+    def lyrics_status(self) -> dict[str, Any]:
+        script = Path(__file__).with_name("velora-lyrics-state")
+        settings = load_velyrics_settings()
+        lead_seconds = float(settings.get("syncOffsetMs", 500.0)) / 1000.0
+        result = run([str(script), "status", "--lead", f"{lead_seconds:.3f}"])
+        if result.returncode:
+            return {"ok": False, "reason": "spotify"}
+        try:
+            return json.loads(result.stdout)
+        except json.JSONDecodeError:
+            return {"ok": False, "reason": "spotify"}
+
+    def queue_center(self, address: str, sequence: int) -> None:
+        self.pending_center = (address, sequence)
+        self.pump_center()
+
+    def stop_centering(self) -> None:
+        if self.pending_center is not None:
+            self.centered_sequence = max(self.centered_sequence, self.pending_center[1])
+        self.pending_center = None
+        if self.center_process is not None and self.center_process.poll() is None:
+            self.center_process.terminate()
+        self.centered_sequence = max(self.centered_sequence, self.centering_sequence)
+        self.center_process = None
+        self.centering_sequence = 0
+
+    def pump_center(self) -> None:
+        if self.center_process is not None:
+            if self.center_process.poll() is None:
+                return
+            self.centered_sequence = max(self.centered_sequence, self.centering_sequence)
+            self.center_process = None
+            self.centering_sequence = 0
+        if not self.pending_center:
+            return
+        address, sequence = self.pending_center
+        self.pending_center = None
+        self.center_process = subprocess.Popen(
+            ["infinite-desktop", "focus-address", address],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        self.centering_sequence = sequence
+
+    def update(self) -> None:
+        self.prune()
+        self.pump_center()
+        settings = load_velyrics_settings()
+        self.font_scale = float(settings.get("fontScale", 1.0))
+        self.font_family = str(settings.get("fontFamily", "Pixelon"))
+        if is_disabled():
+            self.status = "disabled"
+            return
+        now = time.monotonic()
+        if now - self.last_hyprland_poll >= HYPRLAND_POLL_INTERVAL:
+            self.last_hyprland_poll = now
+            self.eligible_cache = self.eligible()
+        eligible = self.eligible_cache
+        if not eligible:
+            self.stop_centering()
+            return
+        if len(eligible) < 3:
+            self.stop_centering()
+
+        if self.lyrics_future is None:
+            if now - self.last_poll < LYRICS_POLL_INTERVAL:
+                return
+            self.last_poll = now
+            self.lyrics_future = self.executor.submit(self.lyrics_status)
+            return
+        if not self.lyrics_future.done():
+            return
+        try:
+            lyric = self.lyrics_future.result()
+        except Exception:
+            lyric = {"ok": False, "reason": "spotify"}
+        self.lyrics_future = None
+        player = str(lyric.get("player", "")).lower()
+        if not player or "spotify" not in player:
+            self.status = "spotify"
+            return
+        if str(lyric.get("status", "")) != "Playing":
+            self.status = "paused"
+            return
+        if not lyric.get("ok"):
+            self.status = "lyrics"
+            return
+        track_key = "\0".join([str(lyric.get("title", "")), str(lyric.get("artist", "")), str(lyric.get("duration", ""))])
+        if track_key != self.track_key:
+            self.track_key = track_key
+            self.cursor = 0
+            self.last_event = ""
+            self.target = ""
+            self.word = ""
+        mode = str(settings.get("mode", "line"))
+        words_per_terminal = int(settings.get("wordsPerTerminal", 4))
+        words = [str(word) for word in (lyric.get("words") or [])]
+        if mode == "words" and words:
+            active_index = max(0, min(len(words) - 1, int(lyric.get("activeIndex", 0))))
+            group_index = active_index // words_per_terminal
+            group_start = group_index * words_per_terminal
+            group_text = " ".join(words[group_start:group_start + words_per_terminal]).strip()
+            event = "\0".join([track_key, str(lyric.get("lineTime", "")), "words", str(words_per_terminal), str(group_index)])
+        else:
+            group_text = str(lyric.get("line", "")).strip()
+            event = "\0".join([track_key, str(lyric.get("lineTime", "")), "line"])
+        self.status = "active"
+        if event == self.last_event:
+            return
+        self.last_event = event
+        target = eligible[self.cursor % len(eligible)]
+        self.cursor += 1
+        self.target = str(target["address"])
+        self.word = group_text
+        if not self.word:
+            return
+        self.sequence += 1
+        if len(eligible) >= 3:
+            self.queue_center(self.target, self.sequence)
+        else:
+            self.centered_sequence = self.sequence
+
+    def handle(self, payload: dict[str, Any]) -> dict[str, Any]:
+        op = payload.get("op")
+        if op == "register":
+            address = str(payload.get("address", ""))
+            workspace = payload.get("workspace")
+            if address and isinstance(workspace, int):
+                if self.workspace is None:
+                    self.workspace = workspace
+                if workspace == self.workspace:
+                    item = self.participants.get(address)
+                    if item is None:
+                        self.order += 1
+                        item = {"address": address, "order": self.order}
+                        self.participants[address] = item
+                        self.last_hyprland_poll = 0.0
+                    item["seen"] = time.monotonic()
+        elif op == "unregister":
+            self.participants.pop(str(payload.get("address", "")), None)
+            self.last_hyprland_poll = 0.0
+        elif op == "ping":
+            return self.response()
+        self.update()
+        return self.response()
+
+
+def daemon() -> int:
+    RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+    with LOCK_PATH.open("w") as lock:
+        try:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return 0
+        SOCKET_PATH.unlink(missing_ok=True)
+        coordinator = Coordinator()
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
+            server.bind(str(SOCKET_PATH))
+            os.chmod(SOCKET_PATH, 0o600)
+            server.listen(16)
+            server.setblocking(False)
+            try:
+                while True:
+                    readable, _, _ = select.select([server], [], [], POLL_INTERVAL)
+                    if readable:
+                        connection, _ = server.accept()
+                        with connection:
+                            connection.settimeout(0.2)
+                            raw = connection.recv(16384)
+                            try:
+                                payload = json.loads(raw.decode("utf-8", "replace"))
+                            except json.JSONDecodeError:
+                                payload = {}
+                            response = coordinator.handle(payload)
+                            connection.sendall(json.dumps(response, separators=(",", ":")).encode())
+                    else:
+                        coordinator.update()
+            finally:
+                coordinator.executor.shutdown(wait=False, cancel_futures=True)
+                SOCKET_PATH.unlink(missing_ok=True)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(prog="velyrics", description="Spatial Spotify lyrics for Infinite Desktop")
+    parser.add_argument("command", nargs="?", choices=["toggle", "status"])
+    parser.add_argument("--daemon", action="store_true", help=argparse.SUPPRESS)
+    args = parser.parse_args()
+    if args.daemon:
+        return daemon()
+    if args.command == "toggle":
+        return toggle()
+    if args.command == "status":
+        print("disabled" if is_disabled() else "enabled")
+        return 0
+    return client()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

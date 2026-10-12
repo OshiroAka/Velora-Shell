@@ -1,0 +1,47 @@
+#!/usr/bin/env python3
+"""Keep a selected bar avatar in Velora's own data directory."""
+
+import hashlib
+import os
+import shutil
+import sys
+import tempfile
+from pathlib import Path
+
+
+def main() -> int:
+    if len(sys.argv) != 2:
+        print("usage: import-bar-avatar IMAGE", file=sys.stderr)
+        return 2
+    source = Path(sys.argv[1]).expanduser()
+    extension = source.suffix.lower()
+    if extension not in {".png", ".jpg", ".jpeg", ".webp"} or not source.is_file():
+        print("Selecione uma imagem PNG, JPEG ou WebP existente.", file=sys.stderr)
+        return 2
+
+    digest = hashlib.sha256()
+    with source.open("rb") as stream:
+        while chunk := stream.read(1024 * 1024):
+            digest.update(chunk)
+    data_home = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share")
+    destination_dir = data_home / "velora-shell" / "avatars"
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    destination = destination_dir / f"bar-{digest.hexdigest()[:20]}{extension}"
+    if not destination.exists():
+        with tempfile.NamedTemporaryFile(dir=destination_dir, delete=False) as temporary:
+            temporary_path = Path(temporary.name)
+            try:
+                with source.open("rb") as stream:
+                    shutil.copyfileobj(stream, temporary)
+                temporary.flush()
+                os.fsync(temporary.fileno())
+            except Exception:
+                temporary_path.unlink(missing_ok=True)
+                raise
+        os.replace(temporary_path, destination)
+    print(destination)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
