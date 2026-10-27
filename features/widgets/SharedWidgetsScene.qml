@@ -50,7 +50,7 @@ Item {
     function dynamicBlurItem(index) {
         const item = desktopLayerRepeater.itemAt(index)
         if (!item || !item.visible || item.opacity <= 0.001
-                || item.materialMode !== "liquid")
+                || !["liquid", "liquid-glass"].includes(item.materialMode))
             return null
         return item
     }

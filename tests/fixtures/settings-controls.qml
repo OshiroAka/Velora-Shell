@@ -35,9 +35,10 @@ ShellRoot {
     const preview=previewLoader.item
     if(step===0) {
      assert(slider.trackWidth<=232,"desktop slider is too wide")
-     const liquid=find(materials,"Liquid glass")
+     const liquid=find(materials,"Liquid Glass")
      assert(liquid.y===0,"material cards unexpectedly wrap on a wide page")
-     liquid.triggered(); assert(config.barMaterial==="liquid","material choice calls existing setter")
+     const previous=find(materials,"Liquid Ass"); previous.triggered(); assert(config.barMaterial==="liquid","previous material remains selectable");
+     liquid.triggered(); assert(config.barMaterial==="liquid-glass","material choice calls existing setter")
      materials.width=480
      slider.width=320
      assert(slider.trackWidth<=232 && slider.implicitHeight>=68,"compact slider is clipped")
@@ -48,7 +49,7 @@ ShellRoot {
      }
     } else if(step===1) {
      assert(!preview.animating && preview.progress===1,"preview keeps working at rest")
-     assert(materials.columns===2 && find(materials,"Liquid glass").y>0,"material cards wrap at compact widths")
+     assert(materials.columns===2 && find(materials,"Liquid Glass").y>0,"material cards wrap at compact widths")
      assert(!structuralPreview.animating && structuralPreview.expansion===1 && structuralPreview.contents===1,"motion preview settles")
      structuralPreview.replay(); assert(structuralPreview.animating,"motion replay starts")
      structuralPreview.visible=false; assert(!structuralPreview.animating,"hidden motion preview stops")

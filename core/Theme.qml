@@ -5,6 +5,9 @@ QtObject {
 
     required property var config
     required property var palette
+    property var kittyMaterial: null
+    readonly property color kittyBackground: kittyMaterial ? kittyMaterial.background : wallpaperSurfaceTone
+    readonly property real kittyOpacity: kittyMaterial ? kittyMaterial.opacity : 0.56
 
     readonly property string style: String(config.visualStyle || "classic")
     readonly property bool editorial: style === "editorial"
@@ -63,13 +66,15 @@ QtObject {
         light ? 0.20 : 0.22), Math.min(1, styleOpacity + 0.05))
     // Both legs consume the same tint and the bar-specific opacity. This is
     // deliberately separate from widget opacity so "Translúcido" is real.
-    property color barSurface: withAlpha(
+    readonly property color independentBarSurface: withAlpha(
         manualPalette ? config.customColor("bar")
             : wallpaperSurfaceTone,
-        config.barMaterial === "solid" ? 1
-            : (config.barMaterial === "liquid"
+        config.barIndependentMaterial === "solid" ? 1
+            : (config.barIndependentMaterial === "liquid"
                 ? Math.min(Number(config.barOpacity) * 0.30, 0.24)
                 : Number(config.barOpacity)))
+    property color barSurface: config.barMatchKittyMaterial
+        ? withAlpha(kittyBackground, kittyOpacity) : independentBarSurface
     property color surfaceSoft: withAlpha(mixColor(
         wallpaperSurfaceTone, light ? Qt.rgba(0.72, 0.75, 0.80, 1)
                                     : Qt.rgba(0.30, 0.32, 0.38, 1),

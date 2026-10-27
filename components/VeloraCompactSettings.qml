@@ -531,9 +531,6 @@ Rectangle {
             }
         }
 
-        ToolTip.visible: ui.embedded && (togglePointer.containsMouse || toggleRow.activeFocus) && hint.length > 0
-        ToolTip.delay: 600
-        ToolTip.text: hint
         MouseArea {
             id: togglePointer
             hoverEnabled: true
@@ -2283,11 +2280,11 @@ Rectangle {
         Column {
             spacing: 10
 
-            SectionTitle { label: "VELYRICS NO INFINITE DESKTOP" }
+            SectionTitle { label: "VELYRICS" }
 
             Text {
                 width: parent.width
-                text: "Funciona a partir de 1 terminal. Com 3 ou mais, o Infinite Desktop acompanha o terminal que recebeu a linha."
+                text: "Funciona desde 1 terminal, em mosaico ou flutuante, com a Infinite Desk desligada. Se ela estiver ativa e houver 3 ou mais terminais flutuantes, a câmera acompanha as letras."
                 color: ui.secondaryText
                 font.family: ui.uiFont
                 font.pixelSize: 10
@@ -2307,7 +2304,7 @@ Rectangle {
                 visible: ui.controller ? ui.controller.velyricsMode === "words" : false
                 height: visible ? implicitHeight : 0
                 label: "Palavras por terminal"
-                hint: "A câmera avança somente quando começa o próximo grupo"
+                hint: "Troca o texto quando começa o próximo grupo"
                 minimum: 1
                 maximum: 12
                 value: ui.controller ? ui.controller.velyricsWordsPerTerminal : 4

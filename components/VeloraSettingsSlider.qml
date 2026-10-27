@@ -10,6 +10,8 @@ Item {
     property real value: 0
     property real minimum: 0
     property real maximum: 1
+    property bool resettable: false
+    property real defaultValue: 0
     property string valueText: Math.round(control.value * 100) + "%"
     readonly property bool stacked: width < 540
     readonly property real trackWidth: Math.min(232, width - 62)
@@ -23,8 +25,38 @@ Item {
         y: root.stacked ? 4 : (parent.height-height)/2
         width: root.stacked ? parent.width : Math.max(80, parent.width-root.trackWidth-90)
         spacing: 4
-        Text { width: parent.width; text: root.label; color: root.theme.textPrimary
-            font.family: root.theme.bodyFont; font.pixelSize: 12; wrapMode: Text.WordWrap }
+        Row {
+            width: parent.width; spacing: 8
+            Text {
+                width: parent.width - (resetButton.visible ? resetButton.width + 8 : 0)
+                anchors.verticalCenter: parent.verticalCenter
+                text: root.label; color: root.theme.textPrimary
+                font.family: root.theme.bodyFont; font.pixelSize: 12; wrapMode: Text.WordWrap
+            }
+            Button {
+                id: resetButton
+                objectName: root.objectName + ".reset"
+                visible: root.resettable
+                enabled: Math.abs(root.value - root.defaultValue) > 0.0001
+                text: "Redefinir"
+                Accessible.name: "Redefinir " + root.label
+                implicitWidth: 74; implicitHeight: 26
+                padding: 5
+                opacity: enabled ? 1 : 0.45
+                onClicked: { root.edited(root.defaultValue); root.finalized(root.defaultValue) }
+                contentItem: Text {
+                    text: resetButton.text; color: root.theme.textSecondary
+                    font.family: root.theme.bodyFont; font.pixelSize: 10
+                    horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                }
+                background: Rectangle {
+                    radius: 8
+                    color: Qt.rgba(1, 1, 1, resetButton.hovered ? 0.13 : 0.055)
+                    border.width: resetButton.activeFocus ? 1 : 0
+                    border.color: root.theme.accent
+                }
+            }
+        }
         Text { width: parent.width; visible: text.length > 0; text: root.hint; color: root.theme.textSecondary
             font.family: root.theme.bodyFont; font.pixelSize: 10; wrapMode: Text.WordWrap }
     }

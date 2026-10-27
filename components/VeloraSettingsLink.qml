@@ -24,7 +24,4 @@ Item {
         font.underline: pointer.containsMouse || root.activeFocus
     }
     MouseArea { id: pointer; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: root.triggered() }
-    ToolTip.visible: pointer.containsMouse && hint.length > 0
-    ToolTip.delay: 600
-    ToolTip.text: hint
 }

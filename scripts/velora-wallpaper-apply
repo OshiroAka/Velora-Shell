@@ -101,15 +101,12 @@ state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/velora-shell"
 static_cache_dir="$HOME/.cache/velora-shell/static-display"
 wallpaper_transition_cache_dir="$HOME/.cache/velora-shell/wallpaper-transition"
 wallpaper_preload_state="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/velora-shell/wallpaper-transition-preload"
-wallpaper_hidden_shader="$base_dir/shaders/mpv-wallpaper-hidden.glsl"
 theme_stamp_file="${state_dir}/wallpaper-theme.stamp"
 theme_log_file="/tmp/velora-wallpaper-theme.log"
-wallpaper_wave_prepared=0
-wallpaper_wave_token=""
-wallpaper_wave_mode=""
-wallpaper_wave_shader_path=""
-declare -a wallpaper_wave_sockets=()
-declare -a wallpaper_wave_units=()
+source "$base_dir/scripts/wallpaper-transition.sh"
+previous_wallpaper_kind=""
+previous_wallpaper_path=""
+previous_wallpaper_preview=""
 
 mkdir -p "$HOME/.cache/velora-shell" "$static_cache_dir" "$wallpaper_transition_cache_dir" "$state_dir"
 
@@ -173,6 +170,7 @@ adopt_newer_wallpaper_request() {
 
 drain_latest_wallpaper_request() {
   local status=$?
+  wallpaper_transition_cancel
   local queued_id=""
   local -a queued_payload=()
   local -a queued_args=()
@@ -208,6 +206,10 @@ if [ "$kind" != "__theme-worker" ] && [[ "$kind" != __transition-preload* ]] && 
   fi
   trap drain_latest_wallpaper_request EXIT
   adopt_newer_wallpaper_request
+fi
+
+if [ -s "$HOME/.cache/velora-shell/current_wallpaper" ]; then
+  IFS='|' read -r previous_wallpaper_kind previous_wallpaper_path previous_wallpaper_preview < "$HOME/.cache/velora-shell/current_wallpaper" || true
 fi
 
 clamp_decimal() {
@@ -268,9 +270,6 @@ if [ "$restore_mode" -eq 1 ]; then
   static_apply_delay="0.00"
   live_fallback_ready_delay="0.00"
   live_reveal_delay="0.00"
-fi
-if [ "$kind" != "__theme-worker" ] && [[ "$kind" != __transition-preload* ]]; then
-  printf '%s|%s|%s\n' "$kind" "$path" "$preview" > "$HOME/.cache/velora-shell/current_wallpaper"
 fi
 
 kill_matching_processes() {
@@ -522,162 +521,10 @@ stop_transition_preloader() {
   rm -f "$wallpaper_preload_state"
 }
 
-start_transition_preloader() {
-  local requested_file="$1"
-  local file="$1"
-  local current_kind=""
-  local current_path=""
-  local current_preview=""
-  local monitors
-  local first_monitor
-  local first_socket
-  local description
-  local description_key
-  local description_value
-  local actual_source=""
-  local mon
-  local unit
-  local socket_path
-  local options
-  local mpvpaper_bin
-  local tmp_state
-  local -a sockets=()
-  local -a units=()
-
-  [ -f "$file" ] || return 0
-  [ -f "$wallpaper_hidden_shader" ] || return 0
-  command -v mpvpaper >/dev/null 2>&1 || return 0
-  command -v systemd-run >/dev/null 2>&1 || return 0
-  [ -f "$wallpaper_controller_script" ] || return 0
-
-  if [ -s "$HOME/.cache/velora-shell/current_wallpaper" ]; then
-    IFS='|' read -r current_kind current_path current_preview < "$HOME/.cache/velora-shell/current_wallpaper" || true
-  fi
-
-  ensure_wayland_env
-  monitors="$(hyprctl monitors -j 2>/dev/null | python3 -c 'import json,sys; data=json.load(sys.stdin); print(" ".join(m.get("name","") for m in data if m.get("name")))' 2>/dev/null || true)"
-  [ -n "$monitors" ] || return 0
-  first_monitor="${monitors%% *}"
-  first_socket="$(mpv_wallpaper_socket "$first_monitor")"
-  if [ -S "$first_socket" ]; then
-    description="$(python3 "$wallpaper_controller_script" --describe --timeout 0.8 "$first_socket" 2>/dev/null || true)"
-    while IFS='=' read -r description_key description_value; do
-      case "$description_key" in
-        SOURCE) actual_source="$description_value" ;;
-      esac
-    done <<< "$description"
-  fi
-
-  if [ -n "$actual_source" ] && [ -f "$actual_source" ]; then
-    if [ "$current_path" = "$requested_file" ] || [ "$actual_source" = "$requested_file" ]; then
-      file="$actual_source"
-    else
-      return 0
-    fi
-  elif [ "$current_path" != "$requested_file" ]; then
-    return 0
-  fi
-
-  [ -f "$file" ] || return 0
-
-  stop_transition_preloader
-  mpvpaper_bin="$(command -v mpvpaper)"
-  mkdir -p "$(dirname "$wallpaper_preload_state")"
-  tmp_state="${wallpaper_preload_state}.$$"
-  printf 'SOURCE|%s\n' "$file" > "$tmp_state"
-
-  for mon in $monitors; do
-    unit="velora-mpvpaper-preload-$(unit_safe_name "$mon")"
-    socket_path="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/velora-shell/mpvpaper-preload-$(unit_safe_name "$mon").sock"
-    systemctl --user stop "${unit}.service" >/dev/null 2>&1 || true
-    rm -f "$socket_path"
-    options="no-audio loop-file=inf image-display-duration=inf pause=yes panscan=1.0 video-unscaled=no hwdec=auto-safe scale=bilinear cscale=bilinear dscale=bilinear interpolation=no deband=no background=none input-ipc-server=${socket_path} glsl-shader=${wallpaper_hidden_shader}"
-
-    if ! systemd-run --user \
-        --setenv="XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR}" \
-        --setenv="WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-}" \
-        --setenv="DBUS_SESSION_BUS_ADDRESS=${DBUS_SESSION_BUS_ADDRESS:-}" \
-        --property=StandardOutput=null \
-        --property=StandardError=null \
-        --property=TimeoutStopSec=1s \
-        --property=RuntimeMaxSec=15min \
-        --unit="$unit" \
-        --collect \
-        --quiet \
-        "$mpvpaper_bin" --layer bottom -o "$options" "$mon" "$file" >/dev/null 2>&1; then
-      rm -f "$tmp_state"
-      stop_transition_preloader
-      return 0
-    fi
-
-    sockets+=("$socket_path")
-    units+=("$unit")
-    printf '%s|%s\n' "$unit" "$socket_path" >> "$tmp_state"
-  done
-
-  mv -f "$tmp_state" "$wallpaper_preload_state"
-  if ! python3 "$wallpaper_controller_script" --wait-ready --timeout 4.0 "${sockets[@]}" >/dev/null 2>&1; then
-    for unit in "${units[@]}"; do
-      systemctl --user stop --no-block "${unit}.service" >/dev/null 2>&1 || true
-    done
-    rm -f "$wallpaper_preload_state"
-    return 0
-  fi
-}
-
-start_current_transition_preloader() {
-  local current_kind=""
-  local current_path=""
-  local current_preview=""
-
-  [ "$live_transition_mode" = "shader" ] || return 0
-  [ -s "$HOME/.cache/velora-shell/current_wallpaper" ] || return 0
-  IFS='|' read -r current_kind current_path current_preview < "$HOME/.cache/velora-shell/current_wallpaper" || return 0
-  case "$current_kind" in
-    live|mpv) start_transition_preloader "$current_path" ;;
-  esac
-}
-
-claim_transition_preloader() {
-  local old_source="$1"
-  local old_position_ms="$2"
-  local shader_path="$3"
-  local source_tag=""
-  local source_path=""
-  local unit
-  local socket_path
-  local -a units=()
-  local -a sockets=()
-
-  [ -s "$wallpaper_preload_state" ] || return 1
-  IFS='|' read -r source_tag source_path < "$wallpaper_preload_state" || return 1
-  if [ "$source_tag" != "SOURCE" ] || [ "$source_path" != "$old_source" ]; then
-    stop_transition_preloader
-    return 1
-  fi
-
-  while IFS='|' read -r unit socket_path; do
-    [ -n "$unit" ] || continue
-    [ -S "$socket_path" ] || {
-      stop_transition_preloader
-      return 1
-    }
-    units+=("$unit")
-    sockets+=("$socket_path")
-  done < <(tail -n +2 "$wallpaper_preload_state")
-  [ "${#sockets[@]}" -gt 0 ] || return 1
-
-  if ! python3 "$wallpaper_controller_script" --prepare-overlay "$shader_path" "$old_position_ms" --timeout 0.8 "${sockets[@]}" >/dev/null 2>&1; then
-    stop_transition_preloader
-    return 1
-  fi
-
-  wallpaper_wave_mode="preloaded"
-  wallpaper_wave_units=("${units[@]}")
-  wallpaper_wave_sockets=("${sockets[@]}")
-  rm -f "$wallpaper_preload_state"
-  return 0
-}
+# Compatibility with a shell already running the old preloader IPC.
+# Retire its hidden players; new transitions never create one.
+start_transition_preloader() { stop_transition_preloader; }
+start_current_transition_preloader() { stop_transition_preloader; }
 
 reuse_mpv_wallpapers() {
   local file="$1"
@@ -718,206 +565,19 @@ wait_mpv_wallpapers_ready() {
   python3 "$wallpaper_controller_script" --wait-ready --timeout 2.5 "${sockets[@]}" >/dev/null 2>&1
 }
 
-cancel_wallpaper_wave() {
-  local unit
-  local socket_path
-
-  if [ "$wallpaper_wave_mode" = "qml" ] && command -v qs >/dev/null 2>&1; then
-    qs ipc -p "$base_dir" call velora wallpaperWaveCancel "$wallpaper_wave_token" >/dev/null 2>&1 || true
-  fi
-  if [ "$wallpaper_wave_mode" = "mpv" ] || [ "$wallpaper_wave_mode" = "preloaded" ]; then
-    for unit in "${wallpaper_wave_units[@]}"; do
-      systemctl --user stop --no-block "${unit}.service" >/dev/null 2>&1 || true
-    done
-    for socket_path in "${wallpaper_wave_sockets[@]}"; do
-      pkill -TERM -f "input-ipc-server=${socket_path}" >/dev/null 2>&1 || true
-      rm -f "$socket_path"
-    done
-    [ -z "$wallpaper_wave_shader_path" ] || rm -f "$wallpaper_wave_shader_path"
-  fi
-
-  wallpaper_wave_prepared=0
-  wallpaper_wave_token=""
-  wallpaper_wave_mode=""
-  wallpaper_wave_shader_path=""
-  wallpaper_wave_sockets=()
-  wallpaper_wave_units=()
-}
-
-start_mpv_wallpaper_wave() {
-  local mon="$1"
-  local source_path="$2"
-  local position_ms="$3"
-  local shader_path="$4"
-  local mpvpaper_bin
-  local unit
-  local socket_path
-  local start_seconds
-  local options
-
-  command -v systemd-run >/dev/null 2>&1 || return 1
-  mpvpaper_bin="$(command -v mpvpaper)"
-  unit="velora-mpvpaper-wave-$(unit_safe_name "$mon")-${wallpaper_wave_token}"
-  socket_path="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/velora-shell/mpvpaper-wave-${wallpaper_wave_token}-$(unit_safe_name "$mon").sock"
-  start_seconds="$(awk -v milliseconds="$position_ms" 'BEGIN { printf "%.3f", milliseconds / 1000 }')"
-  options="no-audio loop-file=inf image-display-duration=inf pause=yes start=${start_seconds} panscan=1.0 video-unscaled=no hwdec=auto-safe scale=bilinear cscale=bilinear dscale=bilinear interpolation=no deband=no background=none input-ipc-server=${socket_path} glsl-shader=${shader_path}"
-
-  ensure_wayland_env
-  mkdir -p "$(dirname "$socket_path")"
-  rm -f "$socket_path"
-  if ! systemd-run --user \
-      --setenv="XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR}" \
-      --setenv="WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-}" \
-      --setenv="DBUS_SESSION_BUS_ADDRESS=${DBUS_SESSION_BUS_ADDRESS:-}" \
-      --property=StandardOutput=null \
-      --property=StandardError=null \
-      --property=TimeoutStopSec=1s \
-      --property=RuntimeMaxSec=15s \
-      --unit="$unit" \
-      --collect \
-      --quiet \
-      "$mpvpaper_bin" --layer bottom -o "$options" "$mon" "$source_path" >/dev/null 2>&1; then
-    return 1
-  fi
-
-  wallpaper_wave_units+=("$unit")
-  wallpaper_wave_sockets+=("$socket_path")
-}
+cancel_wallpaper_wave() { wallpaper_transition_cancel; }
 
 prepare_wallpaper_wave() {
-  local mon
-  local socket_path
-  local description
-  local description_key
-  local description_value
-  local old_source=""
-  local old_position_ms="0"
-  local old_is_live="0"
-  local old_fps="60"
-  local -a sockets=()
-
-  wallpaper_wave_prepared=0
-  wallpaper_wave_token=""
-  wallpaper_wave_mode=""
-  wallpaper_wave_shader_path=""
-  wallpaper_wave_sockets=()
-  wallpaper_wave_units=()
-
   [ "$restore_mode" -eq 0 ] || return 1
-  [ "$live_transition_mode" = "shader" ] || return 1
-  case "$kind" in
-    live|mpv) ;;
-    *) return 1 ;;
-  esac
-  case "$transition" in
-    fade|wave|grow|outer) ;;
-    *) return 1 ;;
-  esac
-  [ -f "$wallpaper_controller_script" ] || return 1
-  command -v python3 >/dev/null 2>&1 || return 1
-
-  for mon in "$@"; do
-    socket_path="$(mpv_wallpaper_socket "$mon")"
-    [ -S "$socket_path" ] || return 1
-    sockets+=("$socket_path")
-  done
-  [ "${#sockets[@]}" -gt 0 ] || return 1
-
-  find "$wallpaper_transition_cache_dir" -maxdepth 1 -type f -name '*.ready' -delete 2>/dev/null || true
-  find "$wallpaper_transition_cache_dir" -maxdepth 1 -type f -name 'transition-*.glsl' -mmin +2 -delete 2>/dev/null || true
-  wallpaper_wave_token="$(date +%s%N)-$$"
-  if ! description="$(python3 "$wallpaper_controller_script" --describe --timeout 1.0 "${sockets[0]}" 2>/dev/null)"; then
-    wallpaper_wave_token=""
-    return 1
+  # The live engine preference applies only to video targets.
+  if [ "$kind" = live ] || [ "$kind" = mpv ]; then
+    [ "$live_transition_mode" = shader ] || return 1
   fi
-  while IFS='=' read -r description_key description_value; do
-    case "$description_key" in
-      SOURCE) old_source="$description_value" ;;
-      POSITION_MS) old_position_ms="$description_value" ;;
-      LIVE) old_is_live="$description_value" ;;
-      FPS) old_fps="$description_value" ;;
-    esac
-  done <<< "$description"
-  [ -n "$old_source" ] && [ -f "$old_source" ] || {
-    wallpaper_wave_token=""
-    return 1
-  }
-  [ "$old_is_live" = "1" ] || {
-    wallpaper_wave_token=""
-    return 1
-  }
-
-  if [ "$transition" != "fade" ] && [ -f "$base_dir/shaders/mpv-wallpaper-wave.glsl" ] && command -v mpvpaper >/dev/null 2>&1 && command -v systemd-run >/dev/null 2>&1; then
-    wallpaper_wave_shader_path="$wallpaper_transition_cache_dir/transition-${wallpaper_wave_token}.glsl"
-    if ! python3 "$wallpaper_controller_script" \
-        --make-shader "$base_dir/shaders/mpv-wallpaper-wave.glsl" "$wallpaper_wave_shader_path" \
-        --duration "$transition_duration" --fps "$old_fps" --transition "$transition" >/dev/null 2>&1; then
-      rm -f "$wallpaper_wave_shader_path"
-      wallpaper_wave_shader_path=""
-      wallpaper_wave_token=""
-      return 1
-    elif claim_transition_preloader "$old_source" "$old_position_ms" "$wallpaper_wave_shader_path"; then
-      wallpaper_wave_prepared=1
-      return 0
-    fi
-  fi
-
-  [ -n "$wallpaper_wave_shader_path" ] || return 1
-  wallpaper_wave_mode="mpv"
-  for mon in "$@"; do
-    if ! start_mpv_wallpaper_wave "$mon" "$old_source" "$old_position_ms" "$wallpaper_wave_shader_path"; then
-      cancel_wallpaper_wave
-      return 1
-    fi
-  done
-  if ! python3 "$wallpaper_controller_script" --wait-ready --timeout 3.0 "${wallpaper_wave_sockets[@]}" >/dev/null 2>&1; then
-    cancel_wallpaper_wave
-    return 1
-  fi
-  wallpaper_wave_prepared=1
-  return 0
+  local outgoing="$previous_wallpaper_path"
+  wallpaper_transition_prepare "$previous_wallpaper_kind" "$outgoing" "$transition" "$transition_duration" "$@"
 }
 
-reveal_wallpaper_wave() {
-  local token="$wallpaper_wave_token"
-  local cleanup_delay
-  local cleanup_unit
-  local -a cleanup_args=()
-  local index
-
-  [ "$wallpaper_wave_prepared" -eq 1 ] || return 1
-  if [ "$wallpaper_wave_mode" = "mpv" ] || [ "$wallpaper_wave_mode" = "preloaded" ]; then
-    if ! python3 "$wallpaper_controller_script" --play --timeout 1.5 "${wallpaper_wave_sockets[@]}" >/dev/null 2>&1; then
-      cancel_wallpaper_wave
-      return 1
-    fi
-
-    for index in "${!wallpaper_wave_units[@]}"; do
-      cleanup_args+=("${wallpaper_wave_units[$index]}.service" "${wallpaper_wave_sockets[$index]}")
-    done
-    cleanup_delay="$(awk -v duration="$transition_duration" 'BEGIN { printf "%.2fs", duration + 0.35 }')"
-    cleanup_unit="velora-mpvpaper-wave-cleanup-${token}"
-    systemd-run --user \
-      --unit="$cleanup_unit" \
-      --on-active="$cleanup_delay" \
-      --collect \
-      --quiet \
-      "$script_path" __wave-cleanup "$wallpaper_wave_shader_path" "${cleanup_args[@]}" >/dev/null 2>&1 || true
-  else
-    if ! qs ipc -p "$base_dir" call velora wallpaperWaveReveal "$token" >/dev/null 2>&1; then
-      cancel_wallpaper_wave
-      return 1
-    fi
-  fi
-
-  wallpaper_wave_prepared=0
-  wallpaper_wave_token=""
-  wallpaper_wave_mode=""
-  wallpaper_wave_shader_path=""
-  wallpaper_wave_sockets=()
-  wallpaper_wave_units=()
-  return 0
-}
+reveal_wallpaper_wave() { wallpaper_transition_reveal; }
 
 start_mpv_wallpaper() {
   local mon="$1"
@@ -1243,17 +903,22 @@ wait_for_wallpaper_process() {
 static_wallpaper() {
   local img="$1"
   local display_img
+  local backend_transition="$transition"
 
   [ -f "$img" ] || exit 2
   display_img="$(static_display_image "$img")"
 
   stop_engine_wallpapers
-  cancel_wallpaper_wave
   stop_transition_preloader
+  # Static-to-static uses awww's real native wave immediately. A transition
+  # from video can use the existing compositor texture without PNG/overlay.
+  if [ "$previous_wallpaper_kind" = live ] || [ "$previous_wallpaper_kind" = mpv ]; then
+    if prepare_wallpaper_wave; then backend_transition=none; fi
+  fi
 
   if command -v awww >/dev/null 2>&1; then
     start_awww_daemon
-    awww img "$display_img" --transition-type "$transition" --transition-duration "$transition_duration" --transition-fps 60 \
+    awww img "$display_img" --transition-type "$backend_transition" --transition-duration "$transition_duration" --transition-fps 60 \
       || awww img "$display_img" --transition-type fade --transition-duration "$transition_duration" --transition-fps 60
     sleep "$static_apply_delay" || true
     stop_mpv_wallpapers
@@ -1263,7 +928,7 @@ static_wallpaper() {
       nohup swww-daemon >/dev/null 2>&1 9>&- &
       sleep 0.20
     fi
-    swww img "$display_img" --transition-type "$transition" --transition-duration "$transition_duration" \
+    swww img "$display_img" --transition-type "$backend_transition" --transition-duration "$transition_duration" \
       || swww img "$display_img" --transition-type fade --transition-duration "$transition_duration"
     sleep "$static_apply_delay" || true
     stop_mpv_wallpapers
@@ -1273,6 +938,7 @@ static_wallpaper() {
   fi
 
   stop_transition_preloader
+  reveal_wallpaper_wave || true
   apply_theme_async "$theme_path"
 }
 
@@ -1297,22 +963,19 @@ live_wallpaper() {
     else
       stop_transition_preloader
     fi
-    stop_static_wallpapers
     if reuse_mpv_wallpapers "$file" $monitors; then
+      stop_static_wallpapers
       reveal_wallpaper_wave || true
       apply_theme_async "$theme_path"
       return 0
     fi
   fi
 
-  if [ "$wallpaper_wave_prepared" -ne 1 ] && [ "$restore_mode" -ne 1 ] && show_static_fallback "$theme_path" "$live_fallback_duration" "$transition"; then
+  if [ "$live_transition_mode" = native ] && [ "$restore_mode" -ne 1 ] && show_static_fallback "$theme_path" "$live_fallback_duration" "$transition"; then
     has_static_fallback=1
     sleep "$live_fallback_ready_delay" || true
   fi
 
-  if [ "$wallpaper_wave_mode" = "mpv" ] || [ "$wallpaper_wave_mode" = "preloaded" ]; then
-    cancel_wallpaper_wave
-  fi
   stop_mpv_wallpapers
   : > /tmp/velora-mpvpaper.log
   for mon in $monitors; do
@@ -1320,7 +983,10 @@ live_wallpaper() {
   done
 
   if wait_for_wallpaper_process '(^|/)mpvpaper([[:space:]]|$)' 8 0.04; then
-    wait_mpv_wallpapers_ready $monitors || sleep 0.10
+    if ! wait_mpv_wallpapers_ready $monitors; then
+      cancel_wallpaper_wave
+      return 1
+    fi
     if [ "$has_static_fallback" -eq 1 ]; then
       sleep "$live_reveal_delay" || true
     fi
@@ -1328,6 +994,7 @@ live_wallpaper() {
     reveal_wallpaper_wave || true
   else
     cancel_wallpaper_wave
+    return 1
   fi
   apply_theme_async "$theme_path"
 }
@@ -1379,5 +1046,15 @@ case "$kind" in
     ;;
   *)
     exit 2
+    ;;
+esac
+
+
+# Publish only a successfully applied wallpaper; preparation needs the outgoing
+# state, and failures must not advertise a wallpaper that never appeared.
+case "$kind" in
+  static|bg|live|mpv|engine)
+    printf '%s|%s|%s\n' "$kind" "$path" "$preview" > "$HOME/.cache/velora-shell/current_wallpaper.$$"
+    mv -f "$HOME/.cache/velora-shell/current_wallpaper.$$" "$HOME/.cache/velora-shell/current_wallpaper"
     ;;
 esac

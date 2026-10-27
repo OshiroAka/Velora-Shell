@@ -8,14 +8,16 @@ Scope {
     property bool active: false
     property var weather: ({})
     property string error: ""
+    readonly property bool refreshing: weatherProcess.running
 
     readonly property string helper: Quickshell.shellDir
         + "/scripts/velora-weather-state"
-    readonly property bool available: String(weather.temp || "").length > 0
-    readonly property string temperature: String(weather.temp || "--")
-    readonly property string maximum: String(weather.max || "--")
-    readonly property string minimum: String(weather.min || "--")
-    readonly property string feelsLike: String(weather.feels || "--")
+    function reading(value) { return value === undefined || value === null || String(value).trim() === "" ? "--" : String(value) }
+    readonly property bool available: temperature !== "--" && isFinite(Number(temperature))
+    readonly property string temperature: reading(weather.temp)
+    readonly property string maximum: reading(weather.max)
+    readonly property string minimum: reading(weather.min)
+    readonly property string feelsLike: reading(weather.feels)
     readonly property string description: String(weather.desc || "Clima indisponível")
     readonly property string iconName: String(weather.icon || "partly")
     readonly property var forecast: Array.isArray(weather.daily)
@@ -23,9 +25,9 @@ Scope {
         : (Array.isArray(weather.forecast) ? weather.forecast.slice(0, 4) : [])
     readonly property var hourly: Array.isArray(weather.hourly)
         ? weather.hourly.slice(0, 8) : []
-    readonly property string humidity: String(weather.humidity || "--")
-    readonly property string wind: String(weather.wind || "--")
-    readonly property string rain: String(weather.rain || "--")
+    readonly property string humidity: reading(weather.humidity)
+    readonly property string wind: reading(weather.wind)
+    readonly property string rain: reading(weather.rain)
     readonly property string location: String(weather.location || "")
 
     function refresh(force) {

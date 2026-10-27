@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Spatial, multi-terminal Spotify lyrics for Velora + Infinite Desktop.
+"""Spotify lyrics for one or more Velora terminals.
 
-Run this command in one or more floating Kitty windows in the same workspace.
+Run this command in one or more Kitty windows, tiled or floating.
 A small local daemon owns the Spotify/LRCLIB polling; clients only render the
-line addressed to their terminal. Infinite Desktop follows the active lyric
-only when at least three terminals participate. Each terminal renders its lyric
+line addressed to their terminal on the current workspace. Infinite Desktop
+optionally follows the active lyric when enabled and at least three floating
+terminals participate. Each terminal renders its lyric
 with the active CAVA gradient generated from Velora pywal; Kitty remains
 responsible for the window's transparency and background.
 """
@@ -15,6 +16,7 @@ import argparse
 import base64
 import concurrent.futures
 import fcntl
+from functools import lru_cache
 import json
 import os
 import select
@@ -31,8 +33,10 @@ from typing import Any
 
 
 RUNTIME_DIR = Path(os.environ.get("XDG_RUNTIME_DIR", f"/tmp/velyrics-{os.getuid()}"))
-SOCKET_PATH = RUNTIME_DIR / "velyrics.sock"
-LOCK_PATH = RUNTIME_DIR / "velyrics.lock"
+# Older coordinators required Infinite Desktop. A separate protocol socket lets
+# reopened terminals use this coordinator even if the old daemon is still idle.
+SOCKET_PATH = RUNTIME_DIR / "velyrics-v2.sock"
+LOCK_PATH = RUNTIME_DIR / "velyrics-v2.lock"
 DISABLED_PATH = RUNTIME_DIR / "velyrics.disabled"
 POLL_INTERVAL = 0.10
 LYRICS_POLL_INTERVAL = 0.12
@@ -40,11 +44,14 @@ HYPRLAND_POLL_INTERVAL = 0.30
 CLIENT_TIMEOUT = 4.0
 DAEMON_START_TIMEOUT = 1.5
 PIXELON_FONT = Path("/usr/share/fonts/pixelon.regular.ttf")
+USER_PIXELON_FONT = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share") / "fonts/velora/Pixelon.ttf"
+BUNDLED_LYRICS_FONT = Path(__file__).resolve().parents[1] / "assets/fonts/Orbitron-Variable.ttf"
 PYWAL_COLORS = Path.home() / ".cache/wal/colors.json"
 CAVA_THEME = Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config"))) / "cava/themes/velora-pywal16"
 VELYRICS_SETTINGS = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "velora-shell/velyrics.json"
 WORD_IMAGE = RUNTIME_DIR / f"velyrics-word-{os.getpid()}.png"
 KITTY_IMAGE_ID = 700000 + (os.getpid() % 900000)
+_displayed_image_id: int | None = None
 _settings_cache: dict[str, Any] = {"mtime": -1, "mode": "line", "wordsPerTerminal": 4, "fontScale": 1.0, "fontFamily": "Pixelon", "syncOffsetMs": 500.0}
 
 
@@ -243,12 +250,16 @@ def load_velyrics_settings() -> dict[str, Any]:
 
 
 def clear_graphics() -> None:
+    global _displayed_image_id
     if os.environ.get("KITTY_WINDOW_ID"):
-        sys.stdout.write(f"\033_Ga=d,d=i,i={KITTY_IMAGE_ID},q=2\033\\")
+        for image_id in (KITTY_IMAGE_ID, KITTY_IMAGE_ID + 1):
+            sys.stdout.write(f"\033_Ga=d,d=I,i={image_id},q=2\033\\")
         sys.stdout.flush()
+    _displayed_image_id = None
 
 
 def show_kitty_image(path: Path, columns: int, rows: int) -> bool:
+    global _displayed_image_id
     try:
         encoded = base64.standard_b64encode(path.read_bytes()).decode("ascii")
     except OSError:
@@ -256,24 +267,65 @@ def show_kitty_image(path: Path, columns: int, rows: int) -> bool:
     chunks = [encoded[index:index + 4096] for index in range(0, len(encoded), 4096)]
     if not chunks:
         return False
+    if _displayed_image_id is None:
+        # ED2 also discards images uploaded without placements. Clear old
+        # terminal text before uploading the first image, never before putting
+        # an image that the terminal has already received.
+        sys.stdout.write("\033[2J\033[H")
+    image_id = KITTY_IMAGE_ID + 1 if _displayed_image_id == KITTY_IMAGE_ID else KITTY_IMAGE_ID
     for index, chunk in enumerate(chunks):
         more = 1 if index + 1 < len(chunks) else 0
         if index == 0:
-            control = f"a=T,f=100,t=d,q=2,i={KITTY_IMAGE_ID},c={columns},r={rows},C=1,m={more}"
+            control = f"a=t,f=100,t=d,q=2,i={image_id},m={more}"
         else:
-            control = f"q=2,i={KITTY_IMAGE_ID},m={more}"
+            control = f"q=2,m={more}"
         sys.stdout.write(f"\033_G{control};{chunk}\033\\")
     sys.stdout.flush()
+    # Transmit into the other image slot while the previous word stays visible.
+    # Place the fully uploaded image and retire the old one in one screen update.
+    commit = f"\033[?2026h\033[H\033_Ga=p,i={image_id},p=1,c={columns},r={rows},C=1,q=2\033\\"
+    if _displayed_image_id is not None:
+        commit += f"\033_Ga=d,d=I,i={_displayed_image_id},q=2\033\\"
+    sys.stdout.write(commit + "\033[?2026l")
+    sys.stdout.flush()
+    _displayed_image_id = image_id
     return True
 
 
 def render_fallback(word: str) -> None:
+    clear_graphics()
     columns, rows = shutil.get_terminal_size((80, 24))
     display = (word or "").upper()
     padding = max(0, (columns - len(display)) // 2)
     vertical = max(0, rows // 2 - 1)
     sys.stdout.write("\033[2J\033[H" + "\n" * vertical + " " * padding + display + "\n")
     sys.stdout.flush()
+
+
+@lru_cache(maxsize=32)
+def resolve_font(family: str) -> str:
+    if family == "Pixelon" and USER_PIXELON_FONT.is_file():
+        return str(USER_PIXELON_FONT)
+    if family == "Pixelon" and PIXELON_FONT.is_file():
+        return str(PIXELON_FONT)
+    matched_path = None
+    try:
+        result = subprocess.run(["fc-match", "-f", "%{family}\n%{file}", "--", family],
+                                capture_output=True, text=True, check=False, timeout=2)
+        lines = result.stdout.splitlines()
+        if result.returncode == 0 and len(lines) >= 2 and Path(lines[1]).is_file():
+            matched_path = lines[1]
+            families = [name.strip().casefold() for name in lines[0].split(",")]
+            if family.casefold() in families or family.casefold() in {"serif", "sans-serif", "monospace"}:
+                return matched_path
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    # Pixelon is optional and its old hardcoded path can be absent. Keep the
+    # graphical CAVA renderer using the bundled display font instead of losing
+    # all styling to a plain terminal-font fallback.
+    if BUNDLED_LYRICS_FONT.is_file():
+        return str(BUNDLED_LYRICS_FONT)
+    return matched_path or family
 
 
 def render(word: str, font_scale: float = 1.0, font_family: str = "Pixelon") -> None:
@@ -298,7 +350,7 @@ def render(word: str, font_scale: float = 1.0, font_family: str = "Pixelon") -> 
     vertical_colors, horizontal_colors = cava_lyrics_gradients()
 
     def generate(selected_font: str) -> subprocess.CompletedProcess[bytes]:
-        font_argument = str(PIXELON_FONT) if selected_font == "Pixelon" and PIXELON_FONT.exists() else selected_font
+        font_argument = resolve_font(selected_font)
         horizontal_segments = max(1, len(horizontal_colors) - 1)
         horizontal_width = max(1, (pixel_width + horizontal_segments - 1) // horizontal_segments)
         vertical_segments = max(1, len(vertical_colors) - 1)
@@ -364,18 +416,33 @@ def render(word: str, font_scale: float = 1.0, font_family: str = "Pixelon") -> 
         render_fallback(display)
         return
 
-    sys.stdout.write("\033[2J\033[H")
-    sys.stdout.flush()
-    clear_graphics()
     if not show_kitty_image(WORD_IMAGE, columns, rows):
         render_fallback(display)
 
 
-def render_status(status: str) -> None:
-    """Keep non-active Velyrics terminals visually neutral."""
-    clear_graphics()
-    sys.stdout.write("\033[2J\033[H")
-    sys.stdout.flush()
+def render_status(status: str, reason: str = "", font_scale: float = 1.0, font_family: str = "Pixelon") -> None:
+    """Explain unavailable lyrics; leave other participating terminals neutral."""
+    messages = {
+        "waiting": "Aguardando o terminal…",
+        "loading": "Carregando letras do Spotify…",
+        "spotify": "Aguardando uma música no Spotify…",
+        "paused": "Spotify pausado",
+        "disabled": "VeLyrics desativado · use velyrics toggle",
+        "wrong-workspace": "Aguardando o workspace deste terminal…",
+        "lyrics": "Letras indisponíveis para esta música",
+    }
+    reasons = {
+        "fetch-failed": "Não foi possível carregar as letras · tentando novamente…",
+        "backend-error": "Não foi possível consultar o Spotify · tentando novamente…",
+    }
+    if reason in {"waiting-for-line", "between-lines", "empty-line"}:
+        render_fallback("")
+        return
+    message = reasons.get(reason, messages.get(status, ""))
+    if message:
+        render(message, max(.5, font_scale * .5), font_family)
+    else:
+        render_fallback("")
 
 
 def client() -> int:
@@ -387,8 +454,12 @@ def client() -> int:
         print("velyrics: não foi possível iniciar o coordenador", file=sys.stderr)
         return 1
 
+    sys.stdout.write("\033[?25l")
+    sys.stdout.flush()
+
     last_sequence = -1
     last_status = ""
+    last_reason = ""
     last_font_scale = -1.0
     last_font_family = ""
     try:
@@ -399,28 +470,38 @@ def client() -> int:
                 time.sleep(POLL_INTERVAL)
                 continue
             status = str(payload.get("status", "waiting"))
+            reason = str(payload.get("reason", ""))
             sequence = int(payload.get("sequence", 0))
             font_scale = float(payload.get("fontScale", 1.0))
             font_family = str(payload.get("fontFamily", "Pixelon"))
-            if payload.get("target") == terminal["address"] and (sequence != last_sequence or abs(font_scale - last_font_scale) > 0.001 or font_family != last_font_family):
+            showing_lyrics = last_status in {"active", "paused"}
+            target_active = payload.get("target") == terminal["address"] and (
+                status == "active" or (status == "paused" and showing_lyrics))
+            needs_render = (sequence != last_sequence or not showing_lyrics
+                            or abs(font_scale - last_font_scale) > 0.001 or font_family != last_font_family)
+            if target_active and needs_render:
                 render(str(payload.get("word", "")), font_scale, font_family)
                 last_sequence = sequence
                 last_font_scale = font_scale
                 last_font_family = font_family
                 last_status = "active"
-            elif status == "active" and sequence != last_sequence and int(payload.get("centeredSequence", sequence)) >= sequence:
-                render_status(status)
+                last_reason = ""
+            elif status == "active" and (sequence != last_sequence or last_status != "active") and int(payload.get("centeredSequence", sequence)) >= sequence:
+                render_status(status, "", font_scale, font_family)
                 last_sequence = sequence
                 last_status = "active"
-            elif status not in {"active", "paused"} and status != last_status:
-                render_status(status)
+            elif status == "paused" and last_status in {"active", "paused"}:
+                last_status = "paused"
+            elif status != "active" and (status != last_status or reason != last_reason):
+                render_status(status, reason, font_scale, font_family)
                 last_status = status
+                last_reason = reason
             time.sleep(POLL_INTERVAL)
     except KeyboardInterrupt:
         request({"op": "unregister", "address": terminal["address"]})
         clear_graphics()
         WORD_IMAGE.unlink(missing_ok=True)
-        sys.stdout.write("\033[0m\n")
+        sys.stdout.write("\033[?2026l\033[?25h\033[0m\n")
         return 0
 
 
@@ -438,6 +519,7 @@ class Coordinator:
         self.font_scale = 1.0
         self.font_family = "Pixelon"
         self.status = "waiting"
+        self.reason = ""
         self.last_poll = 0.0
         self.last_hyprland_poll = 0.0
         self.eligible_cache: list[dict[str, Any]] = []
@@ -449,7 +531,7 @@ class Coordinator:
         self.pending_center: tuple[str, int] | None = None
 
     def response(self) -> dict[str, Any]:
-        return {"status": self.status, "sequence": self.sequence, "target": self.target, "word": self.word, "fontScale": self.font_scale, "fontFamily": self.font_family, "workspace": self.workspace, "centeredSequence": self.centered_sequence}
+        return {"status": self.status, "reason": self.reason, "sequence": self.sequence, "target": self.target, "word": self.word, "fontScale": self.font_scale, "fontFamily": self.font_family, "workspace": self.workspace, "centeredSequence": self.centered_sequence}
 
     def prune(self) -> None:
         now = time.monotonic()
@@ -464,14 +546,14 @@ class Coordinator:
     def eligible(self) -> list[dict[str, Any]]:
         clients = hyprctl_json("clients")
         active = hyprctl_json("activeworkspace")
-        if not canvas_enabled():
-            self.status = "canvas-off"
-            return []
-        if not isinstance(active, dict) or active.get("id") != self.workspace:
+        if not isinstance(active, dict) or not isinstance(active.get("id"), int):
             self.status = "wrong-workspace"
+            self.reason = ""
             return []
+        self.workspace = active["id"]
         if not isinstance(clients, list):
             self.status = "waiting"
+            self.reason = ""
             return []
         client_map = {str(item.get("address")): item for item in clients}
         eligible: list[dict[str, Any]] = []
@@ -479,14 +561,13 @@ class Coordinator:
             window = client_map.get(item["address"])
             if not window:
                 continue
-            if not window.get("floating") or window.get("pinned"):
+            if (window.get("workspace") or {}).get("id") != self.workspace and not window.get("pinned"):
                 continue
-            if (window.get("workspace") or {}).get("id") != self.workspace:
-                continue
-            eligible.append(item)
+            eligible.append({**item, "camera": bool(window.get("floating") and not window.get("pinned"))})
         eligible.sort(key=lambda item: int(item["order"]))
         if not eligible:
             self.status = "waiting"
+            self.reason = ""
             return []
         return eligible
 
@@ -494,13 +575,14 @@ class Coordinator:
         script = Path(__file__).with_name("velora-lyrics-state")
         settings = load_velyrics_settings()
         lead_seconds = float(settings.get("syncOffsetMs", 500.0)) / 1000.0
-        result = run([str(script), "status", "--lead", f"{lead_seconds:.3f}"])
+        result = run([str(script), "status", "--hold-line", "--lead", f"{lead_seconds:.3f}"])
         if result.returncode:
-            return {"ok": False, "reason": "spotify"}
+            return {"ok": False, "reason": "backend-error"}
         try:
-            return json.loads(result.stdout)
+            value = json.loads(result.stdout)
+            return value if isinstance(value, dict) else {"ok": False, "reason": "backend-error"}
         except json.JSONDecodeError:
-            return {"ok": False, "reason": "spotify"}
+            return {"ok": False, "reason": "backend-error"}
 
     def queue_center(self, address: str, sequence: int) -> None:
         self.pending_center = (address, sequence)
@@ -517,6 +599,9 @@ class Coordinator:
         self.centering_sequence = 0
 
     def pump_center(self) -> None:
+        if not canvas_enabled():
+            self.stop_centering()
+            return
         if self.center_process is not None:
             if self.center_process.poll() is None:
                 return
@@ -527,23 +612,33 @@ class Coordinator:
             return
         address, sequence = self.pending_center
         self.pending_center = None
-        self.center_process = subprocess.Popen(
-            ["infinite-desktop", "focus-address", address],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+        try:
+            self.center_process = subprocess.Popen(
+                ["infinite-desktop", "focus-address", address],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except OSError:
+            self.centered_sequence = max(self.centered_sequence, sequence)
+            return
         self.centering_sequence = sequence
 
     def update(self) -> None:
         self.prune()
-        self.pump_center()
         settings = load_velyrics_settings()
         self.font_scale = float(settings.get("fontScale", 1.0))
         self.font_family = str(settings.get("fontFamily", "Pixelon"))
         if is_disabled():
             self.status = "disabled"
+            self.reason = ""
+            self.stop_centering()
             return
+        camera_enabled = canvas_enabled()
+        if camera_enabled:
+            self.pump_center()
+        else:
+            self.stop_centering()
         now = time.monotonic()
         if now - self.last_hyprland_poll >= HYPRLAND_POLL_INTERVAL:
             self.last_hyprland_poll = now
@@ -552,13 +647,16 @@ class Coordinator:
         if not eligible:
             self.stop_centering()
             return
-        if len(eligible) < 3:
+        camera_ready = camera_enabled and sum(bool(item["camera"]) for item in eligible) >= 3
+        if not camera_ready:
             self.stop_centering()
 
         if self.lyrics_future is None:
             if now - self.last_poll < LYRICS_POLL_INTERVAL:
                 return
             self.last_poll = now
+            if self.status == "waiting":
+                self.status = "loading"
             self.lyrics_future = self.executor.submit(self.lyrics_status)
             return
         if not self.lyrics_future.done():
@@ -566,17 +664,18 @@ class Coordinator:
         try:
             lyric = self.lyrics_future.result()
         except Exception:
-            lyric = {"ok": False, "reason": "spotify"}
+            lyric = {"ok": False, "reason": "backend-error"}
         self.lyrics_future = None
+        self.reason = str(lyric.get("reason", ""))
         player = str(lyric.get("player", "")).lower()
         if not player or "spotify" not in player:
             self.status = "spotify"
             return
-        if str(lyric.get("status", "")) != "Playing":
-            self.status = "paused"
-            return
         if not lyric.get("ok"):
             self.status = "lyrics"
+            return
+        if str(lyric.get("status", "")) != "Playing":
+            self.status = "paused"
             return
         track_key = "\0".join([str(lyric.get("title", "")), str(lyric.get("artist", "")), str(lyric.get("duration", ""))])
         if track_key != self.track_key:
@@ -598,17 +697,15 @@ class Coordinator:
             group_text = str(lyric.get("line", "")).strip()
             event = "\0".join([track_key, str(lyric.get("lineTime", "")), "line"])
         self.status = "active"
-        if event == self.last_event:
+        if event == self.last_event and any(item["address"] == self.target for item in eligible):
             return
         self.last_event = event
         target = eligible[self.cursor % len(eligible)]
         self.cursor += 1
         self.target = str(target["address"])
         self.word = group_text
-        if not self.word:
-            return
         self.sequence += 1
-        if len(eligible) >= 3:
+        if self.word and camera_ready and target["camera"]:
             self.queue_center(self.target, self.sequence)
         else:
             self.centered_sequence = self.sequence
@@ -619,16 +716,13 @@ class Coordinator:
             address = str(payload.get("address", ""))
             workspace = payload.get("workspace")
             if address and isinstance(workspace, int):
-                if self.workspace is None:
-                    self.workspace = workspace
-                if workspace == self.workspace:
-                    item = self.participants.get(address)
-                    if item is None:
-                        self.order += 1
-                        item = {"address": address, "order": self.order}
-                        self.participants[address] = item
-                        self.last_hyprland_poll = 0.0
-                    item["seen"] = time.monotonic()
+                item = self.participants.get(address)
+                if item is None:
+                    self.order += 1
+                    item = {"address": address, "order": self.order}
+                    self.participants[address] = item
+                    self.last_hyprland_poll = 0.0
+                item["seen"] = time.monotonic()
         elif op == "unregister":
             self.participants.pop(str(payload.get("address", "")), None)
             self.last_hyprland_poll = 0.0
@@ -669,12 +763,13 @@ def daemon() -> int:
                     else:
                         coordinator.update()
             finally:
+                coordinator.stop_centering()
                 coordinator.executor.shutdown(wait=False, cancel_futures=True)
                 SOCKET_PATH.unlink(missing_ok=True)
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(prog="velyrics", description="Spatial Spotify lyrics for Infinite Desktop")
+    parser = argparse.ArgumentParser(prog="velyrics", description="Spotify lyrics for one or more terminals; Infinite Desktop is optional")
     parser.add_argument("command", nargs="?", choices=["toggle", "status"])
     parser.add_argument("--daemon", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()

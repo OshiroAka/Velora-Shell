@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Layouts
 import Quickshell
 import Quickshell.Io
 
@@ -9,7 +10,7 @@ Item {
     property bool opened: true
     property bool reducedMotion: false
     property color surfaceColor: "#24242d"
-    readonly property bool interactionHeld: awaitingConfirmation || outputs.popup.visible || modeSelect.popup.visible
+    readonly property bool interactionHeld: awaitingConfirmation || outputs.popup.visible || modeSelect.popup.visible || scaleControl.pressed
     property color ink: "white"
     property string uiFont: "sans-serif"
     property var monitors: []
@@ -100,12 +101,10 @@ Item {
         }
     }
     Column {
-                anchors.margins: 0
-                anchors.fill: parent
-                spacing: 9
-                Text { text: "Monitores"; color: root.ink; font.family: root.uiFont; font.pixelSize: 17; font.weight: Font.DemiBold }
+                anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
+                spacing: 8
                 Row {
-                    width: parent.width
+                    width: parent.width; height: 56
                     spacing: 6
                     Repeater {
                         model: [
@@ -117,7 +116,10 @@ Item {
                             required property var modelData
                             objectName: "monitorChoice-" + modelData.key
                             width: (root.width - 12) / 3
+                            height: 56
                             monitorChoice: true
+                            compact: true
+                            loopPreview: root.opened
                             reducedMotion: root.reducedMotion
                             choice: modelData.key
                             text: modelData.label
@@ -133,25 +135,28 @@ Item {
                 MonitorSelect {
                     id: outputs
                     objectName: "monitorOutput"
-                    width: parent.width; height: 36
+                    width: parent.width; height: 32
+                    Accessible.name: "Monitor"
                     model: root.monitors.map(m => m.name + (m.description ? " · " + m.description : ""))
                     currentIndex: root.monitorIndex
                     onActivated: index => root.select(index)
                 }
-                Text { text: "Resolução e frequência"; color: root.ink; font.family: root.uiFont; font.pixelSize: 11 }
                 MonitorSelect {
                     id: modeSelect
                     objectName: "monitorMode"
-                    width: parent.width; height: 36
+                    width: parent.width; height: 32
+                    Accessible.name: "Resolução e frequência"
                     model: root.modes
                     currentIndex: root.modes.indexOf(root.selectedMode)
                     onActivated: index => root.selectedMode = root.modes[index]
                 }
-                Text { text: "Escala · " + Math.round(root.selectedScale * 100) + "%"; color: root.ink; font.family: root.uiFont; font.pixelSize: 11 }
+                RowLayout {
+                    width: parent.width; height: 30; spacing: 8
+                    VeloraMaterialIcon { Layout.preferredWidth: 18; Layout.preferredHeight: 18; iconName: "display"; iconColor: root.ink; opacity: .7 }
                 VeloraMotionSlider {
                     id: scaleControl
                     objectName: "monitorScale"
-                    width: parent.width; height: 30
+                    Layout.fillWidth: true; Layout.preferredHeight: 30
                     Accessible.name: "Escala do monitor"
                     from: 0.5; to: 3; stepSize: 0.05
                     value: root.selectedScale
@@ -160,17 +165,41 @@ Item {
                     accent: root.alpha(root.ink, .65)
                     reducedMotion: root.reducedMotion
                 }
+                    Text {
+                        Layout.preferredWidth: 37
+                        text: Math.round(root.selectedScale * 100) + "%"
+                        color: root.ink; font.family: root.uiFont; font.pixelSize: 11
+                        horizontalAlignment: Text.AlignRight
+                    }
+                }
                 Text {
+                    objectName: "monitorStatus"
+                    visible: root.error.length > 0 || root.awaitingConfirmation
                     width: parent.width
-                    text: root.error || (root.awaitingConfirmation ? "Confirme em 12 segundos ou a tela será restaurada." : "As mudanças são aplicadas à sessão atual.")
-                    color: root.ink; opacity: root.error ? 1 : 0.7
+                    text: root.error || "Manter alterações?"
+                    color: root.ink
                     font.family: root.uiFont; font.pixelSize: 11
-                    wrapMode: Text.WordWrap
+                    elide: Text.ElideRight
+                    Accessible.name: text
                 }
                 Row {
+                    width: parent.width; height: 32
                     spacing: 8
-                    MonitorButton { text: root.awaitingConfirmation ? "Manter" : "Aplicar"; enabled: !!root.monitor && !root.busy; onClicked: if (root.awaitingConfirmation) root.confirm(); else root.apply() }
-                    MonitorButton { text: root.awaitingConfirmation ? "Restaurar" : "Detectar"; enabled: !root.busy; onClicked: if (root.awaitingConfirmation) root.revert(); else root.refresh() }
+                    MonitorButton {
+                        objectName: "monitorApply"
+                        width: root.width - 40
+                        text: root.awaitingConfirmation ? "Manter" : "Aplicar"
+                        enabled: !!root.monitor && !root.busy
+                        onClicked: if (root.awaitingConfirmation) root.confirm(); else root.apply()
+                    }
+                    MonitorButton {
+                        objectName: "monitorRefresh"
+                        width: 32
+                        Accessible.name: root.awaitingConfirmation ? "Restaurar" : "Detectar monitores"
+                        enabled: !root.busy
+                        onClicked: if (root.awaitingConfirmation) root.revert(); else root.refresh()
+                        contentItem: VeloraMaterialIcon { iconName: root.awaitingConfirmation ? "rotate" : "refresh"; iconColor: root.ink; glyphScale: .65 }
+                    }
                 }
     }
     Component.onCompleted: refresh()
@@ -178,7 +207,7 @@ Item {
     component MonitorButton: Button {
         id: button
         property bool selected: false
-        width: 100; height: 31
+        width: 100; height: 32
         background: Rectangle { radius: 9; color: root.alpha(root.ink, button.selected ? 0.23 : button.hovered ? 0.18 : 0.08); border.width: 1; border.color: root.alpha(root.ink, button.selected ? 0.5 : 0.2) }
         contentItem: Text { text: button.text; color: root.ink; opacity: button.enabled ? 1 : 0.45; font.family: root.uiFont; font.pixelSize: 11; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
     }

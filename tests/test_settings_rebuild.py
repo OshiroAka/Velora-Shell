@@ -27,11 +27,14 @@ class SettingsRebuildTests(unittest.TestCase):
                 else:
                     (scripts/path.name).write_text('#!/usr/bin/env python3\nimport sys\nprint("on" if sys.argv[0].endswith("hyprland-blur") else "{}")\n')
                     (scripts/path.name).chmod(0o755)
+            kittydir=base/"host-config/kitty";kittydir.mkdir(parents=True)
+            (kittydir/"velora-pywal.conf").write_text("background #253948\nbackground_opacity 0.47\n")
             (base/"shell.qml").write_text((ROOT/"tests/fixtures/settings-rebuild.qml").read_text().replace('"../../','"./'))
             (base/"runtime").mkdir(mode=0o700)
             env = dict(os.environ, HOME=str(base), QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software", VELORA_VALIDATE="1",
                 XDG_CONFIG_HOME=str(base/"user-config"), XDG_DATA_HOME=str(base/"data"), XDG_STATE_HOME=str(base/"state"),
                 XDG_CACHE_HOME=str(base/"cache"), XDG_RUNTIME_DIR=str(base/"runtime"))
+            env["VELORA_HOST_XDG_CONFIG_HOME"]=str(base/"host-config")
             env.pop("WAYLAND_DISPLAY",None)
             result = subprocess.run([executable,"-p",str(base)],env=env,text=True,capture_output=True,timeout=25)
             output = result.stdout+result.stderr

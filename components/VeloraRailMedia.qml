@@ -53,9 +53,6 @@ Item {
         }
         HoverHandler { id: hover; blocking: false; onHoveredChanged: root.triggerHoverChanged(hovered) }
         TapHandler { acceptedButtons: Qt.LeftButton; onTapped: root.activated() }
-        ToolTip.visible: hover.hovered && !root.selected
-        ToolTip.delay: 900
-        ToolTip.text: root.hasPlayer ? root.media.title + (root.media.artist ? " · " + root.media.artist : "") : "Sua música · Spotify"
         VeloraMediaButton {
             objectName: "railMediaPlay"
             anchors.horizontalCenter: parent.horizontalCenter; y: 63

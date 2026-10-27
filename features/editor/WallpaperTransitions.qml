@@ -73,7 +73,7 @@ Column {
             selected: root.backend ? root.backend.wallpaperLiveTransition : "shader"
             onChosen: id => { if(root.backend) root.backend.setWallpaperLiveTransition(id) }
         }
-        Text { width: parent.width; text: "Escolha como trocar entre vídeos. Imagens estáticas usam a transição nativa."
+        Text { width: parent.width; text: "Imagens usam a transição nativa. Vídeos usam o efeito do compositor quando disponível, sem imagem intermediária."
             wrapMode: Text.WordWrap; color: root.theme.textSecondary; font.family: root.theme.bodyFont; font.pixelSize: 11 }
     }
 }

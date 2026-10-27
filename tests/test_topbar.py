@@ -10,6 +10,119 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class TopbarTests(unittest.TestCase):
+    def test_toolbox_dots_toggle_keyboard_and_placeholder_bounds(self):
+        if not shutil.which("qs"):
+            self.skipTest("Quickshell is required")
+        with tempfile.TemporaryDirectory(prefix="velora-topbar-toolbox-") as directory:
+            base = Path(directory)
+            for name in ("core", "features", "components", "platform", "services", "assets"):
+                (base / name).symlink_to(ROOT / name, target_is_directory=True)
+            (base / "shell.qml").write_text((ROOT / "tests/fixtures/topbar-toolbox.qml").read_text().replace('"../../', '"./'))
+            (base / "runtime").mkdir(mode=0o700)
+            env = dict(os.environ, QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software",
+                XDG_RUNTIME_DIR=str(base / "runtime"), XDG_CONFIG_HOME=str(base / "config"),
+                XDG_STATE_HOME=str(base / "state"), XDG_CACHE_HOME=str(base / "cache"), VELORA_VALIDATE="1")
+            env.pop("WAYLAND_DISPLAY", None)
+            result = subprocess.run(["qs", "-p", str(base)], env=env, text=True, capture_output=True, timeout=12)
+            output = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, output)
+            self.assertIn("TOPBAR_TOOLBOX_OK", output)
+            for error in ("FAILED", "TypeError", "ReferenceError", "Binding loop", "Cannot assign"):
+                self.assertNotIn(error, output)
+
+    def test_timer_alert_morph_buttons_notification_actions_and_reload(self):
+        if not shutil.which("qs"):
+            self.skipTest("Quickshell is required")
+        with tempfile.TemporaryDirectory(prefix="velora-timer-alert-") as directory:
+            base = Path(directory)
+            for name in ("features", "components", "services", "core", "platform", "assets", "shaders"):
+                (base / name).symlink_to(ROOT / name, target_is_directory=True)
+            (base / "shell.qml").write_text((ROOT / "tests/fixtures/timer-alert.qml").read_text().replace('"../../', '"./'))
+            (base / "runtime").mkdir(mode=0o700)
+            (base / "bin").mkdir()
+            notification = base / "bin/notify-send"
+            notification.write_text('#!/bin/sh\nprintf "notification\\n" >> "$XDG_STATE_HOME/notifications"\n'
+                'if [ "$VELORA_TIMER_ALERT_MODE" = notification ]; then sleep 0.15; printf "snooze\\n"; fi\n')
+            notification.chmod(0o755)
+            env = dict(os.environ, QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software",
+                XDG_RUNTIME_DIR=str(base / "runtime"), XDG_CONFIG_HOME=str(base / "config"),
+                XDG_STATE_HOME=str(base / "state"), XDG_CACHE_HOME=str(base / "cache"),
+                PATH=str(base / "bin") + os.pathsep + os.environ["PATH"], VELORA_VALIDATE="1")
+            env.pop("WAYLAND_DISPLAY", None)
+            for mode, marker in (("buttons", "TIMER_ALERT_OK"), ("reload", "TIMER_ALERT_RELOAD_OK"),
+                                 ("notification", "TIMER_ALERT_NOTIFICATION_OK")):
+                result = subprocess.run(["qs", "-p", str(base)], env=dict(env, VELORA_TIMER_ALERT_MODE=mode),
+                    text=True, capture_output=True, timeout=12)
+                output = result.stdout + result.stderr
+                self.assertEqual(result.returncode, 0, output)
+                self.assertIn(marker, output)
+                for error in ("FAILED", "TypeError", "ReferenceError", "Binding loop", "Cannot assign", "QWARN"):
+                    self.assertNotIn(error, output)
+            # Each expiration emits once; restoring completion does not re-notify.
+            self.assertEqual((base / "state/notifications").read_text().splitlines(), ["notification"] * 4)
+
+    def test_charging_adapts_to_actual_media_lyrics_and_whatsapp_panels(self):
+        if not shutil.which("qs"):
+            self.skipTest("Quickshell is required")
+        with tempfile.TemporaryDirectory(prefix="velora-charging-edge-") as directory:
+            base = Path(directory)
+            for name in ("core", "features", "components", "services", "assets", "platform", "scripts"):
+                (base / name).symlink_to(ROOT / name, target_is_directory=True)
+            source = (ROOT / "tests/fixtures/edge-media-popover.qml").read_text().replace('"../../', '"./')
+            (base / "shell.qml").write_text(source)
+            (base / "runtime").mkdir(mode=0o700)
+            env = dict(os.environ, QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software",
+                XDG_RUNTIME_DIR=str(base / "runtime"), XDG_CONFIG_HOME=str(base / "config"),
+                XDG_STATE_HOME=str(base / "state"), XDG_CACHE_HOME=str(base / "cache"),
+                VELORA_VALIDATE="1", VELORA_CHARGING_POLICY_CHECK="1")
+            env.pop("WAYLAND_DISPLAY", None)
+            result = subprocess.run(["qs", "-p", str(base)], env=env, text=True, capture_output=True, timeout=12)
+            output = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, output)
+            self.assertIn("CHARGING_EDGE_POLICY_OK", output)
+            for error in ("FAILED", "FAIL!", "TypeError", "ReferenceError", "Binding loop", "QWARN"):
+                self.assertNotIn(error, output)
+
+    def test_compact_focus_and_battery_fit_and_keep_controls(self):
+        if not shutil.which("qs"):
+            self.skipTest("Quickshell is required")
+        with tempfile.TemporaryDirectory(prefix="velora-topbar-compact-") as directory:
+            base = Path(directory)
+            for name in ("core", "features", "components", "platform", "services", "assets"):
+                (base / name).symlink_to(ROOT / name, target_is_directory=True)
+            (base / "shell.qml").write_text((ROOT / "tests/fixtures/topbar-compact.qml").read_text().replace('"../../', '"./'))
+            (base / "runtime").mkdir(mode=0o700)
+            env = dict(os.environ, QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software",
+                XDG_RUNTIME_DIR=str(base / "runtime"), XDG_CONFIG_HOME=str(base / "config"),
+                XDG_STATE_HOME=str(base / "state"), XDG_CACHE_HOME=str(base / "cache"), VELORA_VALIDATE="1")
+            env.pop("WAYLAND_DISPLAY", None)
+            result = subprocess.run(["qs", "-p", str(base)], env=env, text=True, capture_output=True, timeout=12)
+            output = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, output)
+            self.assertIn("TOPBAR_COMPACT_OK", output)
+            for error in ("TOPBAR_COMPACT_FAILED", "TypeError", "ReferenceError", "Binding loop", "Cannot assign"):
+                self.assertNotIn(error, output)
+
+    def test_hot_hover_handoff_preserves_pose_and_content(self):
+        if not shutil.which("qs"):
+            self.skipTest("Quickshell is required")
+        with tempfile.TemporaryDirectory(prefix="velora-topbar-handoff-") as directory:
+            base = Path(directory)
+            for name in ("core", "features", "components", "platform", "services", "assets"):
+                (base / name).symlink_to(ROOT / name, target_is_directory=True)
+            (base / "shell.qml").write_text((ROOT / "tests/fixtures/topbar-handoff.qml").read_text().replace('"../../', '"./'))
+            (base / "runtime").mkdir(mode=0o700)
+            env = dict(os.environ, QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software",
+                XDG_RUNTIME_DIR=str(base / "runtime"), XDG_CONFIG_HOME=str(base / "config"),
+                XDG_STATE_HOME=str(base / "state"), XDG_CACHE_HOME=str(base / "cache"), VELORA_VALIDATE="1")
+            env.pop("WAYLAND_DISPLAY", None)
+            result = subprocess.run(["qs", "-p", str(base)], env=env, text=True, capture_output=True, timeout=12)
+            output = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, output)
+            self.assertIn("TOPBAR_HANDOFF_OK", output)
+            for error in ("TOPBAR_HANDOFF_FAILED", "TypeError", "ReferenceError", "Binding loop", "Cannot assign"):
+                self.assertNotIn(error, output)
+
     def test_detail_motion_inputs_and_animation_lifecycle(self):
         runner = Path("/usr/lib/qt6/bin/qmltestrunner")
         if not runner.is_file():
@@ -21,7 +134,7 @@ class TopbarTests(unittest.TestCase):
                                     capture_output=True, text=True, env=env, timeout=25)
             output = result.stdout + result.stderr
             self.assertEqual(result.returncode, 0, output)
-            self.assertIn("7 passed, 0 failed", output)
+            self.assertRegex(output, r"Totals:\s+[1-9]\d* passed, 0 failed, \d+ skipped")
             self.assertNotIn("QWARN", output)
 
     def test_execution_events_and_expiration(self):

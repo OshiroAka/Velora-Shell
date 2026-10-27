@@ -55,6 +55,19 @@ case "$command" in
         start_shell
         ;;
     ipc) discover_graphical_session || true; shift; exec qs -p "$project_dir" ipc call "$@" ;;
+    liquid|terminal-liquid)
+        action=${2:-toggle}
+        case "$action" in
+            on|off|toggle|status|strength) ;;
+            *) printf 'uso: velora liquid on|off|toggle|status|strength [0-3]\n' >&2; exit 1 ;;
+        esac
+        if [[ "$action" == strength && $# != 3 ]] || [[ "$action" != strength && $# -gt 2 ]]; then
+            printf 'uso: velora liquid on|off|toggle|status|strength [0-3]\n' >&2
+            exit 1
+        fi
+        discover_graphical_session || true
+        exec qs -p "$project_dir" ipc call composition terminalLiquid "$action" "${3:-1}"
+        ;;
     status|Status)
         discover_graphical_session || true
         if is_running; then
@@ -65,7 +78,7 @@ case "$command" in
         fi
         ;;
     *)
-        printf 'uso: velora start|stop|restart|status\n' >&2
+        printf 'uso: velora start|stop|restart|status|liquid [on|off|toggle|status|strength 0-3]\n' >&2
         exit 2
         ;;
 esac

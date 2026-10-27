@@ -10,7 +10,7 @@ VeloraRailPopover {
     property var manager: backend
     property bool managing: false
     property string removeAddress: ""
-    closeOnLeave: !managing
+    closeOnLeave: !managing && !manager.busy
     property color ink: "white"
     property color accent: "#e4c6c0"
     property string uiFont: "sans-serif"
@@ -20,32 +20,26 @@ VeloraRailPopover {
     property bool powered: manager.powered
     readonly property var knownDevices: devices.filter(d => d && (d.paired || d.bonded || d.connected))
     readonly property bool hasDevices: available && powered && knownDevices.length > 0
-    property string selectedAddress: ""
-    property real selectedCenter: 42
-    readonly property var selectedDevice: knownDevices.find(d => d.address === selectedAddress) || null
-    readonly property string deviceName: selectedDevice ? (selectedDevice.name || selectedDevice.deviceName || selectedDevice.address) : ""
-    property real nameReveal: 0
-    property real nameContentReveal: 0
-    readonly property real nameWidth: Math.min(280, nameMetrics.advanceWidth + 32, Math.max(0, width - railWidth - targetWidth - 16))
-    readonly property real nameY: Math.max(bodyY + 22, Math.min(bodyY + bodyHeight - 66, bodyY + selectedCenter - 22))
-    property alias nameMask: nameArea
     preferredWidth: managing ? 360 : 72
     preferredHeight: managing ? (manager.pairPrompt ? 460 : 380) : (Math.min(hasDevices ? knownDevices.length : 0, 5) + 1) * 56 + 32
     contentPadding: 12
-    extraHovered: nameHover.hovered
-    extension: ({ y: nameY, width: nameWidth * nameReveal * reveal, height: 44 })
-    onOpenedChanged: if (!opened) {
-        hideName(); manager.stopScan()
-        if (manager.busy) manager.cancel()
+    onOpenedChanged: {
+        if (!opened) {
+            manager.stopScan()
+            if (manager.busy && manager.action === "pair") manager.cancel()
+        } else if (manager.error) managing = true
     }
     onMountedChanged: if (!mounted) { managing = false; removeAddress = "" }
     Behavior on preferredWidth { NumberAnimation { duration: 220; easing.type: Easing.InOutCubic } }
     function openManager() {
-        hideName(); managing = true; removeAddress = ""
+        managing = true; removeAddress = ""
         manager.scan()
     }
-    onSelectedDeviceChanged: if (!selectedDevice) hideName()
-    onHasDevicesChanged: if (!hasDevices) hideName()
+    Connections {
+        target: root.manager
+        function onErrorChanged() { if (root.opened && root.manager.error) root.managing = true }
+        function onBusyChanged() { if (!root.manager.busy) root.updatePresence() }
+    }
 
     function alpha(c, a) { return Qt.rgba(c.r, c.g, c.b, a) }
     function iconFor(device) {
@@ -60,30 +54,7 @@ VeloraRailPopover {
         if (/computer/.test(icon)) return "display"
         return "bluetooth"
     }
-    function showName(device, center) {
-        if (!opened || managing || !device) return
-        nameLeave.stop(); nameClosing.stop()
-        selectedAddress = device.address
-        selectedCenter = center
-        nameExpanding.restart()
-        if (nameContentReveal < 0.99) nameDelay.restart()
-    }
-    function hideName() {
-        nameDelay.stop(); nameEntering.stop(); nameExpanding.stop(); nameLeave.stop()
-        nameClosing.restart()
-    }
-    Behavior on selectedCenter { NumberAnimation { duration: 220; easing.type: Easing.InOutCubic } }
     Behavior on preferredHeight { NumberAnimation { duration: 220; easing.type: Easing.InOutCubic } }
-    Timer { id: nameLeave; interval: 180; onTriggered: if (!nameHover.hovered) root.hideName() }
-    NumberAnimation { id: nameExpanding; target: root; property: "nameReveal"; to: 1; duration: 210; easing.type: Easing.OutCubic }
-    Timer { id: nameDelay; interval: 135; onTriggered: nameEntering.restart() }
-    NumberAnimation { id: nameEntering; target: root; property: "nameContentReveal"; to: 1; duration: 150; easing.type: Easing.OutCubic }
-    SequentialAnimation {
-        id: nameClosing
-        NumberAnimation { target: root; property: "nameContentReveal"; to: 0; duration: 65 }
-        NumberAnimation { target: root; property: "nameReveal"; to: 0; duration: 125; easing.type: Easing.InOutCubic }
-    }
-    TextMetrics { id: nameMetrics; font.family: root.uiFont; font.pixelSize: 14; text: root.deviceName }
     customContent: Component {
         Item {
             Flickable {
@@ -94,7 +65,6 @@ VeloraRailPopover {
                 clip: true
                 contentHeight: deviceColumn.height
                 boundsBehavior: Flickable.StopAtBounds
-                onContentYChanged: root.hideName()
                 Column {
                     id: deviceColumn
                     width: list.width
@@ -109,30 +79,35 @@ VeloraRailPopover {
                             height: 48
                             radius: 11
                             activeFocusOnTab: true
+                            readonly property bool pending: root.manager.busy && root.manager.targetAddress === modelData.address
                             readonly property bool highlighted: tileHover.hovered || activeFocus
+                            enabled: root.powered && !root.manager.busy
                             color: root.alpha(root.ink, highlighted ? 0.15 : modelData.connected ? 0.10 : 0.035)
                             border.width: 1
                             border.color: root.alpha(root.ink, highlighted ? 0.32 : 0.14)
                             Behavior on color { ColorAnimation { duration: 120 } }
                             Accessible.role: Accessible.Button
-                            Accessible.name: modelData.name || modelData.deviceName || modelData.address
-                            Accessible.description: modelData.connected ? "Conectado" : "Pareado"
-                            Accessible.onPressAction: revealName()
-                            function revealName() {
-                                const point = mapToItem(root, width / 2, height / 2)
-                                root.showName(modelData, point.y - root.bodyY)
-                            }
-                            onActiveFocusChanged: {
-                                if (activeFocus) { list.contentY = Math.max(0, Math.min(list.contentHeight - list.height, y)); revealName() }
-                                else nameLeave.restart()
-                            }
-                            Keys.onReturnPressed: revealName()
-                            Keys.onSpacePressed: revealName()
+                            Accessible.name: (modelData.connected ? "Desconectar " : "Conectar ")
+                                + (modelData.name || modelData.deviceName || modelData.address)
+                            Accessible.description: pending ? "Aguarde" : modelData.connected ? "Conectado" : "Pareado"
+                            Accessible.onPressAction: activate()
+                            function activate() { if (enabled) root.manager.toggleDevice(modelData) }
+                            onActiveFocusChanged: if (activeFocus)
+                                list.contentY = Math.max(0, Math.min(list.contentHeight - list.height, y))
+                            Keys.onReturnPressed: activate()
+                            Keys.onSpacePressed: activate()
                             VeloraMaterialIcon {
                                 anchors.centerIn: parent
                                 width: 28; height: 28
                                 iconName: root.iconFor(tile.modelData)
+                                opacity: tile.pending ? .35 : 1
                                 iconColor: root.ink
+                            }
+                            BusyIndicator {
+                                objectName: "bluetoothPending" + tile.modelData.address
+                                anchors.centerIn: parent; width: 38; height: 38
+                                running: tile.pending && root.visible && !root.reducedMotion
+                                visible: tile.pending
                             }
                             Rectangle {
                                 anchors { right: parent.right; bottom: parent.bottom; margins: 5 }
@@ -140,15 +115,8 @@ VeloraRailPopover {
                                 color: root.accent
                                 visible: tile.modelData.connected
                             }
-                            HoverHandler {
-                                id: tileHover
-                                blocking: false
-                                onHoveredChanged: {
-                                    if (hovered) tile.revealName()
-                                    else nameLeave.restart()
-                                }
-                            }
-                            TapHandler { onTapped: tile.revealName() }
+                            HoverHandler { id: tileHover; blocking: false }
+                            TapHandler { onTapped: tile.activate() }
                         }
                     }
                 }
@@ -180,7 +148,7 @@ VeloraRailPopover {
                 }
                 Text {
                     width: parent.width; height: 32
-                    text: root.manager.error || (!root.available ? "Bluetooth indisponível" : !root.powered ? "Bluetooth desligado" : root.manager.busy ? "Aguarde…" : root.manager.scanning ? "Buscando dispositivos…" : "Dispositivos disponíveis")
+                    text: root.manager.error || (!root.available ? "Bluetooth indisponível" : !root.powered ? "Bluetooth desligado" : root.manager.busy ? (root.manager.action === "connect" ? "Conectando…" : root.manager.action === "disconnect" ? "Desconectando…" : "Aguarde…") : root.manager.scanning ? "Buscando dispositivos…" : "Dispositivos disponíveis")
                     color: root.ink; font.family: root.uiFont; font.pixelSize: 12
                     wrapMode: Text.WordWrap; maximumLineCount: 2; elide: Text.ElideRight
                 }
@@ -201,21 +169,33 @@ VeloraRailPopover {
                                 color: root.alpha(root.ink, 0.055)
                                 VeloraMaterialIcon { x: 8; y: 12; width: 24; height: 24; iconName: root.iconFor(deviceRow.modelData); iconColor: root.ink }
                                 Text {
-                                    x: 40; width: parent.width - 136; height: 48
+                                    x: 40; width: parent.width - 174; height: 48
                                     text: deviceRow.modelData.name || deviceRow.modelData.deviceName || deviceRow.modelData.address
                                     color: root.ink; font.family: root.uiFont; font.pixelSize: 12
                                     verticalAlignment: Text.AlignVCenter; elide: Text.ElideRight
                                 }
                                 ManagerButton {
-                                    objectName: "bluetoothAction" + deviceRow.modelData.address
-                                    x: parent.width - 88; y: 8; width: 80
-                                    text: deviceRow.modelData.paired || deviceRow.modelData.bonded ? (root.removeAddress === deviceRow.modelData.address ? "Confirmar" : "Remover") : "Parear"
+                                    objectName: "bluetoothConnect" + deviceRow.modelData.address
+                                    x: parent.width - 126; y: 8; width: 84
+                                    text: root.manager.busy && root.manager.targetAddress === deviceRow.modelData.address ? "…"
+                                        : deviceRow.modelData.connected ? "Desconectar"
+                                        : deviceRow.modelData.paired || deviceRow.modelData.bonded ? "Conectar" : "Parear"
                                     enabled: root.powered && !root.manager.busy
+                                    onClicked: { root.removeAddress = ""; root.manager.toggleDevice(deviceRow.modelData) }
+                                }
+                                ManagerButton {
+                                    objectName: "bluetoothAction" + deviceRow.modelData.address
+                                    x: parent.width - 34; y: 8; width: 32
+                                    visible: deviceRow.modelData.paired || deviceRow.modelData.bonded
+                                    enabled: root.powered && !root.manager.busy
+                                    Accessible.name: root.removeAddress === deviceRow.modelData.address ? "Confirmar remoção" : "Remover dispositivo"
+                                    contentItem: VeloraMaterialIcon {
+                                        iconName: root.removeAddress === deviceRow.modelData.address ? "check" : "delete"
+                                        iconColor: root.ink; glyphScale: .7
+                                    }
                                     onClicked: {
-                                        if (deviceRow.modelData.paired || deviceRow.modelData.bonded) {
-                                            if (root.removeAddress === deviceRow.modelData.address) { root.manager.remove(deviceRow.modelData.address); root.removeAddress = "" }
-                                            else root.removeAddress = deviceRow.modelData.address
-                                        } else { root.removeAddress = ""; root.manager.pair(deviceRow.modelData.address) }
+                                        if (root.removeAddress === deviceRow.modelData.address) { root.manager.remove(deviceRow.modelData.address); root.removeAddress = "" }
+                                        else root.removeAddress = deviceRow.modelData.address
                                     }
                                 }
                             }
@@ -231,7 +211,7 @@ VeloraRailPopover {
                         enabled: root.available && !root.manager.busy
                         onClicked: { root.removeAddress = ""; if (!root.powered) root.manager.powerOn(); else if (root.manager.scanning) root.manager.stopScan(); else root.manager.scan() }
                     }
-                    ManagerButton { width: 144; text: root.manager.busy ? "Cancelar pareamento" : "Cancelar remoção"; visible: root.manager.busy || root.removeAddress.length > 0; onClicked: { root.removeAddress = ""; if (root.manager.busy) root.manager.cancel() } }
+                    ManagerButton { width: 144; text: root.manager.busy ? "Cancelar operação" : "Cancelar remoção"; visible: root.manager.busy || root.removeAddress.length > 0; onClicked: { root.removeAddress = ""; if (root.manager.busy) root.manager.cancel() } }
                 }
                 Column {
                     width: parent.width; spacing: 6
@@ -252,38 +232,5 @@ VeloraRailPopover {
         height: 32
         background: Rectangle { radius: 8; color: root.alpha(root.ink, button.hovered ? 0.16 : 0.08); border.width: 1; border.color: root.alpha(root.ink, 0.15) }
         contentItem: Text { text: button.text; color: root.ink; opacity: button.enabled ? 1 : 0.4; font.family: root.uiFont; font.pixelSize: 11; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
-    }
-    Item {
-        id: nameArea
-        x: root.rightSide ? root.width - root.railWidth - root.bodyWidth - width : root.railWidth + root.bodyWidth
-        y: root.nameY - 8
-        width: root.mounted ? root.extension.width : 0
-        height: root.mounted && root.nameReveal > 0.01 ? 60 : 0
-        visible: root.mounted && width > 0.01
-        HoverHandler {
-            id: nameHover
-            blocking: false
-            onHoveredChanged: {
-                if (hovered) nameLeave.stop()
-                else nameLeave.restart()
-            }
-        }
-        Item {
-            anchors.fill: parent
-            clip: true
-            Text {
-                x: 16
-                y: 8
-                width: Math.max(0, parent.width - 32)
-                height: 44
-                text: root.deviceName
-                color: root.ink
-                font.family: root.uiFont
-                font.pixelSize: 14
-                verticalAlignment: Text.AlignVCenter
-                elide: Text.ElideRight
-                opacity: root.nameContentReveal * root.contentReveal
-            }
-        }
     }
 }

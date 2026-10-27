@@ -5,10 +5,13 @@ import sys
 import time
 import urllib.parse
 import urllib.request
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from pathlib import Path
 
 
 CACHE_TTL = 900
+SCHEMA_VERSION = 3
 
 
 def cache_path() -> Path:
@@ -58,19 +61,23 @@ def desc_from_raw(item: dict) -> str:
 
 def weather_icon(desc: str, code: str = "") -> str:
     text = (desc or "").lower()
-    if "chuva" in text or "rain" in text or "garoa" in text:
+    if "trovo" in text or "thunder" in text or "storm" in text:
+        return "storm"
+    if "chuva" in text or "chuvis" in text or "rain" in text or "garoa" in text or "drizzle" in text:
         return "rain"
     if "neve" in text or "snow" in text:
         return "snow"
-    if "trovo" in text or "thunder" in text:
-        return "storm"
+    if "parcial" in text or "partly" in text:
+        return "partly"
     if "nublado" in text or "cloud" in text:
         return "cloud"
     if "limpo" in text or "clear" in text or "sol" in text or "sunny" in text:
         return "sun"
     if str(code) in {"113"}:
         return "sun"
-    if str(code) in {"116", "119", "122", "143", "248", "260"}:
+    if str(code) == "116":
+        return "partly"
+    if str(code) in {"119", "122", "143", "248", "260"}:
         return "cloud"
     if str(code).startswith("2") or str(code).startswith("3"):
         return "rain"
@@ -88,24 +95,64 @@ def time_label(raw_time: str) -> str:
     return f"{hour:02d}:{minute:02d}"
 
 
-def normalize_hourly(raw: dict, limit=12) -> list[dict]:
-    out = []
+def observation_time(current: dict) -> datetime | None:
+    # Use the provider's local clock, not the shell's timezone: a configured
+    # city can be on another continent. Unknown times never relabel midnight.
+    text = safe_text(current.get("localObsDateTime"))
+    for pattern in ("%Y-%m-%d %I:%M %p", "%Y-%m-%d %H:%M"):
+        try:
+            return datetime.strptime(text, pattern)
+        except ValueError:
+            pass
+    return None
+
+
+def normalize_hourly(raw: dict, limit=12, local_time: datetime | None = None) -> list[dict]:
+    if limit <= 0:
+        return []
+    current = (raw.get("current_condition") or [{}])[0]
+    observed = local_time or observation_time(current)
+    samples = []
     for day in raw.get("weather") or []:
+        try:
+            midnight = datetime.strptime(safe_text(day.get("date")), "%Y-%m-%d")
+        except ValueError:
+            continue
         for hour in day.get("hourly") or []:
+            try:
+                clock = int(hour.get("time", ""))
+                if clock < 0 or clock // 100 > 23 or clock % 100 > 59:
+                    continue
+                stamp = midnight + timedelta(hours=clock // 100, minutes=clock % 100)
+            except (ValueError, TypeError):
+                continue
             desc = desc_from_raw(hour)
-            out.append({
-                "time": "Agora" if not out else time_label(hour.get("time", "0")),
+            samples.append((stamp, {
+                "time": stamp.strftime("%H:%M"),
+                "date": stamp.strftime("%Y-%m-%d"),
                 "temp": safe_text(hour.get("tempC"), "--"),
                 "feels": safe_text(hour.get("FeelsLikeC"), "--"),
                 "desc": desc,
                 "humidity": safe_text(hour.get("humidity"), "--"),
                 "wind": safe_text(hour.get("windspeedKmph"), "--"),
-                "rain": safe_text(hour.get("chanceofrain"), "0"),
+                "rain": safe_text(hour.get("chanceofrain"), "--"),
                 "icon": weather_icon(desc, safe_text(hour.get("weatherCode"))),
-            })
-            if len(out) >= limit:
-                return out
-    return out
+            }))
+    samples.sort(key=lambda item: item[0])
+    if not current:
+        return [item for _, item in samples[:limit]]
+    period = next((item for stamp, item in reversed(samples)
+                   if observed and stamp.date() == observed.date() and stamp <= observed), {})
+    now = {
+        "time": "Agora", "temp": safe_text(current.get("temp_C"), "--"),
+        "feels": safe_text(current.get("FeelsLikeC"), "--"),
+        "humidity": safe_text(current.get("humidity"), "--"),
+        "wind": safe_text(current.get("windspeedKmph"), "--"),
+        "rain": period.get("rain", "--"), "desc": desc_from_raw(current),
+        "icon": weather_icon(desc_from_raw(current), safe_text(current.get("weatherCode"))),
+    }
+    future = [item for stamp, item in samples if observed and stamp > observed]
+    return [now, *future[:limit-1]]
 
 
 def normalize_daily(raw: dict, limit=7) -> list[dict]:
@@ -135,17 +182,18 @@ def normalize_daily(raw: dict, limit=7) -> list[dict]:
     return out
 
 
-def normalize(raw: dict, from_cache=False) -> dict:
+def normalize(raw: dict, from_cache=False, local_time=None, timezone_name="") -> dict:
     current = (raw.get("current_condition") or [{}])[0]
     today = (raw.get("weather") or [{}])[0]
     astronomy = (today.get("astronomy") or [{}])[0]
     desc = desc_from_raw(current)
-    hourly = normalize_hourly(raw)
+    hourly = normalize_hourly(raw, local_time=local_time)
     daily = normalize_daily(raw)
     chance_rain = hourly[0].get("rain", "0") if hourly else "0"
 
     return {
-        "schema": 2,
+        "schema": SCHEMA_VERSION,
+        "timezone": timezone_name,
         "location": location_from_raw(raw),
         "temp": safe_text(current.get("temp_C"), "--"),
         "max": safe_text(today.get("maxtempC"), "--"),
@@ -197,7 +245,8 @@ def fallback_rich_from_legacy(item: dict | None) -> dict:
     item = item or {}
     desc = item.get("desc", "Clima indisponivel")
     return {
-        "schema": 2,
+        "schema": item.get("schema", 1),
+        "timezone": item.get("timezone", ""),
         "location": item.get("location", "Localizacao atual"),
         "temp": item.get("temp", "--"),
         "max": item.get("max", "--"),
@@ -254,7 +303,26 @@ def fetch_weather() -> dict:
     request = urllib.request.Request(url, headers={"User-Agent": "Velora-Shell/1.0"})
     with urllib.request.urlopen(request, timeout=5) as response:
         raw = json.loads(response.read().decode("utf-8"))
-    return normalize(raw, False)
+    current = (raw.get("current_condition") or [{}])[0]
+    local_clock = observation_time(current)
+    timezone_name = ""
+    if local_clock is None:
+        # JSON responses can omit localObsDateTime. wttr's %Z supplies the
+        # location's IANA timezone; retain it so later refreshes need one call.
+        cached = load_cache() or {}
+        if cached.get("location") == location_from_raw(raw):
+            timezone_name = safe_text(cached.get("timezone"))
+        try:
+            if not timezone_name:
+                timezone_request = urllib.request.Request(
+                    f"https://wttr.in{location_part}?format=%25Z",
+                    headers={"User-Agent": "Velora-Shell/1.0"})
+                with urllib.request.urlopen(timezone_request, timeout=2) as response:
+                    timezone_name = response.read(128).decode("utf-8").strip()
+            local_clock = datetime.now(ZoneInfo(timezone_name)).replace(tzinfo=None)
+        except (OSError, ValueError, ZoneInfoNotFoundError):
+            timezone_name = ""
+    return normalize(raw, False, local_clock, timezone_name)
 
 
 def main() -> None:
@@ -263,7 +331,7 @@ def main() -> None:
     cached = load_cache()
     now = int(time.time())
 
-    if cached and not force and now - int(cached.get("updated", 0)) < CACHE_TTL:
+    if cached and cached.get("schema") == SCHEMA_VERSION and not force and now - int(cached.get("updated", 0)) < CACHE_TTL:
         if json_mode:
             output_json(cached)
         else:

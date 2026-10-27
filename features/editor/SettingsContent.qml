@@ -162,7 +162,7 @@ Item {
     component LiquidStylePicker: Column {
         width: parent ? parent.width : 300
         spacing: 8
-        Text { text: "Liquid Glass"; color: root.ink; font.pixelSize: 14; font.weight: Font.DemiBold }
+        Text { text: root.config.barMaterial === "liquid" ? "Liquid Ass" : "Liquid Glass"; color: root.ink; font.pixelSize: 14; font.weight: Font.DemiBold }
         Components.VeloraSettingsTabs {
             theme: root.theme; motion: root.motion
             options: [{id:"clear",label:"Nítido"},{id:"frosted",label:"Fosco"}]
@@ -173,7 +173,7 @@ Item {
             width: parent.width; wrapMode: Text.WordWrap
             text: root.config.liquidGlassStyle === "frosted"
                 ? "Fundo suavizado para facilitar a leitura, com reflexos nas bordas."
-                : "Fundo nítido, com refração suave e reflexos nas bordas."
+                : "Fundo nítido, com refração ajustável e reflexos nas bordas."
             color: root.mutedInk; font.pixelSize: 11
         }
     }
@@ -376,10 +376,66 @@ Item {
                         width: parent.width; theme: root.theme; config: root.config; motion: root.motion
                         imageSource: root.wallpaper ? root.wallpaper.currentPreviewPath || root.wallpaper.currentPath : ""
                     }
-                    LiquidStylePicker { visible: root.config.barMaterial === "liquid" }
+                    LiquidStylePicker { visible: ["liquid", "liquid-glass"].includes(root.config.barMaterial) && !root.config.barMatchKittyMaterial }
+                    SettingSlider {
+                        objectName: "bar.brightness"; label: "Brilho da barra"
+                        minimum: .2; maximum: 1.2; value: root.config.barBrightness
+                        valueText: Math.round(value * 100) + "%"
+                        resettable: true; defaultValue: 1
+                        hint: "Barras, menus, molduras e Kitty sincronizado."
+                        onCommitted: value => root.config.setValue("bar.brightness", value)
+                    }
+                    SettingSlider {
+                        objectName: "bar.refraction"; label: "Refração da barra"
+                        visible: ["liquid", "liquid-glass"].includes(root.config.barMaterial)
+                        enabled: !root.config.barMatchKittyMaterial
+                        minimum: 0; maximum: 10; value: root.config.barRefractionStrength
+                        valueText: Number(value).toFixed(1) + "×"
+                        resettable: true; defaultValue: 1
+                        hint: root.config.barMatchKittyMaterial
+                            ? "Desative Kitty e barras iguais para ajustar separadamente."
+                            : "Distorção do fundo das barras e molduras. Padrão: 1×."
+                        onCommitted: value => root.config.setValue(root.config.barRefractionKey, value)
+                    }
+                    SettingSwitch {
+                        objectName: "bar.kitty-match"; label: "Kitty e barras iguais"
+                        hint: "Barras acompanham a cor, transparência e refração do Kitty."
+                        checked: root.config.barMatchKittyMaterial
+                        onTriggered: root.config.setValue("bar.matchKittyMaterial", !checked)
+                    }
+                    SettingSwitch {
+                        objectName: "bar.terminal-liquid"; label: "Liquid Ass no Kitty"
+                        checked: root.config.terminalLiquidEnabled
+                        onTriggered: root.config.setValue("appearance.terminalLiquidEnabled", !checked)
+                    }
+                    SettingSwitch {
+                        objectName: "bar.terminal-follow-bar"; label: "Kitty acompanha a barra"
+                        hint: "Usa a cor, opacidade, blur e refração atuais da barra."
+                        checked: root.config.terminalFollowBar
+                        onTriggered: root.config.setValue("appearance.terminalFollowBar", !checked)
+                    }
+                    SettingSlider {
+                        objectName: "bar.terminal-brightness"; label: "Brilho do Kitty"
+                        visible: root.config.terminalFollowBar
+                        enabled: root.config.terminalLiquidEnabled
+                        minimum: .8; maximum: 1.2; value: root.config.terminalBarBrightness
+                        valueText: Math.round(value * 100) + "%"
+                        resettable: true; defaultValue: 1
+                        hint: "Ajuste fino do fundo do terminal. 100% usa o brilho da barra."
+                        onCommitted: value => root.config.setValue("appearance.terminalBarBrightness", value)
+                    }
+                    SettingSlider {
+                        objectName: "bar.terminal-refraction"; label: "Refração do Kitty"
+                        minimum: 0; maximum: 3; value: root.config.terminalRefraction
+                        valueText: Number(value).toFixed(1) + "×"
+                        enabled: !root.config.terminalFollowBar && (root.config.terminalLiquidEnabled || root.config.barMatchKittyMaterial)
+                        hint: root.config.terminalFollowBar ? "A intensidade acompanha Refração da barra." : ""
+                        onCommitted: value => root.config.setValue("appearance.terminalRefraction", value)
+                    }
                     SettingSlider {
                         label: "Opacidade da barra"
-                        value: root.config.barOpacity
+                        value: root.config.barMatchKittyMaterial ? root.theme.kittyOpacity : root.config.barOpacity
+                        enabled: !root.config.barMatchKittyMaterial
                         visible: root.config.barMaterial !== "solid"
                         onCommitted: function(value) {
                             root.config.setBarOpacity(Math.max(0.08, value))
@@ -406,6 +462,12 @@ Item {
                             checked: root.config.topbarNotesEnabled
                             onTriggered: root.config.setValue("topbar.notesEnabled", !root.config.topbarNotesEnabled)
                         }
+                    }
+                    SettingSwitch {
+                        objectName: "bar.infinite-desktop-topbar"; label: "Barra do Infinite Desk"
+                        hint: "Desative para manter as barras e molduras ao usar Super+Z."
+                        checked: root.config.infiniteDesktopTopbarEnabled
+                        onTriggered: root.config.setValue("bar.infiniteDesktopTopbarEnabled", !checked)
                     }
                     Rectangle {
                         width: Math.min(520,parent.width); height: 88; radius: 15

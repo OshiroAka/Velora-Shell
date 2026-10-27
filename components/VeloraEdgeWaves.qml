@@ -22,12 +22,14 @@ QtObject {
         const start = Number(lines[activeLine].time)
         const end = activeLine + 1 < lines.length ? Number(lines[activeLine + 1].time) : duration
         const progress = end > start ? Math.max(0, Math.min(1, (position + .12 - start) / (end - start))) : 0
-        return activeLine + progress
+        // Each new verse selects a distinct shape; within-verse progress adds
+        // only a gentle drift. A continuous line+progress phase hid the change.
+        return activeLine * 2.4 + progress * .35
     }
     property real lyricPhase: lyricTarget
     Behavior on lyricPhase {
         enabled: root.lyricsActive && root.playing
-        NumberAnimation { duration: 240; easing.type: Easing.Linear }
+        NumberAnimation { duration: 900; easing.type: Easing.InOutCubic }
     }
     property var levels: Array(21).fill(0)
     property bool dirty: false

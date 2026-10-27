@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+project_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+cd "$project_dir/integrations/whatsapp"
+npm ci --ignore-scripts --omit=dev --no-audit --no-fund
+"$project_dir/scripts/velora-whatsapp" --check

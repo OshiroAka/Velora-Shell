@@ -1,3 +1,4 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell.Hyprland
 import "../../components" as Components
@@ -19,6 +20,9 @@ Item {
     required property var system
     required property var timerService
     required property real wavePhase
+    property var shell: null
+    property real desktopMorphProgress: 0
+    property real desktopTargetReveal: 0
     property int opticsGeneration: 0
     property alias barSurfaceItem: background
     property real leftInset: 0
@@ -28,7 +32,7 @@ Item {
         return config.topbarItemsForSection(section, false).reduce((sum, item) => sum + legacyItemWidth(item.type), 0)
     }
     readonly property var sectionBounds: BarGeometry.sections(width,
-        sectionWidth("left"), sectionWidth("center"), toolRow.width, leftInset, rightInset)
+        sectionWidth("left"), sectionWidth("center"), toolRow.width, leftInset + leftDesktopTools.width, rightInset + rightDesktopTools.width)
     onSectionBoundsChanged: geometryChanged()
     readonly property var hyprMonitor: Hyprland.monitorFor(host.screen)
     readonly property var workspaceIds: {
@@ -47,6 +51,17 @@ Item {
     readonly property var visibleTools: config.topbarToolsOrder.filter(type =>
         type !== "caffeine" && (type !== "thing" || config.topbarOneThingEnabled)
         && (type !== "notes" || config.topbarNotesEnabled))
+    readonly property var batteryAnchorItem: toolRepeater.count > 0 && visibleTools.includes("battery")
+        ? toolRepeater.itemAt(visibleTools.indexOf("battery")) : null
+    readonly property real batteryAnchorX: batteryAnchorItem
+        ? rightTools.x + toolRow.x + batteryAnchorItem.x - rightTools.contentX + batteryAnchorItem.width / 2 : 0
+    readonly property bool batteryAnchorVisible: !!batteryAnchorItem
+        && batteryAnchorX >= rightTools.x && batteryAnchorX <= rightTools.x + rightTools.width
+    readonly property var timerAnchorItem: toolRepeater.count > 0
+        ? toolRepeater.itemAt(visibleTools.indexOf("timer")) : null
+    readonly property real timerAnchorX: timerAnchorItem
+        ? rightTools.x + toolRow.x + timerAnchorItem.x - rightTools.contentX + timerAnchorItem.width / 2
+        : width / 2
     property string dragType: ""
     property int dragFrom: -1
     property int dragTo: -1
@@ -83,13 +98,13 @@ Item {
     function label(type) {
         return ({cat: "RunCat · CPU", caffeine: "Manter acordado", timer: "Timer", usb: "Dispositivos USB",
             thing: "One Thing", notes: "Notas · arraste para baixo para criar", battery: "Bateria", monitor: "Monitores", paint: "Misturar cores do wallpaper", wifi: "Wi-Fi",
-            search: "Buscar aplicativos", controls: "Controles", clock: "Data e calendário"})[type] || type
+            search: "Busca", controls: "Configurações", weather: "Previsão do tempo", clock: "Data e calendário"})[type] || type
     }
     function legacyItemWidth(type) {
         const widths = { launcher: 90, workspaces: 208, context: compact ? 130 : 250,
             clock: compact ? 210 : 330, media: compact ? 100 : 140,
             wifi: 54, volume: 54, battery: 86, settings: 48, avatar: 48,
-            search: 48, weather: 60, brand: 90 }
+            search: 48, weather: 124, brand: 90 }
         return (widths[type] || 48) * unit
     }
     function legacyGlyph(type) {
@@ -105,12 +120,14 @@ Item {
         if (type === "media") return media.hasPlayer ? media.title : "Sem mídia"
         if (type === "battery") return status.hasBattery ? status.batteryPercent + "%" : ""
         if (type === "weather") return weather.available
-            ? weather.temperature + "° · " + weather.description : ""
+            ? weather.temperature + "°" : "—"
         if (type === "brand") return "Velora"
         return ""
     }
-    function activateLegacy(type) {
-        if (type === "launcher" || type === "search") actions.openLauncher()
+    function activateLegacy(type, item) {
+        if (type === "launcher") controller.toggle("toolbox", item, host)
+        else if (type === "search") return
+        else if (type === "weather") controller.toggle("weather", item, host)
         else if (type === "media") media.hasPlayer ? media.togglePlaying() : actions.openMusic()
         else if (type === "wifi") actions.openNetworkSettings()
         else if (type === "volume") status.toggleMuted()
@@ -119,6 +136,32 @@ Item {
     }
 
     Item { id: background; anchors.fill: parent }
+    Loader {
+        id: leftDesktopTools
+        active: !!root.shell && root.desktopMorphProgress > .0001
+        width: 228 * root.desktopMorphProgress
+        height: root.height
+        z: 5
+        sourceComponent: InfiniteDesktopTools {
+            shell: root.shell; theme: root.theme; config: root.config
+            controller: root.controller; host: root.host; actions: root.actions; status: root.status
+            progress: root.desktopMorphProgress; reveal: root.desktopTargetReveal
+        }
+    }
+    Loader {
+        id: rightDesktopTools
+        active: !!root.shell && root.desktopMorphProgress > .0001
+        width: 92 * root.desktopMorphProgress
+        height: root.height
+        x: root.width - width
+        z: 5
+        sourceComponent: InfiniteDesktopTools {
+            shell: root.shell; theme: root.theme; config: root.config
+            controller: root.controller; host: root.host; actions: root.actions; status: root.status
+            progress: root.desktopMorphProgress; reveal: root.desktopTargetReveal
+            rightSide: true
+        }
+    }
     component Section: Row {
         id: section
         required property string sectionName
@@ -129,23 +172,36 @@ Item {
                 id: entry
                 required property var modelData
                 readonly property string type: modelData.type
+                readonly property string panelType: type === "launcher" ? "toolbox" : type === "weather" ? "weather" : ""
+                readonly property bool panelSelected: panelType.length > 0
+                    && root.controller.owner === root.host && root.controller.activeType === panelType
                 width: root.legacyItemWidth(type)
                 height: root.height
+                objectName: type === "launcher" ? "topbarToolboxTrigger" : type === "weather" ? "topbarWeatherTrigger" : ""
+                activeFocusOnTab: panelType.length > 0
+                Accessible.role: panelType ? Accessible.Button : Accessible.NoRole
+                Accessible.name: type === "launcher" ? "Caixa de ferramentas" : type === "weather" ? root.label(type) : ""
+                Accessible.onPressAction: if (panelType) root.activateLegacy(type, entry)
+                Keys.onReturnPressed: if (panelType) root.activateLegacy(type, entry)
+                Keys.onSpacePressed: if (panelType) root.activateLegacy(type, entry)
+                Component.onCompleted: if (panelType) root.controller.registerItem(panelType, entry, root.host)
+                Component.onDestruction: if (panelType) root.controller.unregisterItem(entry)
                 Rectangle {
                     anchors.fill: parent
                     anchors.margins: 6 * root.unit
                     radius: 16 * root.unit
                     color: root.theme.accentMuted
-                    visible: pointer.containsMouse && entry.type !== "workspaces"
+                    visible: entry.panelSelected || entry.activeFocus || (pointer.containsMouse && entry.type !== "workspaces")
                 }
                 Components.VeloraIconMotion {
                     id: legacyIconMotion
-                    highlighted: pointer.containsMouse || entry.activeFocus
+                    highlighted: pointer.containsMouse || entry.activeFocus || entry.panelSelected
                     reducedMotion: root.config.reducedMotion
                 }
                 Row {
                     id: entryVisual
                     anchors.centerIn: parent
+                    anchors.horizontalCenterOffset: entry.type === "weather" ? -18 : 0
                     spacing: 8 * root.unit
                     visible: !["workspaces", "context"].includes(entry.type)
                     Components.VeloraMaterialIcon {
@@ -154,9 +210,19 @@ Item {
                         opacity: legacyIconMotion.inkOpacity
                         anchors.verticalCenter: parent.verticalCenter
                         width: 23 * root.unit; height: width
-                        visible: !["clock", "brand"].includes(entry.type)
+                        visible: !["clock", "brand", "weather"].includes(entry.type)
                         iconName: root.legacyGlyph(entry.type)
                         iconColor: root.theme.accentSoft
+                    }
+                    Components.VeloraWeatherIcon {
+                        visible: entry.type === "weather"
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 23 * root.unit; height: width
+                        name: root.weather.iconName || "partly"
+                        ink: root.theme.textPrimary
+                        scale: legacyIconMotion.zoom
+                        transform: Translate { y: legacyIconMotion.lift }
+                        opacity: legacyIconMotion.inkOpacity
                     }
                     Text {
                         anchors.verticalCenter: parent.verticalCenter
@@ -171,7 +237,8 @@ Item {
                 }
                 Loader {
                     active: entry.type === "weather"
-                    x: entryVisual.x + entryVisual.width + 10
+                    z: 1
+                    x: entry.width - width - 2
                     width: 46; height: root.height
                     sourceComponent: catComponent
                 }
@@ -210,10 +277,12 @@ Item {
                 MouseArea {
                     id: pointer
                     anchors.fill: parent
-                    enabled: entry.type !== "workspaces" && entry.type !== "weather"
+                    enabled: entry.type !== "workspaces"
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
-                    onClicked: root.activateLegacy(entry.type)
+                    onClicked: root.activateLegacy(entry.type, entry)
+                    onEntered: if (entry.type === "weather") root.controller.enter("weather", entry, root.host)
+                    onExited: if (entry.type === "weather") root.controller.leave(entry)
                     onWheel: function(event) {
                         if (entry.type === "volume") root.status.adjustVolume(event.angleDelta.y > 0 ? 1 : -1)
                     }
@@ -280,6 +349,7 @@ Item {
     }
 
     Flickable {
+        id: rightTools
         x: root.sectionBounds.right.x; width: root.sectionBounds.right.width; height: root.height
         contentWidth: toolRow.width; contentHeight: height
         clip: true; boundsBehavior: Flickable.StopAtBounds
@@ -297,6 +367,16 @@ Item {
                 required property string modelData
                 required property int index
                 readonly property string type: modelData
+                readonly property bool panelTool: !["search", "controls"].includes(type)
+                objectName: "topbarTool-" + type
+                readonly property bool timerAlertActive: type === "timer" && root.timerService.finished
+                onTimerAlertActiveChanged: {
+                    if (timerAlertActive) {
+                        root.controller.leave(item)
+                        if (root.controller.owner === root.host && root.controller.activeType === "timer")
+                            root.controller.close()
+                    }
+                }
                 theme: root.theme
                 reducedMotion: root.config.reducedMotion
                 width: (type === "clock" ? 178 : type === "thing" ? (root.width < 1000 ? 90 : 160)
@@ -314,10 +394,10 @@ Item {
                     width: 1; height: 16; radius: 0.5
                     color: root.theme.withAlpha(root.theme.textPrimary, 0.32)
                 }
-                selected: root.controller.owner === root.host && root.controller.activeType === type
+                selected: panelTool && root.controller.owner === root.host && root.controller.activeType === type
                 dragToCreate: type === "notes" && !root.editing
                 onHoveredChanged: {
-                    if (hovered && !root.editing) root.controller.enter(type, item, root.host)
+                    if (hovered && panelTool && !root.editing && !timerAlertActive) root.controller.enter(type, item, root.host)
                     else root.controller.leave(item)
                 }
                 z: root.dragType === type ? 10 : 0
@@ -329,8 +409,13 @@ Item {
                     root.system.newNote()
                     if (!selected) root.controller.toggle(type, item, root.host)
                 }
-                onActivated: if (!root.editing) root.controller.toggle(type, item, root.host)
-                onSecondaryActivated: if (!root.editing) root.controller.toggle(type, item, root.host)
+                onActivated: if (!root.editing) {
+                    if (type === "controls") { root.controller.close(); root.actions.openSettings() }
+                    else if (type === "search") return
+                    else if (timerAlertActive) root.controller.close()
+                    else root.controller.toggle(type, item, root.host)
+                }
+                onSecondaryActivated: activated()
                 Keys.onLeftPressed: event => {
                     if (root.editing) root.config.stepTopbarTool(type, -1)
                     else event.accepted = false
@@ -363,8 +448,8 @@ Item {
                     onReleased: if (root.dragType === item.type) root.finishDrag()
                     onCanceled: root.cancelDrag()
                 }
-                Component.onCompleted: root.controller.registerItem(type, item, root.host)
-                Component.onDestruction: root.controller.unregisterItem(item)
+                Component.onCompleted: if (panelTool) root.controller.registerItem(type, item, root.host)
+                Component.onDestruction: if (panelTool) root.controller.unregisterItem(item)
                 Components.VeloraIconMotion {
                     id: iconMotion
                     highlighted: item.hovered || item.activeFocus
@@ -461,4 +546,5 @@ Item {
         }
     }
     }
+
 }

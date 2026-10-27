@@ -23,9 +23,14 @@ ShellRoot {
         property bool needsPin: false
         property string pairPrompt: ""
         property string error: ""
+        property string action: ""
+        property string targetAddress: ""
         property int scans: 0
         property int pairs: 0
         property int removals: 0
+        property int connections: 0
+        property int disconnections: 0
+        property int cancellations: 0
         property var devices: [
             {address: "headset", name: "QCY H3", icon: "audio-headset", paired: true, connected: true},
             {address: "phone", name: "Phone", icon: "phone", paired: false, connected: false}
@@ -33,8 +38,14 @@ ShellRoot {
         function scan() { scans++; scanning = true }
         function stopScan() { scanning = false }
         function pair(address) { pairs++ }
+        function toggleDevice(device) {
+            if (busy) return
+            if (device.connected) disconnections++
+            else if (device.paired || device.bonded) connections++
+            else pairs++
+        }
         function remove(address) { removals++ }
-        function cancel() { busy = false }
+        function cancel() { cancellations++; busy = false }
     }
     Item {
         width: 800; height: 600
@@ -65,26 +76,40 @@ ShellRoot {
                     break
                 case 1:
                     test.check(menu.opened && menu.reveal > 0.98, "hover opens menu")
-                    menu.showName(fakeManager.devices[0], 44)
+                    test.check(menu.extension === null, "hover cannot create a name tag")
+                    test.check(fakeManager.connections === 0 && fakeManager.disconnections === 0, "hover cannot change a connection")
+                    test.find(menu,"bluetoothDeviceheadset").activate()
+                    test.check(fakeManager.disconnections === 1,"compact tile disconnects the connected headset")
+                    fakeManager.devices=[{address:"headset",name:"QCY H3",icon:"audio-headset",paired:true,connected:false},fakeManager.devices[1]]
                     break
                 case 2:
-                    test.check(menu.nameReveal > 0.98 && menu.deviceName === "QCY H3", "name extends from device")
                     test.check(menu.iconFor(fakeManager.devices[0]) === "headphones", "device icon")
+                    const tile=test.find(menu,"bluetoothDeviceheadset")
+                    tile.activate(); test.check(fakeManager.connections===1,"compact tile connects the paired headset")
+                    fakeManager.action="connect";fakeManager.targetAddress="headset";fakeManager.busy=true
+                    tile.activate();test.check(fakeManager.connections===1,"busy tile rejects duplicate clicks")
+                    test.check(test.find(menu,"bluetoothPendingheadset").visible && !menu.closeOnLeave,"pending connection stays visible")
+                    fakeManager.busy=false;fakeManager.action="";fakeManager.targetAddress=""
                     test.find(menu, "bluetoothAdd").clicked()
                     test.check(fakeManager.scans === 1 && menu.managing, "plus starts search")
                     break
                 case 3: {
+                    test.find(menu,"bluetoothConnectheadset").clicked()
+                    test.check(fakeManager.connections===2,"manager offers a connection action for paired devices")
                     const remove = test.find(menu, "bluetoothActionheadset")
                     remove.clicked()
                     test.check(fakeManager.removals === 0 && menu.removeAddress === "headset", "removal requires confirmation")
                     remove.clicked()
                     test.check(fakeManager.removals === 1, "confirmed removal dispatched")
-                    test.find(menu, "bluetoothActionphone").clicked()
+                    test.find(menu, "bluetoothConnectphone").clicked()
                     test.check(fakeManager.pairs === 1, "pair dispatch")
+                    fakeManager.busy=true;fakeManager.action="connect";fakeManager.targetAddress="headset"
                     menu.triggerHovered = false; menu.close()
+                    test.check(fakeManager.cancellations===0 && fakeManager.busy,"Closing the menu must preserve an in-flight connection")
                     break
                 }
                 case 4:
+                    fakeManager.busy=false;fakeManager.action="";fakeManager.targetAddress=""
                     test.check(!menu.mounted && !menu.managing && !fakeManager.scanning, "close releases discovery and manager")
                     service.scan(); test.check(adapter.discovering, "scan starts")
                     service.stopScan(); test.check(!adapter.discovering, "own scan stops")
@@ -101,23 +126,33 @@ ShellRoot {
                 case 6:
                     if (service.busy) return
                     test.check(service.error === "" && service.pairPrompt === "", "pair success")
-                    service.remove("failure")
+                    service.disconnectDevice("success")
                     break
                 case 7:
+                    if (service.busy) return
+                    test.check(service.error === "","disconnect success")
+                    service.remove("failure")
+                    break
+                case 8:
                     if (service.busy) return
                     test.check(service.error.length > 0, "remove error surfaced")
                     service.pair("failure")
                     break
-                case 8:
+                case 9:
                     if (service.busy) return
                     test.check(service.error.length > 0, "pair failure with zero exit code surfaced")
+                    service.connectDevice("failure")
+                    break
+                case 10:
+                    if (service.busy) return
+                    test.check(service.error.indexOf("conectar")>=0,"connection failure has its own error")
                     service.pair("success")
                     break
-                case 9:
+                case 11:
                     if (!service.pairPrompt) return
                     service.cancel()
                     break
-                case 10:
+                case 12:
                     test.check(!service.busy && !service.pairPrompt, "pair cancellation clears session")
                     adapter.enabled = false; service.scan()
                     test.check(!adapter.discovering && service.error.length > 0, "disabled adapter reported")

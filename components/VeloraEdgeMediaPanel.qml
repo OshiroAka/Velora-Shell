@@ -14,15 +14,30 @@ Item {
     property bool reducedMotion: false
     property bool following: true
     property var contourSamples: Contours.samples(lyrics ? 2 : 1)
-    readonly property color ink: theme ? theme.textPrimary : "white"
-    readonly property color muted: theme ? theme.textSecondary : "#aeb8bf"
+    readonly property color ink: lyrics && theme ? theme.textPrimary : "#f4f5f7"
+    readonly property color muted: lyrics && theme ? theme.textSecondary : "#b8bec7"
     readonly property string family: theme ? theme.bodyFont : "sans-serif"
     readonly property string lyricsFamily: lyricFont.name || "serif"
     FontLoader { id: lyricFont; source: "../assets/fonts/LiberationSerif-Regular.ttf" }
     readonly property bool hasTrack: !!media && media.hasPlayer
     readonly property real position: Math.max(0, Math.min(media.length || 0, media.sampledPosition || 0))
-    readonly property bool interactionHeld: seek.pressed || volume.pressed || search.activeFocus
-        || lines.dragging || lines.flicking || tracks.dragging || tracks.flicking || players.popup.visible
+    readonly property bool interactionHeld: seek.pressed || searchPopup.visible
+        || lines.dragging || lines.flicking || tracks.dragging || tracks.flicking
+    readonly property real contentLeft: lyrics ? 46 : Math.min(104, width * .26)
+    readonly property real contentWidth: Math.max(0, width - contentLeft - 24)
+    readonly property bool compact: contentWidth < 260
+    readonly property bool searching: library.page === "search"
+    readonly property real artworkHeight: Math.min(650, Math.max(280, height * .64)) + 40
+    QtObject {
+        id: panelTheme
+        readonly property color textPrimary: root.ink
+        readonly property color textSecondary: root.muted
+        readonly property string bodyFont: root.family
+    }
+    function currentTrack(track) {
+        const current = media.spotifyCurrent
+        return hasTrack && !!current && !!current.uri && String(track.uri || "") === String(current.uri)
+    }
     signal backRequested()
     signal lyricsRequested()
     signal mediaRequested()
@@ -52,8 +67,8 @@ Item {
         duration: 900; easing.type: Easing.InOutCubic
     }
     onReducedMotionChanged: if (reducedMotion) lyricSlide.complete()
-    onVisibleChanged: if (!visible) lyricSlide.stop()
-    onLyricsChanged: if (!lyrics) lyricSlide.stop()
+    onVisibleChanged: if (!visible) { lyricSlide.stop(); searchPopup.close() }
+    onLyricsChanged: { if (!lyrics) lyricSlide.stop(); else { searchPopup.close() } }
     Connections {
         target: root.library
         function onActiveLineChanged() { root.followLine() }
@@ -63,21 +78,40 @@ Item {
     Keys.onEscapePressed: closeRequested()
     Keys.onSpacePressed: if (hasTrack && media.canToggle) media.togglePlaying()
 
-    ColumnLayout {
+    VeloraMediaBackdrop {
+        objectName: "edgeMediaBackdrop"
         anchors.fill: parent
-        anchors.leftMargin: root.lyrics ? 46 : 104; anchors.rightMargin: 24
+        visible: !root.lyrics
+        source: root.hasTrack ? root.media.artUrl : ""
+        artworkHeight: root.artworkHeight
+        contourSamples: root.contourSamples
+        animated: !root.reducedMotion
+    }
+
+    ColumnLayout {
+        id: content
+        anchors.fill: parent
+        anchors.leftMargin: root.contentLeft; anchors.rightMargin: 24
         anchors.topMargin: 22; anchors.bottomMargin: 26
-        spacing: 14
+        spacing: root.compact ? 10 : 14
         RowLayout {
             Layout.fillWidth: true; spacing: 6
             Layout.leftMargin: Math.max(0, Contours.offset(root.contourSamples,
-                38 / Math.max(1, root.height)) * root.width + 24 - (root.lyrics ? 46 : 104))
+                38 / Math.max(1, root.height)) * root.width + 24 - root.contentLeft)
             VeloraMaterialIcon { implicitWidth: 23; implicitHeight: 23; iconName: "music"; iconColor: root.ink }
             Text {
                 Layout.fillWidth: true; Layout.leftMargin: 5
                 text: root.lyrics ? "Lyrics" : "Media"
                 color: root.ink; font.family: root.lyrics ? root.lyricsFamily : root.family
                 font.pixelSize: root.lyrics ? 23 : 17
+            }
+            IconButton {
+                id: searchButton
+                objectName: "edgeMediaSearchButton"
+                visible: !root.lyrics
+                iconName: "search"; hint: "Buscar no Spotify"
+                highlighted: searchPopup.visible || root.searching
+                onClicked: searchPopup.visible ? searchPopup.close() : searchPopup.open()
             }
             IconButton {
                 iconName: root.lyrics ? "music" : "memo"
@@ -94,13 +128,10 @@ Item {
             implicitHeight: 1; color: root.alpha(root.ink, .12)
         }
 
-        VeloraMediaArtwork {
+        Item {
             visible: !root.lyrics
-            Layout.alignment: Qt.AlignHCenter
-            Layout.preferredWidth: Math.min(parent.width, 252, Math.max(110, root.height * .24))
-            Layout.preferredHeight: Layout.preferredWidth
-            source: root.hasTrack ? root.media.artUrl : ""
-            radius: 18; ink: root.ink; accent: root.ink; animated: !root.reducedMotion
+            Layout.fillWidth: true
+            Layout.preferredHeight: Math.max(24, Math.min(root.height * .27, root.height - 540))
         }
         ColumnLayout {
             visible: !root.lyrics; Layout.fillWidth: true; spacing: 3
@@ -108,7 +139,7 @@ Item {
                 Layout.fillWidth: true
                 text: root.hasTrack ? root.media.title : "Seu Spotify, aqui"
                 textFormat: Text.PlainText; color: root.ink; font.family: root.family
-                font.pixelSize: 22; font.weight: Font.Light
+                font.pixelSize: root.compact ? 21 : 24; font.weight: Font.Medium
                 wrapMode: Text.WordWrap; maximumLineCount: 2; elide: Text.ElideRight
             }
             Text {
@@ -210,7 +241,7 @@ Item {
             VeloraMotionSlider {
                 id: seek; objectName: "edgeMediaSeek"
                 Layout.fillWidth: true; implicitHeight: 24
-                handleSize: 7
+                handleSize: 6; trackHeight: 2
                 from: 0; to: Math.max(1, root.media.length || 0)
                 enabled: root.hasTrack && root.media.canSeek
                 ink: root.ink; reducedMotion: root.reducedMotion
@@ -228,109 +259,118 @@ Item {
             }
         }
         RowLayout {
-            visible: !root.lyrics; Layout.fillWidth: true
-            IconButton { iconName: "shuffle"; hint: "Aleatório"; enabled: root.media.canShuffle; highlighted: root.media.shuffled; onClicked: root.media.toggleShuffle() }
-            Item { Layout.fillWidth: true }
-            IconButton { objectName: "edgeMediaPrevious"; iconName: "skip-previous"; hint: "Anterior"; enabled: root.media.canPrevious; onClicked: root.media.previous() }
-            IconButton {
+            objectName: "edgeMediaTransport"
+            visible: !root.lyrics
+            Layout.alignment: Qt.AlignHCenter
+            spacing: root.compact ? 20 : 28
+            VeloraMediaTransportButton {
+                objectName: "edgeMediaPrevious"
+                ink: root.ink; animated: !root.reducedMotion
+                iconName: "skip-previous"; hint: "Anterior"
+                enabled: root.media.canPrevious; onClicked: root.media.previous()
+            }
+            VeloraMediaTransportButton {
                 objectName: "edgeMediaPlay"
-                implicitWidth: 54; implicitHeight: 54
+                primary: true
+                ink: root.ink; animated: !root.reducedMotion
                 iconName: root.hasTrack && root.media.playing ? "pause" : "play"
                 hint: !root.hasTrack ? "Abrir Spotify" : root.media.playing ? "Pausar" : "Reproduzir"
                 enabled: !root.hasTrack || root.media.canToggle
-                background: Rectangle { radius: width / 2; color: root.alpha(root.ink, parent.hovered ? .09 : 0); border.color: root.alpha(root.ink, .7) }
                 onClicked: root.hasTrack ? root.media.togglePlaying() : root.media.openSpotify("")
             }
-            IconButton { objectName: "edgeMediaNext"; iconName: "skip-next"; hint: "Próxima"; enabled: root.media.canNext; onClicked: root.media.next() }
-            Item { Layout.fillWidth: true }
-            IconButton { iconName: "refresh"; hint: "Repetição"; enabled: root.media.canRepeat; highlighted: root.media.repeatMode > 0; onClicked: root.media.cycleRepeat() }
-        }
-        RowLayout {
-            visible: !root.lyrics && root.media.canVolume; Layout.fillWidth: true; spacing: 10
-            VeloraMaterialIcon { implicitWidth: 20; implicitHeight: 20; iconName: "volume"; iconColor: root.ink }
-            VeloraMotionSlider {
-                id: volume; objectName: "edgeMediaVolume"
-                Layout.fillWidth: true; from: 0; to: 1; stepSize: .01
-                handleSize: 7
-                ink: root.ink; reducedMotion: root.reducedMotion
-                Accessible.name: "Volume do player"
-                Binding { target: volume; property: "value"; value: root.media.volume; when: !volume.pressed }
-                onMoved: root.media.setVolume(value)
+            VeloraMediaTransportButton {
+                objectName: "edgeMediaNext"
+                ink: root.ink; animated: !root.reducedMotion
+                iconName: "skip-next"; hint: "Próxima"
+                enabled: root.media.canNext; onClicked: root.media.next()
             }
-            Text { text: Math.round(volume.value * 100); color: root.muted; font.family: root.family; font.pixelSize: 11 }
         }
-        ComboBox {
-            id: players; objectName: "edgeMediaPlayer"
-            visible: !root.lyrics && count > 0; Layout.fillWidth: true; implicitHeight: 36
-            model: root.media.players || []; textRole: "identity"
-            currentIndex: (root.media.players || []).indexOf(root.media.player)
-            Accessible.name: "Player de mídia"
-            onActivated: index => root.media.preferredPlayer = root.media.players[index].dbusName
-            background: Rectangle { radius: 9; color: root.alpha(root.ink, .045); border.color: root.alpha(root.ink, .08) }
-            contentItem: Text { leftPadding: 12; rightPadding: 30; text: players.displayText; color: root.ink; font.family: root.family; font.pixelSize: 12; verticalAlignment: Text.AlignVCenter; elide: Text.ElideRight }
+        Item { visible: !root.lyrics; Layout.fillHeight: true; Layout.minimumHeight: 0 }
+        VeloraSettingsLink {
+            objectName: "edgeMediaBack"
+            Layout.alignment: Qt.AlignHCenter
+            label: "Voltar aos apps"; theme: panelTheme
+            onTriggered: root.backRequested()
         }
-        TextField {
-            id: search; objectName: "edgeMediaSearch"
-            visible: !root.lyrics; Layout.fillWidth: true; implicitHeight: 36
-            placeholderText: "Buscar no Spotify…"; placeholderTextColor: root.muted
-            color: root.ink; font.family: root.family; font.pixelSize: 12
-            leftPadding: 12; selectByMouse: true
-            Accessible.name: "Buscar no Spotify"
-            onTextEdited: { root.library.page = text.trim().length > 1 ? "search" : "queue"; root.library.query = text }
-            onAccepted: root.library.search()
-            Keys.onEscapePressed: root.closeRequested()
-            background: Rectangle { radius: 9; color: root.alpha(root.ink, .045); border.color: root.alpha(root.ink, search.activeFocus ? .35 : .07) }
-        }
-        Text {
-            visible: !root.lyrics; Layout.fillWidth: true
-            text: root.library.page === "search" ? "Resultados" : "A seguir"
-            color: root.ink; font.family: root.family; font.pixelSize: 15
-        }
-        Item {
-            visible: !root.lyrics; Layout.fillWidth: true; Layout.fillHeight: true; Layout.minimumHeight: 60
-            ListView {
-                id: tracks; objectName: "edgeMediaTracks"
-                anchors.fill: parent; clip: true; spacing: 5
-                boundsBehavior: Flickable.StopAtBounds
-                model: root.library.page === "search" ? root.library.results : root.media.spotifyQueueAvailable ? root.media.spotifyQueue : []
-                delegate: ItemDelegate {
-                    id: track
-                    required property var modelData
-                    width: tracks.width; height: 58
-                    Accessible.name: String(modelData.title || "") + " · " + String(modelData.artist || "")
-                    enabled: /^spotify:track:[a-zA-Z0-9]+$/.test(String(modelData.uri || ""))
-                    onClicked: root.media.playTrack(modelData.uri)
-                    background: Rectangle { radius: 9; color: root.alpha(root.ink, track.hovered ? .09 : .025) }
-                    contentItem: RowLayout {
-                        spacing: 10
-                        VeloraMediaArtwork { implicitWidth: 42; implicitHeight: 42; source: String(track.modelData.art || ""); radius: 7; ink: root.ink; animated: !root.reducedMotion }
-                        Column {
-                            Layout.fillWidth: true; spacing: 3
-                            Text { width: parent.width; text: String(track.modelData.title || ""); textFormat: Text.PlainText; color: root.ink; font.family: root.family; font.pixelSize: 11; elide: Text.ElideRight }
-                            Text { width: parent.width; text: String(track.modelData.artist || ""); textFormat: Text.PlainText; color: root.muted; font.family: root.family; font.pixelSize: 10; elide: Text.ElideRight }
-                        }
-                    }
+    }
+    Popup {
+        id: searchPopup
+        objectName: "edgeMediaSearchPopup"
+        parent: root
+        x: root.contentLeft; y: 70
+        width: root.contentWidth
+        height: root.searching ? Math.min(330, root.height - y - 30) : 40
+        padding: 0; focus: true
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        background: Rectangle { radius: 10; color: root.searching ? "#f51b1d22" : "transparent" }
+        onOpened: search.forceActiveFocus()
+        onClosed: if (root.visible && !root.lyrics) searchButton.forceActiveFocus()
+        contentItem: ColumnLayout {
+            spacing: 8
+            TextField {
+                Layout.fillWidth: true
+                id: search; objectName: "edgeMediaSearch"
+                implicitHeight: 40
+                placeholderText: "Buscar no Spotify…"; placeholderTextColor: root.muted
+                color: root.ink; font.family: root.family; font.pixelSize: 12
+                leftPadding: 12; selectByMouse: true
+                Accessible.name: "Buscar no Spotify"
+                onTextEdited: { root.library.page = text.trim().length > 1 ? "search" : "queue"; root.library.query = text }
+                onAccepted: root.library.search()
+                Keys.onEscapePressed: searchPopup.close()
+                hoverEnabled: true
+                background: Rectangle {
+                    radius: 10
+                    color: search.activeFocus ? "#d52b2e34" : search.hovered ? "#b52b2e34" : "#9525282e"
+                    border.color: root.alpha(root.ink, search.activeFocus ? .28 : search.hovered ? .12 : .06)
+                    Behavior on color { ColorAnimation { duration: root.reducedMotion ? 0 : 130 } }
+                    Behavior on border.color { ColorAnimation { duration: root.reducedMotion ? 0 : 130 } }
                 }
             }
-            Text {
-                anchors.fill: parent; visible: tracks.count === 0; wrapMode: Text.WordWrap
-                text: root.library.page !== "search" ? "A fila aparece quando estiver disponível no Spotify."
-                    : root.library.searchState === "loading" ? "Buscando…"
-                    : root.library.searchState === "offline" ? "Abra o Spotify para buscar."
-                    : root.library.searchState === "error" ? "Não foi possível buscar. Pressione Enter para tentar novamente."
-                    : "Nenhuma música encontrada."
-                color: root.muted; font.family: root.family; font.pixelSize: 11
+            Item {
+                visible: root.searching
+                Layout.fillWidth: true; Layout.fillHeight: true
+                ListView {
+                    id: tracks; objectName: "edgeMediaSearchResults"
+                    anchors.fill: parent; anchors.margins: 6
+                    clip: true; spacing: 4
+                    boundsBehavior: Flickable.StopAtBounds
+                    model: searchPopup.visible && root.searching ? root.library.results : []
+                    delegate: VeloraMediaTrackRow {
+                        width: tracks.width
+                        current: root.currentTrack(modelData)
+                        ink: root.ink; muted: root.muted; family: root.family
+                        reducedMotion: root.reducedMotion
+                        onPlayRequested: uri => root.media.playTrack(uri)
+                    }
+                    ScrollBar.vertical: ScrollBar {}
+                }
+                Text {
+                    anchors.fill: parent; anchors.margins: 12
+                    visible: tracks.count === 0; wrapMode: Text.WordWrap
+                    text: root.library.searchState === "loading" ? "Buscando…"
+                        : root.library.searchState === "offline" ? "Abra o Spotify para buscar."
+                        : root.library.searchState === "error" ? "Não foi possível buscar. Pressione Enter para tentar novamente."
+                        : "Nenhuma música encontrada."
+                    color: root.muted; font.family: root.family; font.pixelSize: 11
+                }
             }
-        }
-        VeloraSettingsLink {
-            Layout.alignment: Qt.AlignHCenter
-            label: "Voltar aos apps"; theme: root.theme
-            onTriggered: root.backRequested()
         }
     }
     component IconButton: VeloraMediaButton {
         ink: root.ink; accent: root.ink; animated: !root.reducedMotion
-        implicitWidth: 30; implicitHeight: 30
+        implicitWidth: root.compact ? 36 : 40; implicitHeight: implicitWidth
+        activeFocusOnTab: true
+        Accessible.role: Accessible.Button
+        Keys.onReturnPressed: clicked()
+        Keys.onEnterPressed: clicked()
+        Accessible.description: highlighted ? "Ativo" : ""
+        Rectangle {
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.bottom: parent.bottom; anchors.bottomMargin: 3
+            width: 3; height: 3; radius: 1.5
+            color: root.ink; visible: parent.highlighted
+        }
         ToolTip.visible: false
     }
 }

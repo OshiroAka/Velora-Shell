@@ -15,6 +15,7 @@ FocusScope {
     required property var media
     required property var actions
     required property var weather
+    property var shell: null
     property real barHeight: 40
     property real leftInset: 8
     property real rightInset: 8
@@ -53,11 +54,15 @@ FocusScope {
             id: motionContent
             anchors.fill: parent
             active: motion.mounted
+            presented: root.desiredType === motion.presentedType && motion.mounted
+            motionTokens: root.motionTokens
             type: motion.presentedType
             theme: root.theme; systemStatus: root.status; system: root.system
             fanPlus: root.fanPlus
             timerService: root.timerService; clock: root.clock; calendar: root.calendar
             media: root.media; weather: root.weather
+            shell: root.shell
+            screenName: root.host.screen.name
             controller: root.controller; actions: root.actions
             onInteractionHeldChanged: root.syncPresence()
         }

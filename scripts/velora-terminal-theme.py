@@ -4,6 +4,8 @@ import argparse
 import json
 import os
 import re
+import math
+import signal
 import subprocess
 import sys
 import shutil
@@ -511,6 +513,8 @@ def soften_near_black(
 def palette_from_theme(
     theme,
     wal,
+    bar_material=None,
+    independent=False,
 ):
     colors = (
         wal.get("colors", {})
@@ -655,6 +659,20 @@ def palette_from_theme(
             background,
             0.18,
         )
+
+    # The native shared lens supplies the bar's optical colour treatment.
+    # Match the client's background to that material; the native shader
+    # compensates its premultiplied blend. Keep numeric alpha, not #AARRGGBB.
+    follows_bar = False
+    if bar_material is None and not independent and live.get("terminalFollowBar"):
+        bar_material = (live.get("barColor"), live.get("barOpacity"))
+    if bar_material is not None:
+        exact_color, exact_opacity = bar_material
+        exact_opacity = float(exact_opacity)
+        if not re.fullmatch(r"#[0-9a-fA-F]{6}", str(exact_color)) or not math.isfinite(exact_opacity) or not 0 <= exact_opacity <= 1:
+            raise ValueError("invalid bar material colour/opacity")
+        background, background_opacity = exact_color.lower(), exact_opacity
+        follows_bar = True
 
     #
     # ANSI.
@@ -812,6 +830,8 @@ def palette_from_theme(
         "background_opacity":
             background_opacity,
 
+        "follows_bar": follows_bar,
+
         "foreground":
             foreground,
 
@@ -857,7 +877,7 @@ def generate_kitty_theme(
 
         (
             "background_opacity "
-            f"{palette['background_opacity']:.3f}"
+            f"{palette['background_opacity']:.8f}"
         ),
 
         f"cursor {palette['foreground']}",
@@ -918,6 +938,9 @@ def generate_kitty_theme(
             f"color{index} "
             f"{palette[f'color{index}']}"
         )
+
+    if palette.get("follows_bar"):
+        lines.append("dynamic_background_opacity yes")
 
     return (
         "\n".join(lines)
@@ -1105,7 +1128,7 @@ def sync_kitty_auto_themes(theme_text):
     return synced, backups
 
 
-def sync_terminal_theme():
+def sync_terminal_theme(bar_material=None, independent=False):
     theme = load_pywal_theme()
 
     wal = read_json(
@@ -1115,6 +1138,8 @@ def sync_terminal_theme():
     palette = palette_from_theme(
         theme,
         wal,
+        bar_material=bar_material,
+        independent=independent,
     )
 
     KITTY_DIR.mkdir(
@@ -1176,6 +1201,8 @@ def sync_terminal_theme():
                 "opacityManaged":
                     True,
 
+                "followsBar": palette["follows_bar"],
+
                 "strongColors":
                     palette[
                         "strong_colors"
@@ -1209,13 +1236,26 @@ def main():
         "--quiet",
         action="store_true",
     )
+    material = parser.add_mutually_exclusive_group()
+    material.add_argument("--follow-bar", nargs=2, metavar=("COLOR", "OPACITY"))
+    material.add_argument("--independent", action="store_true")
+    parser.add_argument("--reload", action="store_true")
 
     args = parser.parse_args()
 
     try:
         palette = (
-            sync_terminal_theme()
+            sync_terminal_theme(args.follow_bar, args.independent)
         )
+        if args.reload:
+            # Reload config without closing windows or signalling child shells.
+            found = subprocess.run(["pgrep", "-u", str(os.getuid()), "-x", "kitty"],
+                capture_output=True, text=True, check=False)
+            for pid in found.stdout.split():
+                try:
+                    os.kill(int(pid), signal.SIGUSR1)
+                except ProcessLookupError:
+                    pass
 
     except Exception as exc:
         print(

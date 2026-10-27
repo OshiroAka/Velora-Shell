@@ -45,7 +45,7 @@ for (const nativeBarMaterial of [true,false]) {
         with tempfile.TemporaryDirectory(prefix="velora-bar-render-") as temporary:
             directory = Path(temporary)
             shaders = []
-            for name in ["LIQUID_GLASS_VERTEX", "LIQUID_GLASS_FRAGMENT"]:
+            for name in ["LIQUID_GLASS_VERTEX", "LIQUID_GLASS_FRAGMENT", "OPTICAL_BLUR_FRAGMENT"]:
                 match = re.search(name + r' = R"GLSL\((.*?)\)GLSL";', source, re.S)
                 self.assertIsNotNone(match, name)
                 path = directory / name
@@ -62,3 +62,7 @@ for (const nativeBarMaterial of [true,false]) {
             if rendered.returncode == 77:
                 self.skipTest("Surfaceless EGL unavailable")
             self.assertEqual(rendered.returncode, 0, rendered.stderr)
+            environment["VELORA_TEST_OPTICAL_JOINS"] = "1"
+            optical = subprocess.run([str(binary), *shaders], env=environment,
+                                     capture_output=True, text=True, timeout=30)
+            self.assertEqual(optical.returncode, 0, optical.stderr)

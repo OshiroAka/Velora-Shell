@@ -25,8 +25,10 @@ void main() {
     float t=ubuf.progress;
     float reveal=t;
     if (ubuf.effect > .5 && ubuf.effect < 1.5) {
-        float edge=t*1.22-.11+.08*sin(p.y*8.0+t*5.0)*sin(t*3.14159);
-        reveal=1.0-smoothstep(edge-.025,edge+.025,p.x);
+        float phase=p.y*2.4*6.2831853-t*2.2;
+        float ripple=(sin(phase)*.065+sin(phase*2.03+1.1)*.012)*4.0*t*(1.0-t);
+        float edge=mix(-.10,1.10,t)+ripple;
+        reveal=1.0-smoothstep(edge-.007,edge+.007,p.x);
     } else if (ubuf.effect < 2.5 && ubuf.effect > 1.5) {
         reveal=1.0-smoothstep(t-.004,t+.004,p.x);
     } else if (ubuf.effect < 3.5 && ubuf.effect > 2.5) {

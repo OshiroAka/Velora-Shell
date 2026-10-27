@@ -1,0 +1,91 @@
+#!/usr/bin/env python3
+"""Extract two representative colors from album art, cached once per source."""
+import hashlib
+import io
+import json
+import math
+import os
+from pathlib import Path
+import sys
+from urllib.parse import unquote, urlparse
+from urllib.request import Request, urlopen
+from PIL import Image, ImageOps
+
+
+def valid(colors):
+    return isinstance(colors, list) and len(colors) == 6 and all(
+        isinstance(c, (int, float)) and math.isfinite(c) and 0 <= c <= 1 for c in colors)
+
+
+def extract(image):
+    if image.width * image.height > 16_000_000:
+        return []
+    image = ImageOps.exif_transpose(image).convert("RGBA")
+    image.thumbnail((64, 64))
+    samples = (image.getpixel((x, y)) for y in range(image.height) for x in range(image.width))
+    pixels = [p[:3] for p in samples if p[3] >= 128]
+    if not pixels:
+        return []
+    strip = Image.new("RGB", (len(pixels), 1))
+    strip.putdata(pixels)
+    quantized = strip.quantize(colors=12)
+    palette = quantized.getpalette()
+    candidates = []
+    for count, index in quantized.getcolors():
+        rgb = [c / 255 for c in palette[index * 3:index * 3 + 3]]
+        high, low = max(rgb), min(rgb)
+        # Ignore embedded black/white letterboxes when there are other colors.
+        useful = high >= .10 and low <= .92
+        saturation = (high - low) / max(high, .001)
+        candidates.append((count * (.25 + saturation) * (.5 + high * .5), rgb, useful))
+    selected = [c for c in candidates if c[2]] or candidates
+    selected.sort(key=lambda c: c[0], reverse=True)
+    first = selected[0][1]
+    second = max(selected, key=lambda c: c[0] ** .6 * sum((a - b) ** 2
+        for a, b in zip(first, c[1])))[1]
+    return [round(c, 6) for c in first + second]
+
+
+def album_palette(source):
+    if source.startswith("spotify:image:"):
+        source = "https://i.scdn.co/image/" + source[14:]
+    url = urlparse(source)
+    local = Path(unquote(url.path)) if url.scheme == "file" else Path(source) if not url.scheme else None
+    identity = source
+    if local is not None:
+        identity += ":" + str(local.stat().st_mtime_ns)
+    key = hashlib.sha256(identity.encode()).hexdigest()
+    cache = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "velora-shell/album-palettes" / (key + ".json")
+    try:
+        colors = json.loads(cache.read_text())
+        if valid(colors):
+            return colors
+    except (OSError, ValueError):
+        pass
+    if local is not None:
+        with Image.open(local) as image:
+            colors = extract(image)
+    elif url.scheme in ("http", "https"):
+        request = Request(source, headers={"User-Agent": "Velora-Shell/album-palette"})
+        with urlopen(request, timeout=6) as response:
+            data = response.read(8 * 1024 * 1024 + 1)
+        if len(data) > 8 * 1024 * 1024:
+            return []
+        with Image.open(io.BytesIO(data)) as image:
+            colors = extract(image)
+    else:
+        return []
+    if valid(colors):
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        temporary = cache.with_suffix("." + str(os.getpid()) + ".tmp")
+        temporary.write_text(json.dumps(colors))
+        temporary.replace(cache)
+    return colors
+
+
+if __name__ == "__main__":
+    try:
+        colors = album_palette(sys.argv[1]) if len(sys.argv) == 2 else []
+    except Exception:
+        colors = []
+    print(json.dumps({"colors": colors}))

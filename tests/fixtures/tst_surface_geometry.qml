@@ -77,7 +77,7 @@ Item {
             rail.anchorY = fixture.height - 8
             rail.open()
             controller.anchorItem = anchor
-            popup.anchorX = fixture.width - 18
+            popup.updateAnchor()
             verify(rail.targetWidth + 64 + 16 <= fixture.width + .01)
             verify(rail.bodyY >= 0 && rail.bodyY + rail.bodyHeight <= fixture.height + .01)
             verify(popup.panelRect.x >= popup.leftInset)
@@ -156,7 +156,7 @@ Item {
                         if (validation.phase === 0) {
                             fixture.width = data.width; fixture.height = data.height - 40
                             rail.rightSide = data.right; rail.anchorY = fixture.height - 8
-                            rail.open(); controller.anchorItem = anchor; popup.anchorX = fixture.width - 18
+                            rail.open(); controller.anchorItem = anchor; popup.updateAnchor()
                             validation.phase = 1
                         } else {
                             validation.test_resolution_changes(data)

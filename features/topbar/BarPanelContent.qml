@@ -1,7 +1,7 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import Quickshell.Services.UPower
 import "../../components" as Components
 
 Loader {
@@ -18,18 +18,101 @@ Loader {
     required property var weather
     required property var controller
     required property var actions
+    property var shell: null
+    property bool presented: true
+    property var motionTokens: null
+    property string screenName: ""
     readonly property bool interactionHeld: item ? item.interactionHeld === true : false
-    sourceComponent: ({ battery: batteryPanel, clock: clockPanel, calendar: clockPanel, timer: timerPanel,
+    sourceComponent: ({ toolbox: toolboxPanel, weather: weatherPanel, battery: batteryPanel, clock: clockPanel, calendar: clockPanel, timer: timerPanel,
         monitor: monitorPanel, paint: paintPanel, wifi: wifiPanel, caffeine: toolsPanel, cat: toolsPanel, usb: toolsPanel,
-        thing: toolsPanel, notes: toolsPanel, search: toolsPanel, controls: toolsPanel })[type] || null
+        thing: toolsPanel, notes: toolsPanel,
+        volume: levelPanel, brightness: levelPanel, bluetooth: bluetoothPanel, notifications: notificationsPanel })[type] || null
+
+    Component {
+        id: toolboxPanel
+        ToolboxPanel { theme: root.theme }
+    }
+    Component {
+        id: levelPanel
+        ColumnLayout {
+            id: levelContent
+            readonly property var levels: root.shell ? root.shell.infiniteDesktopLevels(root.screenName) : null
+            readonly property bool brightness: root.type === "brightness"
+            readonly property bool interactionHeld: levelSlider.pressed
+            spacing: 8
+            Heading { Layout.fillWidth: true; text: levelContent.brightness ? "Brilho" : "Volume" }
+            RowLayout {
+                Layout.fillWidth: true
+                Components.VeloraMotionSlider {
+                    id: levelSlider
+                    Layout.fillWidth: true
+                    ink: root.theme.textPrimary
+                    accent: root.theme.textPrimary
+                    reducedMotion: !!root.theme.config && root.theme.config.reducedMotion
+                    from: levelContent.brightness ? .05 : 0
+                    to: 1
+                    enabled: levelContent.brightness ? !!levelContent.levels && levelContent.levels.brightnessAvailable : root.systemStatus.hasAudio
+                    value: levelContent.brightness ? (levelContent.levels ? levelContent.levels.brightness : .5) : root.systemStatus.volume
+                    Accessible.name: levelContent.brightness ? "Brilho" : "Volume"
+                    onMoved: {
+                        if (levelContent.brightness) levelContent.levels.setBrightness(value)
+                        else root.systemStatus.audioSink.audio.volume = value
+                    }
+                }
+                Label { text: Math.round(levelSlider.value * 100) + "%"; Layout.preferredWidth: 40 }
+            }
+            Detail { visible: !levelSlider.enabled; text: "Controle indisponível neste dispositivo." }
+        }
+    }
+    Component {
+        id: bluetoothPanel
+        Components.VeloraRailBluetooth {
+            theme: root.theme
+            embedded: true
+            managing: true
+            railWidth: 0
+            contentPadding: 0
+            ink: root.theme.textPrimary
+            accent: root.theme.accent
+            uiFont: root.theme.bodyFont
+            readonly property bool interactionHeld: panelHeld
+        }
+    }
+    Component {
+        id: notificationsPanel
+        Components.VeloraRailNotifications {
+            theme: root.theme; system: root.system
+            embedded: true
+            contentPadding: 0
+            notificationsModel: root.shell ? root.shell.notificationHistory : null
+            ink: root.theme.textPrimary
+            accent: root.theme.accent
+            uiFont: root.theme.bodyFont
+            onDismissRequested: id => { if (root.shell) root.shell.dismissNotificationHistory(id) }
+            onClearRequested: { if (root.shell) root.shell.clearTrackedNotificationHistory() }
+            readonly property bool interactionHeld: panelHeld
+        }
+    }
 
     Component {
         id: monitorPanel
         Components.VeloraMonitorSettings {
+            opened: root.presented
             reducedMotion: !!root.theme.config && root.theme.config.reducedMotion
             ink: root.theme.textPrimary
             uiFont: root.theme.bodyFont
             surfaceColor: root.theme.wallpaperSurfaceTone
+        }
+    }
+    Component {
+        id: weatherPanel
+        Components.VeloraWeatherTopPanel {
+            theme: root.theme
+            weather: root.weather
+            contentPadding: 0
+            open: root.presented
+            motionTokens: root.motionTokens
+            onCloseRequested: root.controller.close()
         }
     }
     Component {
@@ -70,8 +153,6 @@ Loader {
                         onStopped: shuffleButton.contentItem.rotation = 0
                     }
                 }
-                ToolTip.visible: hovered && !!root.system.palette && root.system.palette.error.length > 0
-                ToolTip.text: root.system.palette ? root.system.palette.error : ""
             }
         }
     }
@@ -113,28 +194,36 @@ Loader {
     Component {
         id: batteryPanel
         ColumnLayout {
-            spacing: 10
+            spacing: 8
             RowLayout {
                 Layout.fillWidth: true
-                BatteryIndicator { available: root.systemStatus.hasBattery; level: root.systemStatus.batteryLevel; charging: root.systemStatus.batteryCharging; color: root.theme.accentSoft }
-                Heading { Layout.fillWidth: true; text: root.systemStatus.hasBattery ? root.systemStatus.batteryPercent + "%" : "Sem bateria" }
-                Detail {
-                    text: !root.systemStatus.hasBattery ? "" : root.systemStatus.batteryCharging ? "Carregando"
-                        : root.systemStatus.battery.state === UPowerDeviceState.FullyCharged ? "Carga completa"
-                        : root.systemStatus.battery.state === UPowerDeviceState.Discharging ? "Na bateria" : "Conectada à energia"
+                Layout.preferredHeight: 30; Layout.minimumHeight: 30; Layout.maximumHeight: 30
+                spacing: 10
+                BatteryIndicator {
+                    available: root.systemStatus.hasBattery
+                    level: root.systemStatus.batteryLevel
+                    charging: root.systemStatus.batteryCharging
+                    color: root.theme.accentSoft
+                    Layout.alignment: Qt.AlignVCenter
                 }
+                Heading {
+                    Layout.fillWidth: true
+                    text: root.systemStatus.hasBattery ? root.systemStatus.batteryPercent + "%" : "—"
+                    font.pixelSize: 22
+                }
+                Rectangle {
+                    visible: !!(root.system.error || root.fanPlus.error)
+                    Layout.preferredWidth: 18; Layout.preferredHeight: 18
+                    radius: 9; color: root.theme.withAlpha(root.theme.warning, .12)
+                    border.color: root.theme.warning
+                    Accessible.name: root.system.error || root.fanPlus.error
+                    Text { anchors.centerIn: parent; text: "!"; color: root.theme.warning; font.pixelSize: 11 }
+                }
+
             }
-            Fact {
-                label: root.systemStatus.batteryCharging ? "Até carregar" : "Tempo restante"
-                value: root.systemStatus.hasBattery ? root.time(root.systemStatus.batteryCharging ? root.systemStatus.battery.timeToFull : root.systemStatus.battery.timeToEmpty) : ""
-            }
-            Fact {
-                label: "Saúde da bateria"
-                value: root.systemStatus.hasBattery && root.systemStatus.battery.healthSupported ? Math.round(root.systemStatus.battery.healthPercentage) + "%" : ""
-            }
-            Rule {}
             RowLayout {
                 Layout.fillWidth: true
+                Layout.preferredHeight: 56; Layout.minimumHeight: 56; Layout.maximumHeight: 56
                 spacing: 6
                 Repeater {
                     model: [
@@ -145,61 +234,65 @@ Loader {
                     Components.VeloraSystemChoice {
                         required property var modelData
                         objectName: "energyChoice-" + modelData.key
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: 92
+                        Layout.fillWidth: true; Layout.minimumWidth: 0; Layout.preferredWidth: 0
+                        Layout.preferredHeight: 56
+                        compact: true
                         reducedMotion: !!root.theme.config && root.theme.config.reducedMotion
-                        choice: modelData.key
-                        text: modelData.label
-                        explanation: modelData.detail
-                        ink: root.theme.textPrimary
-                        accent: root.theme.textPrimary
-                        uiFont: root.theme.bodyFont
+                        choice: modelData.key; text: modelData.label; explanation: modelData.detail
+                        ink: root.theme.textPrimary; accent: root.theme.textPrimary; uiFont: root.theme.bodyFont
                         enabled: root.system.power.available && !root.system.powerBusy && root.system.power.profiles.indexOf(modelData.key) >= 0
                         selected: root.system.power.current === modelData.key
                         onClicked: root.system.setProfile(modelData.key)
                     }
                 }
             }
-            Detail { Layout.fillWidth: true; visible: !root.system.power.available; text: "Perfis de energia indisponíveis neste sistema." }
-            Rule {}
             RowLayout {
                 Layout.fillWidth: true
-                spacing: 12
-                ColumnLayout {
-                    Layout.fillWidth: true
-                    spacing: 2
-                    Label { text: "Fan+"; font.weight: Font.DemiBold }
-                    Detail {
-                        text: root.fanPlus.state === "unsupported" ? (root.fanPlus.error || "Indisponível neste dispositivo")
-                            : root.fanPlus.state === "starting" ? "Ativando resfriamento…"
-                            : root.fanPlus.state === "stopping" ? "Retornando ao controle automático…"
-                            : root.fanPlus.state === "error" ? "Não foi possível controlar a ventoinha"
-                            : "Resfriamento máximo"
+                Layout.preferredHeight: 30; Layout.minimumHeight: 30; Layout.maximumHeight: 30
+                Canvas {
+                    Layout.preferredWidth: 22; Layout.preferredHeight: 22
+                    property color ink: root.theme.textPrimary
+                    opacity: fanSwitch.enabled ? 1 : .4
+                    Accessible.name: "Fan+"
+                    onInkChanged: requestPaint()
+                    onPaint: {
+                        const c = getContext("2d"); c.reset()
+                        c.scale(width / 24, height / 24); c.translate(12, 12)
+                        c.strokeStyle = ink; c.fillStyle = ink
+                        c.lineWidth = 1.4; c.lineJoin = "round"
+                        for (let blade = 0; blade < 3; blade++) {
+                            c.save(); c.rotate(blade * Math.PI * 2 / 3)
+                            c.beginPath(); c.moveTo(1, -2)
+                            c.bezierCurveTo(0, -6, 1, -9, 5, -9)
+                            c.bezierCurveTo(11, -9, 10, -2, 4, 0)
+                            c.closePath(); c.globalAlpha = .16; c.fill(); c.globalAlpha = 1; c.stroke()
+                            c.restore()
+                        }
+                        c.beginPath(); c.arc(0, 0, 2.2, 0, Math.PI * 2); c.fill()
                     }
                 }
+                Item { Layout.fillWidth: true }
                 Switch {
                     id: fanSwitch
-                    implicitWidth: 40; implicitHeight: 36
+                    objectName: "topbarFanSwitch"
+                    implicitWidth: 40; implicitHeight: 30
                     Accessible.name: "Fan+ · Resfriamento máximo"
                     checked: root.fanPlus.enabled || (root.fanPlus.state === "error" && root.fanPlus.lastConfirmedActive)
                     enabled: root.fanPlus.supported && !root.fanPlus.busy
                     onToggled: root.fanPlus.toggle()
                     indicator: Rectangle {
-                        x: 2; y: 8; width: 36; height: 20; radius: 10
+                        x: 2; y: 5; width: 36; height: 20; radius: 10
                         color: root.theme.withAlpha(root.theme.textPrimary, fanSwitch.checked ? .4 : .18)
-                        border.width: fanSwitch.activeFocus ? 1 : 0
-                        border.color: root.theme.textPrimary
+                        border.width: fanSwitch.activeFocus ? 1 : 0; border.color: root.theme.textPrimary
                         opacity: fanSwitch.enabled ? 1 : .4
                         Rectangle {
                             x: fanSwitch.checked ? 19 : 3; y: 3
-                            width: 14; height: 14; radius: 7
-                            color: root.theme.textPrimary
+                            width: 14; height: 14; radius: 7; color: root.theme.textPrimary
                         }
                     }
                 }
+
             }
-            Detail { Layout.fillWidth: true; visible: root.fanPlus.state === "error"; text: root.fanPlus.error; color: root.theme.warning }
-            Item { Layout.fillHeight: true }
         }
     }
     Component {

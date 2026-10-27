@@ -48,7 +48,10 @@ device_connected() {
 }
 
 device_paired() {
-  device_info "$1" | info_value "Paired" | grep -Fx yes >/dev/null 2>&1
+  local info
+  info=$(device_info "$1") || return 1
+  printf '%s\n' "$info" | info_value "Paired" | grep -Fx yes >/dev/null 2>&1 \
+    || printf '%s\n' "$info" | info_value "Bonded" | grep -Fx yes >/dev/null 2>&1
 }
 
 device_trusted() {
@@ -207,33 +210,41 @@ connect_device() {
   if [ "$(adapter_powered)" != "yes" ]; then
     bluetoothctl power on >/dev/null 2>&1 || fail "connect" "failed to power adapter"
   fi
+  device_info "$address" >/dev/null || fail "connect" "device not available"
 
-  short_scan
-
-  if ! device_paired "$address"; then
-    bluetoothctl pair "$address" >/dev/null 2>&1 || true
-  fi
+  # A paired accessory can connect directly. Starting a fresh discovery and
+  # silently pairing again delayed every click and lost agent confirmations.
+  if device_connected "$address"; then ok "connect" "$address"; return; fi
+  device_paired "$address" || fail "connect" "device-not-paired: pair the device first"
   if ! device_trusted "$address"; then
-    bluetoothctl trust "$address" >/dev/null 2>&1 || true
+    bluetoothctl --timeout 8 trust "$address" >/dev/null 2>&1 || true
   fi
 
-  bluetoothctl connect "$address" >/dev/null 2>&1 || fail "connect" "bluetoothctl connect failed for $address"
-  sleep 0.35
-  device_connected "$address" || fail "connect" "device did not report connected"
-  ok "connect" "$address"
+  local output result=0 attempt
+  output=$(bluetoothctl --timeout 20 connect "$address" 2>&1) || result=$?
+  for attempt in {1..10}; do
+    if device_connected "$address"; then ok "connect" "$address"; return; fi
+    (( result != 0 )) && break
+    sleep 0.2
+  done
+  fail "connect" "${output:-device did not report connected}"
 }
 
 disconnect_device() {
   require_bluetoothctl
   local address="${1:-}"
   [ -n "$address" ] || fail "disconnect" "missing device address"
+  device_info "$address" >/dev/null || fail "disconnect" "device not available"
 
-  bluetoothctl disconnect "$address" >/dev/null 2>&1 || fail "disconnect" "bluetoothctl disconnect failed for $address"
-  sleep 0.25
-  if device_connected "$address"; then
-    fail "disconnect" "device still reports connected"
-  fi
-  ok "disconnect" "$address"
+  if ! device_connected "$address"; then ok "disconnect" "$address"; return; fi
+  local output result=0 attempt
+  output=$(bluetoothctl --timeout 12 disconnect "$address" 2>&1) || result=$?
+  for attempt in {1..10}; do
+    if ! device_connected "$address"; then ok "disconnect" "$address"; return; fi
+    (( result != 0 )) && break
+    sleep 0.2
+  done
+  fail "disconnect" "${output:-device still reports connected}"
 }
 
 remove_device() {

@@ -37,6 +37,7 @@
   "bar": {
     "material": "glass",
     "liquidStyle": "frosted",
+    "brightness": 1,
     "blurEnabled": true,
     "opacity": 0.52,
     "waveStrength": 0.28

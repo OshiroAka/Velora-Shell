@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -20,6 +21,7 @@ EXACT_REQUEST_TIMEOUT_SECONDS = 2.8
 SEARCH_REQUEST_TIMEOUT_SECONDS = 7.0
 FETCH_DEADLINE_SECONDS = 14.0
 DEFAULT_LEAD_EPSILON_SECONDS = 0.025
+_dbus_player_cache = {}
 
 
 def clean(value):
@@ -28,16 +30,59 @@ def clean(value):
 
 def run_text(args):
     try:
-        return subprocess.check_output(args, stderr=subprocess.DEVNULL, text=True).strip()
+        return subprocess.check_output(args, stderr=subprocess.DEVNULL, text=True, timeout=3).strip()
+    except Exception:
+        return ""
+
+
+def dbus_player_meta(bus, player):
+    """Read the same MPRIS data without the optional playerctl executable."""
+    try:
+        import dbus
+        proxy = bus.get_object(player, "/org/mpris/MediaPlayer2", introspect=False)
+        properties = dbus.Interface(proxy, "org.freedesktop.DBus.Properties").GetAll(
+            "org.mpris.MediaPlayer2.Player", timeout=2)
+        metadata = properties.get("Metadata", {})
+        artists = metadata.get("xesam:artist", [])
+        artist = artists if isinstance(artists, str) else " ".join(str(item) for item in artists)
+        return {
+            "player": str(player),
+            "title": clean(metadata.get("xesam:title", "")),
+            "artist": clean(artist),
+            "album": clean(metadata.get("xesam:album", "")),
+            "duration": max(0, int(round(float(metadata.get("mpris:length", 0)) / 1000000))),
+            "position": max(0.0, float(properties.get("Position", 0)) / 1000000),
+            "status": clean(properties.get("PlaybackStatus", "")),
+        }
+    except Exception:
+        # A player may disappear between ListNames and GetAll. Keep looking.
+        return {}
+
+
+def pick_dbus_player():
+    _dbus_player_cache.clear()
+    try:
+        import dbus
+        bus = dbus.SessionBus()
+        names = [str(name) for name in bus.list_names() if str(name).startswith("org.mpris.MediaPlayer2.")]
+        for name in names:
+            metadata = dbus_player_meta(bus, name)
+            if metadata.get("title"):
+                _dbus_player_cache[name] = metadata
+        playing = [name for name, metadata in _dbus_player_cache.items() if metadata.get("status") == "Playing"]
+        candidates = playing or list(_dbus_player_cache)
+        return next((name for name in candidates if "spotify" in name.lower()), candidates[0] if candidates else "")
     except Exception:
         return ""
 
 
 def pick_player():
+    if not shutil.which("playerctl"):
+        return pick_dbus_player()
     raw = run_text(["playerctl", "-l"])
     players = [line.strip() for line in raw.splitlines() if line.strip()]
     if not players:
-        return ""
+        return pick_dbus_player()
 
     playing = []
     for player in players:
@@ -55,6 +100,8 @@ def pick_player():
 def player_meta(player):
     if not player:
         return {}
+    if player in _dbus_player_cache:
+        return _dbus_player_cache[player]
 
     batch = run_text([
         "playerctl",
@@ -642,7 +689,9 @@ def status(args=None):
     active_index, speech_span, timing_mode = active_word_index(words, current, next_time, render_position)
     speech_end_time = current["time"] + speech_span
     hold_tail = line_hold_tail(speech_span, next_time, current["time"], timing_mode)
-    if timing_source == "synced" and hold_tail > 0 and render_position > speech_end_time + hold_tail:
+    # A terminal keeps its current verse until the next timestamp. The shell
+    # overlay opts into hiding after speech, where its contour animates out.
+    if "--hide-between-lines" in args and timing_source == "synced" and hold_tail > 0 and render_position > speech_end_time + hold_tail:
         emit({
             "ok": False,
             "reason": "between-lines",

@@ -13,7 +13,8 @@ QtObject {
     readonly property bool spectrumEnabled: enabled && composition.desktopVisualizerVisible
     readonly property color tint: composition.unifiedBarSurface
     readonly property string style: [composition.barMaterial === "solid" ? 0
-        : composition.barMaterial === "glass" ? 1 : 2,
+        : composition.barMaterial === "glass" ? 1
+        : composition.barMaterial === "liquid-glass" ? (Platform.NativeBlur.supports("optical-glass") ? 3 : 1) : 2,
         tint.r, tint.g, tint.b, tint.a, composition.barBlurEnabled ? 1 : 0,
         spectrumEnabled ? 1 : 0].join(" ")
     property bool dirty: true

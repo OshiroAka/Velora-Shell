@@ -1,6 +1,7 @@
 import QtQuick
 import "platform" as Platform
 import "core/SurfaceGeometry.js" as SurfaceGeometry
+import "core" as Core
 import Qt5Compat.GraphicalEffects
 import Quickshell
 import Quickshell.Hyprland
@@ -15,6 +16,7 @@ Scope {
 
     required property var composition
     property var edgeMediaPanels: ({})
+    property var edgeFullHeightPanels: ({})
     readonly property bool edgeMediaOpen: Object.keys(edgeMediaPanels).length > 0
     property var edgeSpectrumPanels: ({})
     readonly property bool edgeSpectrumOpen: Object.keys(edgeSpectrumPanels).length > 0
@@ -32,11 +34,17 @@ Scope {
         else delete next[screenName]
         edgeSpectrumPanels = next
     }
-    function setEdgeMediaVisible(screenName, visible) {
+    function setEdgeMediaVisible(screenName, visible, owner) {
         const next = Object.assign({}, edgeMediaPanels)
-        if (visible) next[screenName] = true
+        if (visible) next[screenName] = owner
         else delete next[screenName]
         edgeMediaPanels = next
+    }
+    function setEdgeFullHeightVisible(screenName, visible) {
+        const next = Object.assign({}, edgeFullHeightPanels)
+        if (visible) next[screenName] = true
+        else delete next[screenName]
+        edgeFullHeightPanels = next
     }
     property alias unifiedTheme: veloraTheme
     function openUnifiedSettings() { closeQuickPopup(); composition.openEditor("desktop") }
@@ -52,6 +60,20 @@ Scope {
         root.syncTopBarWindowGaps()
     })
 
+
+    // Direct qs launches and hot reloads also honor the saved provider choice.
+    // The helper only stops a known service with a matching D-Bus owner PID.
+    Process {
+        id: notificationProviderClaim
+        running: true
+        command: ["python3", Quickshell.shellDir + "/scripts/velora-notifications", "claim"]
+        stdout: StdioCollector {
+            onStreamFinished: if (text.trim()) console.info(text.trim())
+        }
+        stderr: StdioCollector {
+            onStreamFinished: if (text.trim()) console.warn("Velora notifications: " + text.trim())
+        }
+    }
 
     NotificationServer {
         id: veloraNotificationServer
@@ -124,8 +146,7 @@ Scope {
     property bool sidebarPopupHovering: false
     property bool quickPopupHovering: false
     property bool weatherTopOpen: false
-    // Temporarily inactive at the user's request; keep the weather widget visible.
-    readonly property bool weatherMenuEnabled: false
+    readonly property bool weatherMenuEnabled: true
     property bool weatherTopWindowOpen: false
     property bool weatherTopKeyboardFocus: false
     property string weatherTopMode: "weather"
@@ -140,17 +161,7 @@ Scope {
     property bool settingsPanelPreloadEnabled: false
     property bool quickPopupPreloadEnabled: false
     property int quickPopupPreloadCount: 0
-    property bool wallpaperWaveMounted: false
-    property string wallpaperWaveFrameDir: ""
-    property string wallpaperWaveToken: ""
-    property string wallpaperWaveSourcePath: ""
-    property real wallpaperWaveDirectionX: 1
-    property real wallpaperWaveDirectionY: 0
-    property real wallpaperWavePhase: 0
-    property string wallpaperWaveTransition: "wave"
-    property int wallpaperWaveLastDirection: -1
-    property real wallpaperWaveProgress: 0
-    property int wallpaperWaveDurationMs: 1000
+
     property string appLaunchCommand: ""
     property string appliedWindowGaps: ""
     property string pendingWindowGaps: ""
@@ -204,6 +215,7 @@ Scope {
     property real leftMediaWindowCenterY: 300
     property string leftDetailWindowType: "media"
     signal railMediaRequested()
+    signal railWhatsAppRequested()
     property real leftDetailSwitchProgress: 1
     property bool leftMenuInteractiveFocus: false
     property bool leftMenuPreloadEnabled: false
@@ -224,6 +236,22 @@ Scope {
     property string infiniteDesktopCommand: ""
     property bool infiniteDesktopCanvasEnabled: false
     property bool infiniteDesktopStateReady: false
+    readonly property real infiniteDesktopMorphProgress: infiniteDesktopTransition.progress
+    readonly property real infiniteDesktopFrameFoldProgress: infiniteDesktopTransition.frameFold
+    readonly property real infiniteDesktopSourceReveal: infiniteDesktopTransition.sourceReveal
+    readonly property real infiniteDesktopTargetReveal: infiniteDesktopTransition.targetReveal
+    readonly property real infiniteDesktopFrameRemaining: infiniteDesktopTransition.remaining
+    readonly property real infiniteDesktopRailRemaining: infiniteDesktopTransition.railRemaining
+    readonly property bool infiniteDesktopMorphing: infiniteDesktopTransition.moving
+    property var infiniteDesktopPanels: ({})
+    property alias notificationHistory: notificationHistoryModel
+    Core.InfiniteDesktopTransition {
+        id: infiniteDesktopTransition
+        active: root.infiniteDesktopCanvasEnabled
+        transformBars: !root.composition || root.composition.infiniteDesktopTopbarEnabled
+        reducedMotion: !!root.composition && root.composition.reducedMotion
+        pace: root.composition ? root.composition.motionTokens.pace : 1
+    }
     readonly property string infiniteDesktopStatePath: (Quickshell.env("XDG_RUNTIME_DIR") || "/tmp") + "/velora-infinite-desktop.state"
     readonly property bool infiniteDesktopGestureMounted: infiniteDesktopCommand.length > 0 && infiniteDesktopCanvasEnabled && !shellSuppressedByFullscreen
     readonly property bool barOnRight: veloraTheme.barPosition === "right"
@@ -246,7 +274,7 @@ Scope {
     readonly property int sideVisualizerWaveWidth: 58
     readonly property real sideVisualizerCapReach: Math.min(38, sideVisualizerWaveWidth * 0.46)
     readonly property int barPanelWidth: sideBarLayoutEnabled ? sidebarVisualWidth + sidebarOuterMargin : 0
-    readonly property int barReserveWidth: sideBarLayoutEnabled ? barPanelWidth : 0
+    readonly property int barReserveWidth: sideBarLayoutEnabled ? Math.round(barPanelWidth * infiniteDesktopRailRemaining) : 0
     readonly property int desktopFrameRadius: 24
     readonly property bool frameVisualsEnabled: veloraTheme.desktopFrameEnabled && !topBarLayout
     readonly property int frameVisualInset: frameVisualsEnabled ? desktopFrameMargin : 0
@@ -329,7 +357,25 @@ Scope {
     }
 
     function updateInfiniteDesktopFeature() {
+        // install-session creates an empty marker for the bundled bridge.
         infiniteDesktopCommand = String(infiniteDesktopFeatureFile.text() || "").trim()
+            || Quickshell.shellDir + "/scripts/infinite-desktop"
+    }
+    function registerInfiniteDesktopPanel(name, panel) {
+        const next = Object.assign({}, infiniteDesktopPanels)
+        if (panel) next[name] = panel
+        else delete next[name]
+        infiniteDesktopPanels = next
+    }
+    function infiniteDesktopLevels(name) {
+        const panel = infiniteDesktopPanels[name]
+        return panel ? panel.levelControls : null
+    }
+    onInfiniteDesktopCanvasEnabledChanged: {
+        dismissTransientSurfaces()
+        activeRailControl = ""
+        exitFocus()
+        if (composition) composition.closeTopbarTool()
     }
 
     onInfiniteDesktopCommandChanged: {
@@ -432,80 +478,6 @@ Scope {
 
         audioSignalRecentlyActive = true
         audioSignalHoldTimer.restart()
-    }
-
-    function wallpaperWaveSafeName(value) {
-        return String(value || "eDP-1").replace(/[^A-Za-z0-9_]/g, "-")
-    }
-
-    function wallpaperWaveReadyPath(screenName) {
-        if (!wallpaperWaveFrameDir || !wallpaperWaveToken)
-            return ""
-        return wallpaperWaveFrameDir + "/" + wallpaperWaveToken + "-" + wallpaperWaveSafeName(screenName) + ".ready"
-    }
-
-    function wallpaperWaveUrl(path) {
-        const value = String(path || "")
-        if (value.indexOf("file://") === 0)
-            return value
-        return value.length > 0 ? "file://" + value : ""
-    }
-
-    function randomizeWallpaperWaveDirection() {
-        const directions = [
-            [1, 0],
-            [-1, 0],
-            [0, 1],
-            [0, -1],
-            [1, 1],
-            [1, -1],
-            [-1, 1],
-            [-1, -1]
-        ]
-        let next = Math.floor(Math.random() * directions.length)
-        if (directions.length > 1 && next === wallpaperWaveLastDirection)
-            next = (next + 1 + Math.floor(Math.random() * (directions.length - 1))) % directions.length
-
-        wallpaperWaveLastDirection = next
-        wallpaperWaveDirectionX = directions[next][0]
-        wallpaperWaveDirectionY = directions[next][1]
-        wallpaperWavePhase = Math.random() * Math.PI * 2
-    }
-
-    function prepareWallpaperWave(frameDir, token, durationMs, sourcePath, transitionType) {
-        wallpaperWaveAnimation.stop()
-        wallpaperWaveMounted = false
-        wallpaperWaveFrameDir = String(frameDir || "")
-        wallpaperWaveToken = String(token || "")
-        wallpaperWaveSourcePath = String(sourcePath || "")
-        wallpaperWaveTransition = transitionType === "grow" || transitionType === "outer" || transitionType === "fade"
-            ? transitionType
-            : "wave"
-        wallpaperWaveDurationMs = Math.max(150, Math.min(3000, Number(durationMs) || 1000))
-        wallpaperWaveProgress = 0
-        randomizeWallpaperWaveDirection()
-        wallpaperWaveMounted = wallpaperWaveFrameDir.length > 0 && wallpaperWaveToken.length > 0 && wallpaperWaveSourcePath.length > 0
-    }
-
-    function revealWallpaperWave(token) {
-        if (!wallpaperWaveMounted || String(token || "") !== wallpaperWaveToken)
-            return
-
-        wallpaperWaveProgress = 0
-        wallpaperWaveAnimation.restart()
-    }
-
-    function cancelWallpaperWave(token) {
-        if (token && String(token) !== wallpaperWaveToken)
-            return
-
-        wallpaperWaveAnimation.stop()
-        wallpaperWaveProgress = 0
-        wallpaperWaveMounted = false
-        wallpaperWaveFrameDir = ""
-        wallpaperWaveToken = ""
-        wallpaperWaveSourcePath = ""
-        wallpaperWaveTransition = "wave"
     }
 
     function launchApp(command) {
@@ -1234,6 +1206,11 @@ Scope {
 
         const item = normalizeNotification(notification)
 
+        // The persistent clock alert owns its buttons and attached surface.
+        // Keep the actionable notification in history without a second toast.
+        if (item.app === "Velora · Temporizador" && composition.connectedNotifications)
+            return
+
         notificationToastTitle = item.summary
         notificationToastBody = item.body
         notificationToastApp = item.app
@@ -1339,22 +1316,11 @@ Scope {
         }
     }
 
-    function clockAlertCommand(title, message) {
-        const sound = "/usr/share/sounds/freedesktop/stereo/alarm-clock-elapsed.oga"
-        return "title=" + shellQuote(title || "Velora") + "; body=" + shellQuote(message || "Clock alert") + "; sound=" + shellQuote(sound) + "; " +
-            "notify-send -a Velora -u critical -t 12000 \"$title\" \"$body\" >/dev/null 2>&1 || true; " +
-            "if [ -f \"$sound\" ]; then " +
-            "for i in 1 2 3; do " +
-            "if command -v pw-play >/dev/null 2>&1; then pw-play \"$sound\" >/dev/null 2>&1; " +
-            "elif command -v paplay >/dev/null 2>&1; then paplay \"$sound\" >/dev/null 2>&1; " +
-            "elif command -v mpv >/dev/null 2>&1; then mpv --no-video --really-quiet \"$sound\" >/dev/null 2>&1; " +
-            "fi; sleep 0.18; done; fi"
-    }
-
     function sendClockNotification(message, title) {
         if (leftClockNotifyProcess.running)
             leftClockNotifyProcess.running = false
-        leftClockNotifyProcess.command = ["bash", "-lc", clockAlertCommand(title || "Velora", message)]
+        leftClockNotifyProcess.command = ["notify-send", "-a", "Velora", "-u", "normal", "-t", "6000",
+            title || "Velora", message || "Clock alert"]
         leftClockNotifyProcess.running = true
     }
 
@@ -1362,113 +1328,31 @@ Scope {
         id: leftClockState
 
         property date currentDate: new Date()
-        property var alarms: [
-            { time: "07:00", detail: "Weekday", enabled: true },
-            { time: "08:30", detail: "Weekend", enabled: true },
-            { time: "22:00", detail: "Daily", enabled: true }
-        ]
-        property string lastAlarmMinute: ""
-        property int timerSeconds: 1800
-        property int timerRemaining: 1800
-        property bool timerRunning: false
-
-        function alarmAt(index) {
-            if (index >= 0 && index < alarms.length)
-                return alarms[index]
-            return { time: "07:00", detail: "", enabled: false }
-        }
-
-        function replaceAlarms(next) {
-            alarms = next.slice()
-            lastAlarmMinute = ""
-        }
-
-        function setAlarmEnabled(index, enabled) {
-            if (index < 0 || index >= alarms.length)
-                return
-            var next = alarms.slice()
-            var item = Object.assign({}, next[index])
-            item.enabled = enabled
-            next[index] = item
-            replaceAlarms(next)
-        }
-
-        function addAlarm() {
-            var d = new Date(currentDate.getTime() + 60 * 60 * 1000)
-            var next = alarms.slice()
-            next.push({
-                time: String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0"),
-                detail: "Custom",
-                enabled: true
-            })
-            replaceAlarms(next)
-        }
-
-        function shiftAlarmMinutes(index, delta) {
-            if (index < 0 || index >= alarms.length)
-                return
-            var item = Object.assign({}, alarms[index])
-            var parts = String(item.time || "07:00").split(":")
-            var total = ((parseInt(parts[0]) || 0) * 60 + (parseInt(parts[1]) || 0) + delta + 1440) % 1440
-            item.time = String(Math.floor(total / 60)).padStart(2, "0") + ":" + String(total % 60).padStart(2, "0")
-            var next = alarms.slice()
-            next[index] = item
-            replaceAlarms(next)
-        }
-
-        function removeAlarm(index) {
-            if (alarms.length <= 1 || index < 0 || index >= alarms.length)
-                return
-            var next = alarms.slice()
-            next.splice(index, 1)
-            replaceAlarms(next)
-        }
-
-        function checkAlarms() {
-            const hhmm = Qt.formatTime(currentDate, "HH:mm")
-            const dayKey = Qt.formatDate(currentDate, "yyyyMMdd") + "-" + hhmm
-            for (var i = 0; i < alarms.length; ++i) {
-                const alarm = alarmAt(i)
-                if (alarm.enabled && hhmm === alarm.time && lastAlarmMinute !== dayKey) {
-                    lastAlarmMinute = dayKey
-                    root.sendClockNotification("Alarm " + alarm.time, "Velora alarm")
-                    break
-                }
-            }
-        }
+        readonly property var timer: root.composition ? root.composition.clockTimerService : null
+        readonly property int timerSeconds: timer ? Math.round(timer.duration / 1000) : 1800
+        readonly property int timerRemaining: timer ? Math.ceil(timer.remaining / 1000) : 1800
+        readonly property bool timerRunning: !!timer && timer.countdown.running
 
         function adjustTimerSeconds(delta) {
+            if (!timer) return
             const next = Math.max(60, Math.min(24 * 3600, timerSeconds + delta))
-            timerSeconds = next
-            if (!timerRunning)
-                timerRemaining = next
-            else
-                timerRemaining = Math.max(1, Math.min(24 * 3600, timerRemaining + delta))
+            if (!timerRunning) timer.setDuration(next)
+            else {
+                timer.now = Date.now()
+                const left = Math.max(1000, Math.min(86400000, timer.remaining + (next - timerSeconds) * 1000))
+                timer.duration = next * 1000
+                timer.countdown = { running: true, deadline: timer.now + left, remaining: left }
+                timer.save()
+            }
         }
-
-        function setTimerPreset(seconds) {
-            timerSeconds = seconds
-            timerRemaining = seconds
-            timerRunning = false
-        }
-
-        function toggleTimer() {
-            if (timerRemaining <= 0)
-                timerRemaining = timerSeconds
-            timerRunning = !timerRunning
-        }
-
-        function resetTimer() {
-            timerRunning = false
-            timerRemaining = timerSeconds
-        }
-
+        function setTimerPreset(seconds) { if (timer) timer.setDuration(seconds) }
+        function toggleTimer() { if (timer) timer.toggleTimer() }
+        function resetTimer() { if (timer) timer.resetTimer() }
         function finishTimer() {
-            timerRunning = false
-            timerRemaining = 0
-            root.sendClockNotification("Timer finished", "Velora timer")
+            if (!timer) return
+            timer.countdown = { running: true, deadline: Date.now() - 1, remaining: 0 }
+            timer.tick()
         }
-
     }
 
     Timer {
@@ -1478,19 +1362,6 @@ Scope {
         triggeredOnStart: true
         onTriggered: {
             leftClockState.currentDate = new Date()
-            leftClockState.checkAlarms()
-        }
-    }
-
-    Timer {
-        interval: 1000
-        running: leftClockState.timerRunning
-        repeat: true
-        onTriggered: {
-            if (leftClockState.timerRemaining > 1)
-                leftClockState.timerRemaining -= 1
-            else
-                leftClockState.finishTimer()
         }
     }
 
@@ -1537,6 +1408,7 @@ Scope {
         watchChanges: true
         printErrors: false
 
+        onFileChanged: reload()
         onLoaded: root.updateInfiniteDesktopFeature()
         onTextChanged: root.updateInfiniteDesktopFeature()
         onLoadFailed: root.infiniteDesktopCommand = ""
@@ -1545,7 +1417,7 @@ Scope {
     Process {
         id: infiniteDesktopStateSync
 
-        running: false
+        running: root.infiniteDesktopCommand.length > 0
         command: root.infiniteDesktopCommand.length > 0
             ? [root.infiniteDesktopCommand, "sync-state"]
             : ["true"]
@@ -1559,18 +1431,20 @@ Scope {
         onExited: {
             running = false
             root.infiniteDesktopStateReady = root.infiniteDesktopCommand.length > 0
+            infiniteDesktopStateFile.reload()
         }
     }
 
     FileView {
         id: infiniteDesktopStateFile
 
-        path: root.infiniteDesktopStateReady ? root.infiniteDesktopStatePath : ""
-        preload: root.infiniteDesktopStateReady
+        path: root.infiniteDesktopCommand.length > 0 ? root.infiniteDesktopStatePath : ""
+        preload: root.infiniteDesktopCommand.length > 0
         watchChanges: true
         printErrors: false
 
-        onLoaded: root.applyInfiniteDesktopState(text())
+        onFileChanged: reload()
+        onLoaded: { root.infiniteDesktopStateReady = true; root.applyInfiniteDesktopState(text()) }
         onTextChanged: root.applyInfiniteDesktopState(text())
     }
 
@@ -1578,7 +1452,7 @@ Scope {
         id: lyricsQuery
 
         running: false
-        command: [root.lyricsStateScript, "status", "--lead", (veloraTheme.lyricsSyncOffsetMs / 1000).toFixed(3)]
+        command: [root.lyricsStateScript, "status", "--hide-between-lines", "--lead", (veloraTheme.lyricsSyncOffsetMs / 1000).toFixed(3)]
 
         stdout: SplitParser {
             onRead: function(data) {
@@ -1821,26 +1695,6 @@ Scope {
         }
     }
 
-    NumberAnimation {
-        id: wallpaperWaveAnimation
-
-        target: root
-        property: "wallpaperWaveProgress"
-        from: 0
-        to: 1
-        duration: root.wallpaperWaveDurationMs
-        easing.type: Easing.InOutSine
-
-        onFinished: {
-            root.wallpaperWaveProgress = 1
-            root.wallpaperWaveMounted = false
-            root.wallpaperWaveFrameDir = ""
-            root.wallpaperWaveToken = ""
-            root.wallpaperWaveSourcePath = ""
-            root.wallpaperWaveTransition = "wave"
-        }
-    }
-
     Timer {
         id: topWallpaperCardsMountTimer
 
@@ -1894,7 +1748,7 @@ Scope {
 
     readonly property var focusItems: sideBarLayoutEnabled
         ? ["caffeine", "notes", "discord", "volume",
-            "brightness", "notifications", "bluetooth", "wifi", "avatar"] : [
+            "brightness", "notifications", "bluetooth", "wifi"] : [
         "clock",
         "search",
         "workspace1",
@@ -2420,6 +2274,11 @@ Scope {
     }
 
     function openWeatherTop(withKeyboardFocus, mode) {
+        if (mode !== "search" && composition && composition.referenceAppearance) {
+            disableWeatherTopNow()
+            if (weatherMenuEnabled) composition.showTopbarWeather()
+            return
+        }
         if (topBarLayout || (!weatherMenuEnabled && mode !== "search")) {
             disableWeatherTopNow()
             return
@@ -2444,6 +2303,7 @@ Scope {
     }
 
     function openWeatherTopFromMouse() {
+        if (composition && composition.referenceAppearance) return
         if (topBarLayout || !weatherMenuEnabled)
             return
 
@@ -2465,6 +2325,7 @@ Scope {
     }
 
     function closeWeatherTop() {
+        if (composition && composition.activeTopbarType === "weather") composition.closeTopbarTool()
         weatherTopOpen = false
         weatherTopKeyboardFocus = false
         weatherTopTriggerHovering = false
@@ -2474,6 +2335,11 @@ Scope {
     }
 
     function toggleWeatherTop() {
+        if (composition && composition.referenceAppearance) {
+            disableWeatherTopNow()
+            if (weatherMenuEnabled) composition.toggleTopbarWeather()
+            return
+        }
         if (topBarLayout || !weatherMenuEnabled) {
             disableWeatherTopNow()
             return
@@ -3318,6 +3184,9 @@ Scope {
     }
 
     function openAdaptiveBarPopup(type, centerY) {
+        if (type === "notifications" && infiniteDesktopCanvasEnabled && notificationsInTopbar
+                && composition.toggleTopbarNotifications())
+            return
         if (sideBarLayoutEnabled) {
             if (["volume", "brightness", "battery"].indexOf(type) >= 0) {
                 const nextControl = activeRailControl === type ? "" : type
@@ -3334,7 +3203,14 @@ Scope {
                 activeRailControl = nextControl
                 return
             }
-            if (["wifi", "notifications", "bluetooth"].indexOf(type) >= 0)
+            if (type === "notifications") {
+                for (const surface of sidebarPanels.instances) {
+                    surface.notificationMenu.anchorY = centerY
+                    surface.notificationMenu.toggle()
+                }
+                return
+            }
+            if (["wifi", "bluetooth"].indexOf(type) >= 0)
                 return
         }
         if (!sideBarLayoutEnabled) {
@@ -4078,16 +3954,12 @@ Scope {
             theme()
         }
 
-        function wallpaperWavePrepare(frameDir: string, token: string, durationMs: int, sourcePath: string, transitionType: string): void {
-            root.prepareWallpaperWave(frameDir, token, durationMs, sourcePath, transitionType)
-        }
-
-        function wallpaperWaveReveal(token: string): void {
-            root.revealWallpaperWave(token)
-        }
-
-        function wallpaperWaveCancel(token: string): void {
-            root.cancelWallpaperWave(token)
+        function wallpaperNativeTransitionBackend(action: string): string {
+            if (!Platform.NativeBlur.supports("wallpaper-transition"))
+                return ""
+            if (action === "prepare" && (!veloraTheme.motionEnabled || (root.composition && root.composition.reducedMotion)))
+                return ""
+            return Platform.NativeBlur.supports("lua-dispatch") ? "lua" : "native"
         }
 
         function topWallpaper(): void {
@@ -4204,6 +4076,12 @@ Scope {
                 toastVisible: root.notificationToastVisible,
                 toastTitle: root.notificationToastTitle, toastBody: root.notificationToastBody })
         }
+        function infiniteDesktopState(): string {
+            return JSON.stringify({enabled: root.infiniteDesktopCanvasEnabled,
+                ready: root.infiniteDesktopStateReady, moving: root.infiniteDesktopMorphing,
+                progress: root.infiniteDesktopMorphProgress, frameFold: root.infiniteDesktopFrameFoldProgress,
+                sourceReveal: root.infiniteDesktopSourceReveal, targetReveal: root.infiniteDesktopTargetReveal})
+        }
 
         function weatherTop(): void {
             root.toggleWeatherTop()
@@ -4298,8 +4176,22 @@ Scope {
                     mounted: menu.mounted, managing: menu.managing,
                     available: menu.available, powered: menu.powered,
                     scanning: menu.manager.scanning, devices: menu.devices.length,
+                    busy: menu.manager.busy, action: menu.manager.action,
+                    target: menu.manager.targetAddress,
+                    deviceStates: menu.devices.map(device => ({address: device.address,
+                        name: device.name || device.deviceName, paired: device.paired,
+                        connected: device.connected})),
                     error: menu.manager.error }
             }))
+        }
+
+        function bluetoothConnect(address: string): bool {
+            for (const surface of sidebarPanels.instances) {
+                const manager = surface.bluetoothMenu.manager
+                if (manager.devices.some(device => device.address === address))
+                    return manager.connectDevice(address)
+            }
+            return false
         }
 
         function battery(): void {
@@ -4322,6 +4214,7 @@ Scope {
             if (root.sideBarLayoutEnabled) root.railMediaRequested()
             else root.openRightDashboard("media")
         }
+        function whatsapp(): void { root.railWhatsAppRequested() }
 
         function leftMenu(): void {
             root.leftMenuPinned = false
@@ -4434,49 +4327,6 @@ Scope {
 
                 anchors.fill: parent
                 bridgePath: root.infiniteDesktopCommand
-            }
-        }
-    }
-
-    Variants {
-        model: root.wallpaperWaveMounted ? Quickshell.screens : []
-
-        PanelWindow {
-            id: wallpaperWavePanel
-
-            required property var modelData
-            readonly property string outputName: modelData && modelData.name ? String(modelData.name) : "eDP-1"
-
-            screen: modelData
-            color: "transparent"
-            implicitWidth: modelData.width > 0 ? modelData.width : 1
-            implicitHeight: modelData.height > 0 ? modelData.height : 1
-            exclusiveZone: 0
-            exclusionMode: ExclusionMode.Ignore
-            focusable: false
-
-            WlrLayershell.layer: WlrLayer.Bottom
-            WlrLayershell.namespace: "velora-wallpaper-transition"
-            WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
-
-            anchors {
-                top: true
-                bottom: true
-                left: true
-                right: true
-            }
-
-            mask: Region {}
-
-            VeloraWallpaperTransition {
-                anchors.fill: parent
-                source: root.wallpaperWaveUrl(root.wallpaperWaveSourcePath)
-                directionX: root.wallpaperWaveDirectionX
-                directionY: root.wallpaperWaveDirectionY
-                wavePhase: root.wallpaperWavePhase
-                transitionType: root.wallpaperWaveTransition
-                readyPath: root.wallpaperWaveReadyPath(wallpaperWavePanel.outputName)
-                transitionProgress: root.wallpaperWaveProgress
             }
         }
     }
@@ -5557,8 +5407,8 @@ Scope {
             readonly property int areaX: root.mainAreaX(panelWidth)
             readonly property int areaWidth: root.mainAreaWidth(panelWidth)
             readonly property bool expanded: false
-            readonly property int targetWidth: Math.round(Math.min(820, Math.max(760, panelWidth * 0.417)))
-            readonly property int compactHeight: 390
+            readonly property int targetWidth: Math.min(368, panelWidth - 32)
+            readonly property int compactHeight: 354
             readonly property int expandedHeight: Math.round(Math.min(620, Math.max(480, panelHeight * 0.56)))
             readonly property int targetHeight: expanded ? expandedHeight : compactHeight
             readonly property int targetX: Math.round((panelWidth - targetWidth) / 2)
@@ -5662,8 +5512,7 @@ Scope {
                 sourceComponent: Component {
                     VeloraWeatherTopPanel {
                         theme: veloraTheme
-                        barSurface: root.composition
-                            ? root.composition.unifiedBarSurface : root.desktopFrameMatteColor()
+                        motionTokens: root.composition ? root.composition.motionTokens : null
                         weather: root.composition ? root.composition.forecastService : null
                         open: root.weatherTopOpen
                         onActivated: root.engageWeatherTop()
@@ -7287,6 +7136,12 @@ Scope {
         PanelWindow {
             id: panel
             readonly property var bluetoothMenu: bluetoothPopover
+            readonly property var notificationMenu: notificationsPopover
+            readonly property var levelControls: railControls
+            readonly property color desktopIconInk: barRoot.ink
+            readonly property real desktopIconOpacity: barRoot.configuredIconOpacity
+            readonly property string desktopAvatarSource: barRoot.profileImageSource()
+            readonly property real desktopIconSize: Math.round(22 * barRoot.uiScale * barRoot.configuredIconScale)
 
             required property var modelData
             readonly property int panelWidth: width
@@ -7295,8 +7150,8 @@ Scope {
             readonly property bool weatherTopConversationExpanded: false
             readonly property bool weatherTopNotificationAttached: root.weatherTopWindowOpen && root.notificationToastMounted
             readonly property int weatherTopOpenY: Math.max(root.desktopFrameMargin + 18, 30)
-            readonly property int weatherTopTargetWidth: Math.round(Math.min(panelWidth - 100, weatherTopSearchMode ? 720 : 800))
-            readonly property int weatherTopCompactHeight: 390
+            readonly property int weatherTopTargetWidth: Math.round(Math.min(panelWidth - 100, weatherTopSearchMode ? 720 : 368))
+            readonly property int weatherTopCompactHeight: 354
             readonly property int weatherTopNotificationHeight: weatherTopCompactHeight
             readonly property int weatherTopExpandedHeight: Math.round(Math.min(560, Math.max(420, panelHeight * 0.50)))
             readonly property int weatherTopSearchHeight: Math.round(Math.min(540, panelHeight - weatherTopOpenY - 70))
@@ -7309,20 +7164,21 @@ Scope {
             readonly property int weatherTopTargetY: root.weatherTopOpen ? weatherTopOpenY : -weatherTopTargetHeight - 18
             readonly property int weatherTopCornerRadius: 24
             property var activeRailSystemPopover: null
-            readonly property bool wantsDrawerKeyboard: railControls.mounted || edgePopover.mounted || coffeePopover.mounted || notesPopover.mounted || bluetoothPopover.mounted || notificationsPopover.mounted || wifiPopover.mounted || root.focusMode || root.quickPopupType === "search" || root.quickPopupType === "agenda" || root.quickPopupType === "weatherPanel" || root.settingsPanelOpen || root.wallpaperSelectorOpen || (root.topWallpaperKeyboardFocus && root.topWallpaperUsesBottomSelector) || (!root.topBarLayout && root.weatherTopKeyboardFocus) || root.leftMenuInteractiveFocus
+            readonly property bool wantsDrawerKeyboard: railControls.mounted || (edgePopover.mounted && !edgePopover.keepOpenOutside) || coffeePopover.mounted || notesPopover.mounted || bluetoothPopover.mounted || notificationsPopover.mounted || wifiPopover.mounted || root.focusMode || root.quickPopupType === "search" || root.quickPopupType === "agenda" || root.quickPopupType === "weatherPanel" || root.settingsPanelOpen || root.wallpaperSelectorOpen || (root.topWallpaperKeyboardFocus && root.topWallpaperUsesBottomSelector) || (!root.topBarLayout && root.weatherTopKeyboardFocus) || root.leftMenuInteractiveFocus
+            readonly property bool whatsappKeyboard: edgePopover.mounted && edgePopover.keepOpenOutside
 
             screen: modelData
             color: "transparent"
             implicitWidth: Math.max(1, modelData.width)
             exclusiveZone: root.barReserveWidth
             exclusionMode: ExclusionMode.Normal
-            focusable: wantsDrawerKeyboard
+            focusable: wantsDrawerKeyboard || whatsappKeyboard
 
             WlrLayershell.layer: WlrLayer.Overlay
             WlrLayershell.namespace: "velora-shell-unified-bar"
             WlrLayershell.keyboardFocus: root.weatherTopKeyboardFocus
                 ? WlrKeyboardFocus.OnDemand
-                : (wantsDrawerKeyboard ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None)
+                : (wantsDrawerKeyboard ? WlrKeyboardFocus.Exclusive : whatsappKeyboard ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None)
 
             // ExclusionMode.Normal places this window below the 40 px topbar.
             // Its local origin already is the join: adding barHeight here
@@ -7334,7 +7190,7 @@ Scope {
 
             function syncUnifiedBarNativeShape() {
                 const active = root.composition
-                    && (root.composition.barMaterial === "liquid" || root.composition.nativeBarMaterial)
+                    && (["liquid", "liquid-glass"].includes(root.composition.barMaterial) || root.composition.nativeBarMaterial)
                     && width > 0 && height > 0
                 if (!active) {
                     Platform.NativeBlur.dispatch("velora-blur:unified-bar-shape " + modelData.name + " 0")
@@ -7375,7 +7231,8 @@ Scope {
                     + Number(edgePopover.sidebarWaveScale).toFixed(6) + " "
                     + Number(edgePopover.dockProgress).toFixed(6) + " "
                     + Number(edgePopover.sidebarWaveWidth / width).toFixed(6) + " "
-                    + edgePopover.sidebarSamples.map(value => Number(value).toFixed(6)).join(" "))
+                    + edgePopover.sidebarSamples.map(value => Number(value).toFixed(6)).join(" ") + " "
+                    + Number(root.infiniteDesktopFrameFoldProgress).toFixed(6))
             }
 
             DesktopBarMaterial {
@@ -7384,9 +7241,14 @@ Scope {
                 enabled: root.sideBarLayoutEnabled
             }
 
-            Component.onCompleted: Qt.callLater(syncUnifiedBarNativeShape)
-            Component.onDestruction:
+            Component.onCompleted: {
+                root.registerInfiniteDesktopPanel(modelData.name, panel)
+                Qt.callLater(syncUnifiedBarNativeShape)
+            }
+            Component.onDestruction: {
+                root.registerInfiniteDesktopPanel(modelData.name, null)
                 Platform.NativeBlur.dispatch("velora-blur:unified-bar-shape " + modelData.name + " 0")
+            }
             onWidthChanged: Qt.callLater(syncUnifiedBarNativeShape)
             onHeightChanged: Qt.callLater(syncUnifiedBarNativeShape)
 
@@ -7405,7 +7267,7 @@ Scope {
                 intersection: Intersection.Combine
 
                 Region {
-                    item: barRoot.panelMaskItem
+                    item: root.infiniteDesktopSourceReveal > .99 ? barRoot.panelMaskItem : null
                     radius: barRoot.cornerRadius
                 }
 
@@ -7434,13 +7296,13 @@ Scope {
                 Region { item: edgeTrigger }
                 Region { item: edgePopover.maskItem }
                 Region { item: edgePopover.labelMask }
+                Region { item: edgePopover.contactsDragMask.visible ? edgePopover.contactsDragMask : null }
                 Region { item: railControls.volumeMask }
                 Region { item: railControls.brightnessMask }
                 Region { item: railControls.batteryMask }
                 Region { item: coffeePopover.maskItem }
                 Region { item: notesPopover.maskItem }
                 Region { item: bluetoothPopover.maskItem }
-                Region { item: bluetoothPopover.nameMask }
                 Region { item: notificationsPopover.maskItem }
                 Region { item: wifiPopover.maskItem }
                 Region { item: railToolOutsideInput }
@@ -7502,9 +7364,9 @@ Scope {
                     : 0
                 y: 0
                 width: root.sideBarLayoutEnabled
-                    ? root.sidebarVisualWidth + root.sidebarCornerRadius : 0
+                    ? (root.sidebarVisualWidth + root.sidebarCornerRadius) * root.infiniteDesktopRailRemaining : 0
                 height: root.sideBarLayoutEnabled
-                    ? root.sidebarCornerRadius : 0
+                    ? root.sidebarCornerRadius * root.infiniteDesktopRailRemaining : 0
             }
 
             anchors {
@@ -7519,7 +7381,7 @@ Scope {
 
                 anchors.fill: parent
                 antialiasing: true
-                visible: root.frameVisualsMounted || root.sideBarLayoutEnabled
+                visible: (root.frameVisualsMounted || root.sideBarLayoutEnabled) && root.infiniteDesktopFrameFoldProgress < .0001
                 opacity: root.layoutSwitchOpacity
                 z: 0
 
@@ -7680,8 +7542,9 @@ Scope {
                         } else if (edgePopover.extension.width > .01) {
                             const ey = edgePopover.extension.y
                             const ew = edgePopover.extension.width
-                            ctx.lineTo(nose, ey + 52)
-                            ctx.bezierCurveTo(nose, ey + 40, nose - ew, ey + 56, nose - ew, ey + 34)
+                            const eh = edgePopover.extension.height
+                            ctx.lineTo(nose, ey + eh + 8)
+                            ctx.bezierCurveTo(nose, ey + eh - 4, nose - ew, ey + eh + 12, nose - ew, ey + eh - 10)
                             ctx.lineTo(nose - ew, ey + 10)
                             ctx.bezierCurveTo(nose - ew, ey - 12, nose, ey + 4, nose, ey - 8)
                         }
@@ -7990,13 +7853,28 @@ Scope {
             }
 
             // Physical screen corner cutouts. They suggest a rounded display
+            InfiniteDesktopFrame {
+                anchors.fill: parent
+                progress: root.infiniteDesktopFrameFoldProgress
+                rightSide: root.barOnRight
+                surface: root.sidebarBarMaterialColor()
+                visible: progress > 0 && progress < 1 && (!root.composition || !root.composition.nativeBarMaterial)
+                z: 0
+            }
+            Rectangle {
+                x: 0; y: 0; width: 1; height: 1
+                color: "#01000000"
+                visible: !!root.composition && root.composition.nativeBarMaterial
+            }
+
+            // Physical screen corner cutouts. They suggest a rounded display
             // without painting black strips along any straight edge.
             Canvas {
                 id: bottomScreenCorners
                 z: 100
                 anchors.fill: parent
                 visible: root.sideBarLayoutEnabled
-                opacity: 1
+                opacity: root.infiniteDesktopFrameRemaining
                 antialiasing: true
 
                 onPaint: {
@@ -8121,15 +7999,17 @@ Scope {
             Item {
                 id: inlineWeatherTopTriggerMask
 
-                x: Math.round(root.mainAreaX(panel.panelWidth))
+                x: Math.round(root.mainAreaX(panel.panelWidth)
+                    + (root.mainAreaWidth(panel.panelWidth) - width) / 2)
                 y: 0
-                width: root.topBarLayout ? 0 : Math.round(root.mainAreaWidth(panel.panelWidth))
+                width: root.topBarLayout || !root.weatherMenuEnabled || (root.composition && root.composition.referenceAppearance) ? 0
+                    : Math.round(Math.min(420, root.mainAreaWidth(panel.panelWidth) * .28))
                 height: root.topBarLayout ? 0 : (root.weatherTopWindowOpen ? Math.max(12, panel.weatherTopOpenY + 2) : Math.max(12, root.desktopFrameMargin + 2))
                 z: 35
 
                 MouseArea {
                     anchors.fill: parent
-                    enabled: !root.topBarLayout
+                    enabled: !root.topBarLayout && root.weatherMenuEnabled && !(root.composition && root.composition.referenceAppearance)
                     hoverEnabled: true
                     acceptedButtons: Qt.LeftButton
                     onEntered: {
@@ -8248,9 +8128,9 @@ Scope {
 
                 VeloraWeatherTopPanel {
                     theme: veloraTheme
+                    motionTokens: root.composition ? root.composition.motionTokens : null
                     weather: root.composition ? root.composition.forecastService : null
                     open: root.weatherTopOpen
-                    embeddedInFrame: true
                     onActivated: root.engageWeatherTop()
                     onCloseRequested: root.closeWeatherTop()
                     onPointerInsideChanged: function(inside) {
@@ -9631,6 +9511,7 @@ Scope {
 
             VeloraBarV2 {
                 id: barRoot
+                desktopSourceReveal: root.infiniteDesktopSourceReveal
 
                 theme: veloraTheme
                 mediaService: root.composition ? root.composition.mediaService : null
@@ -9748,6 +9629,7 @@ Scope {
 
             VeloraRailControls {
                 id: railControls
+                externalBrightnessActive: root.infiniteDesktopCanvasEnabled && root.composition.activeTopbarType === "brightness"
                 motion: root.composition.motionTokens
                 handoffSource: panel.activeRailSystemPopover
                 onLevelOpening: popover => panel.activeRailSystemPopover = popover
@@ -9780,16 +9662,18 @@ Scope {
             Item {
                 id: edgeTrigger
                 x: parent.width - width; y: edgePopover.anchorY - height / 2
-                width: root.sideBarLayoutEnabled && !root.barOnRight ? root.oppositeFrameWidth + 4 : 0
+                width: root.sideBarLayoutEnabled && !root.barOnRight && root.infiniteDesktopSourceReveal > .99 ? root.oppositeFrameWidth + 4 : 0
                 height: 200
                 HoverHandler { id: edgeHover; blocking: false }
             }
             VeloraEdgePopover {
                 id: edgePopover
-                onMediaPanelActiveChanged: root.setEdgeMediaVisible(panel.modelData.name, mediaPanelActive)
+                onMediaPanelActiveChanged: root.setEdgeMediaVisible(panel.modelData.name, mediaPanelActive, edgePopover)
+                onFullHeightPanelActiveChanged: root.setEdgeFullHeightVisible(panel.modelData.name, fullHeightPanelActive)
                 onSpectrumActiveChanged: root.setEdgeSpectrumVisible(panel.modelData.name, spectrumActive)
                 Component.onDestruction: {
                     root.setEdgeMediaVisible(panel.modelData.name, false)
+                    root.setEdgeFullHeightVisible(panel.modelData.name, false)
                     root.setEdgeSpectrumVisible(panel.modelData.name, false)
                     root.setEdgeDockProgress(panel.modelData.name, 0)
                 }
@@ -9800,6 +9684,19 @@ Scope {
                 theme: root.composition ? root.composition.topbarTheme : null
                 media: root.composition ? root.composition.mediaService : null
                 analyzer: root.composition ? root.composition.audioVisualizer : null
+                beatEnabled: Platform.NativeBlur.supports("lyrics-beat-palette") && !root.shellSuppressedByFullscreen
+                onPercussionBeat: (strength, colors) => {
+                    // One origin inside the Lyrics body, in full-monitor
+                    // coordinates, shared by all native material passes.
+                    const x = (panel.width - edgePopover.railWidth - edgePopover.bodyWidth * .5) / panel.width
+                    const y = (40 + edgePopover.bodyY + edgePopover.bodyHeight * .44) / (panel.height + 40)
+                    Platform.NativeBlur.dispatch("velora-blur:lyrics-beat " + panel.modelData.name + " "
+                        + [x, y, strength].concat(colors).map(v => Number(v).toFixed(6)).join(" "))
+                }
+                onReducedMotionChanged: if (reducedMotion)
+                    Platform.NativeBlur.dispatch("velora-blur:lyrics-beat " + panel.modelData.name + " reset")
+                visualizerDockEnabled: !!root.composition && root.composition.desktopVisualizerEnabled
+                whatsapp: root.composition ? root.composition.whatsappService : null
                 railWidth: root.oppositeFrameWidth
                 // The local origin starts below the reserved topbar.
                 anchorY: height - panel.modelData.height / 2
@@ -9918,14 +9815,19 @@ Scope {
                     if (edgePopover.opened && edgePopover.mediaPanelActive) edgePopover.close()
                     else { edgePopover.open(); edgePopover.showPage("media") }
                 }
+                function onRailWhatsAppRequested() {
+                    if (!edgePopover.enabled) return
+                    if (edgePopover.opened && edgePopover.whatsappPage) edgePopover.close()
+                    else { edgePopover.open(); edgePopover.showPage("whatsapp") }
+                }
             }
             MouseArea {
                 id: railToolOutsideInput
                 z: 9
                 width: panel.width
-                height: railControls.mounted || edgePopover.mounted || coffeePopover.mounted || notesPopover.mounted || bluetoothPopover.mounted || notificationsPopover.mounted || wifiPopover.mounted ? panel.height : 0
+                height: railControls.mounted || (edgePopover.mounted && !edgePopover.keepOpenOutside) || coffeePopover.mounted || notesPopover.mounted || bluetoothPopover.mounted || notificationsPopover.mounted || wifiPopover.mounted ? panel.height : 0
                 acceptedButtons: Qt.AllButtons
-                onPressed: { root.activeRailControl = ""; edgePopover.close(); coffeePopover.close(); notesPopover.close(); bluetoothPopover.close(); notificationsPopover.close(); wifiPopover.close() }
+                onPressed: { root.activeRailControl = ""; if (!edgePopover.keepOpenOutside) edgePopover.close(); coffeePopover.close(); notesPopover.close(); bluetoothPopover.close(); notificationsPopover.close(); wifiPopover.close() }
             }
             Connections {
                 target: root
@@ -9934,6 +9836,11 @@ Scope {
                     if (!edgePopover.keepOpenForControl(root.activeRailControl)) edgePopover.close()
                     coffeePopover.close(); notesPopover.close(); bluetoothPopover.close()
                     notificationsPopover.close(); wifiPopover.close()
+                }
+                function onInfiniteDesktopFrameFoldProgressChanged() { panel.syncUnifiedBarNativeShape() }
+                function onInfiniteDesktopCanvasEnabledChanged() {
+                    edgePopover.close(); coffeePopover.closeInstant(); notesPopover.closeInstant()
+                    bluetoothPopover.closeInstant(); notificationsPopover.closeInstant(); wifiPopover.closeInstant()
                 }
                 function onQuickPopupTypeChanged() {
                     if (!root.quickPopupType) return

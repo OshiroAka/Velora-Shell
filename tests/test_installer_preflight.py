@@ -23,7 +23,22 @@ def load(name):
 
 
 class PreflightTests(unittest.TestCase):
-    def setUp(self): self.module = load('preflight')
+    def setUp(self):
+        self.module = load('preflight')
+        self.enterContext(patch.object(self.module.lyrics_font, 'status', return_value={'ready': True, 'path': '/fixture/Pixelon.ttf'}))
+
+    def test_pixelon_is_required_and_has_an_automatic_source_installer(self):
+        m = self.module
+        with patch.object(m.lyrics_font, 'status', return_value={'ready': False}), \
+             patch.object(m.shutil, 'which', side_effect=lambda c: '/usr/bin/' + c), \
+             patch.object(m, 'select_quickshell', return_value=({'path': '/usr/bin/qs'}, [])), \
+             patch.object(m.wal, 'select_wal', return_value=({'path': '/usr/bin/wal'}, [])), \
+             patch.object(m.browser, 'select_browser', return_value=({'path': '/usr/bin/zen-browser'}, [])), \
+             patch.object(m, 'run', return_value=SimpleNamespace(returncode=0, stdout='6.12.0', stderr='')):
+            state = m.inspect()
+        self.assertFalse(state['ready'])
+        self.assertIn('velyrics-font', state['sourceFeatures'])
+        self.assertIn('Pixelon (fonte do VeLyrics)', state['missing'])
 
     def test_missing_commands_and_qs_are_aggregated(self):
         m = self.module
@@ -264,6 +279,24 @@ class InstallerPipelineTests(unittest.TestCase):
         calls = [call.args[0][0] for call in self.commands.call_args_list]
         self.assertLess(calls.index(str(ROOT / 'scripts/install-zen')), calls.index(str(ROOT / 'scripts/build')))
         self.assertEqual(self.preflight.inspect.call_count, 2)
+
+    def test_required_font_is_installed_and_rechecked_before_build(self):
+        missing = dict(self.ready, ready=False, missing=['Pixelon'], sourceFeatures=['velyrics-font'])
+        self.preflight.inspect.side_effect = [missing, self.ready]
+        self.assertEqual(self.installer.main(['--non-interactive', '--without-fanplus', '--accept-hypr-config']), 0)
+        calls = [call.args[0] for call in self.commands.call_args_list]
+        font = next(index for index, command in enumerate(calls) if str(ROOT / 'scripts/install-velyrics-font') in command)
+        build = next(index for index, command in enumerate(calls) if str(ROOT / 'scripts/build') in command)
+        self.assertLess(font, build)
+        self.assertEqual(self.preflight.inspect.call_count, 2)
+
+    def test_failed_font_download_blocks_ready_and_preserves_session(self):
+        self.ready.update(ready=False, missing=['Pixelon'], sourceFeatures=['velyrics-font'])
+        self.commands.side_effect = lambda *args, **kw: SimpleNamespace(returncode=1)
+        self.assertEqual(self.installer.main(['--non-interactive', '--without-fanplus']), 1)
+        self.assertIn('Pixelon não instalada', self.output.getvalue())
+        self.assertFalse((self.home / '.local/bin').exists())
+        self.assertFalse((self.home / 'data/fonts').exists())
 
     def test_bluetooth_service_requires_consent_before_mutation(self):
         self.bluetooth.status = lambda: dict(hardware=True, active=False, enabled=False, blocked=True)

@@ -6,22 +6,35 @@ Button {
     id: root
     required property string choice
     property bool monitorChoice: false
+    property bool compact: false
     property bool selected: false
     property bool reducedMotion: false
+    property bool loopPreview: false
+    readonly property bool previewLooping: loopPreview && visible && !reducedMotion
     property real previewProgress: 1
     function replay() {
         previewMotion.stop()
-        if (visible && !reducedMotion) previewMotion.restart()
+        if (visible && !reducedMotion && !loopPreview && !monitorChoice) previewMotion.restart()
         else previewProgress = 1
     }
     onVisibleChanged: replay()
     onReducedMotionChanged: replay()
-    onSelectedChanged: if (selected) replay()
-    onHoveredChanged: if (hovered) replay()
+    onLoopPreviewChanged: replay()
+    onSelectedChanged: if (selected && !loopPreview) replay()
+    onHoveredChanged: if (hovered && !loopPreview) replay()
     Component.onCompleted: replay()
     NumberAnimation {
         id: previewMotion; target: root; property: "previewProgress"
         from: 0; to: 1; duration: 360; easing.type: Easing.OutCubic
+    }
+    SequentialAnimation {
+        running: root.previewLooping
+        loops: Animation.Infinite
+        NumberAnimation { target: root; property: "previewProgress"; from: 0; to: 1; duration: 1050; easing.type: Easing.InOutSine }
+        PauseAnimation { duration: 450 }
+        NumberAnimation { target: root; property: "previewProgress"; from: 1; to: 0; duration: 1050; easing.type: Easing.InOutSine }
+        PauseAnimation { duration: 450 }
+        onStopped: root.previewProgress = 1
     }
     property color ink: "white"
     property color accent: ink
@@ -29,7 +42,7 @@ Button {
     property string explanation: ""
     function alpha(c, a) { return Qt.rgba(c.r, c.g, c.b, a) }
     implicitWidth: 104
-    implicitHeight: monitorChoice ? 80 : 92
+    implicitHeight: compact ? 56 : monitorChoice ? 80 : 92
     hoverEnabled: true
     focusPolicy: Qt.StrongFocus
     scale: down ? .97 : 1
@@ -52,9 +65,11 @@ Button {
         Canvas {
             id: drawing
             anchors.horizontalCenter: parent.horizontalCenter
-            y: root.monitorChoice ? 5 : 7
-            width: 92
-            height: 58
+            y: root.compact ? 0 : root.monitorChoice ? 5 : 7
+            width: root.compact ? 66 : 92
+            height: root.compact ? 42 : 58
+            onWidthChanged: requestPaint()
+            onHeightChanged: requestPaint()
             property color stroke: root.selected ? root.accent : root.ink
             onStrokeChanged: requestPaint()
             Connections {
@@ -66,6 +81,7 @@ Button {
             onPaint: {
                 const c = getContext("2d")
                 c.reset()
+                c.scale(width / 92, height / 58)
                 c.strokeStyle = stroke; c.fillStyle = stroke
                 c.lineWidth = 1.5; c.lineCap = "round"; c.lineJoin = "round"
                 function line(x, y, xx, yy) { c.beginPath(); c.moveTo(x,y); c.lineTo(xx,yy); c.stroke() }
@@ -120,7 +136,7 @@ Button {
             }
         }
         Row {
-            visible: !root.monitorChoice
+            visible: !root.monitorChoice && !root.compact
             anchors.horizontalCenter: parent.horizontalCenter
             anchors.bottom: parent.bottom
             anchors.bottomMargin: 5
@@ -144,7 +160,7 @@ Button {
             }
         }
         Text {
-            visible: root.monitorChoice
+            visible: root.monitorChoice && !root.compact
             anchors.horizontalCenter: parent.horizontalCenter
             anchors.bottom: parent.bottom
             text: root.text; color: root.ink

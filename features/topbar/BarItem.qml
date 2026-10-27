@@ -56,7 +56,4 @@ FocusScope {
             wheel.accepted = true
         }
     }
-    ToolTip.visible: hovered && label.length > 0 && !selected
-    ToolTip.delay: 700
-    ToolTip.text: label
 }

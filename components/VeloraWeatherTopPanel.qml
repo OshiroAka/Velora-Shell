@@ -1,327 +1,218 @@
+pragma ComponentBehavior: Bound
 import QtQuick
+import QtQuick.Controls
 
+// Content only: the connected host supplies the bar's single liquid surface.
 Item {
     id: root
-
     property var theme: null
     property var weather: null
+    property var motionTokens: null
     property bool open: false
-    property bool embeddedInFrame: false
+    property real contentPadding: 16
     property bool fahrenheit: false
     property int metric: 0
-    property color barSurface: theme ? theme.surfacePopup : "#172820"
-    readonly property color ink: theme ? theme.textPrimary : "#f2f5f4"
-    readonly property color muted: theme ? theme.textSecondary : "#a8b8b2"
-    readonly property color accent: theme ? theme.accentPrimary : "#8bcab3"
-    readonly property color line: theme ? theme.borderSoft : "#53625e"
-    readonly property string uiFont: theme ? theme.uiFont : "Noto Sans"
-    readonly property var hours: weather ? weather.hourly : []
-    readonly property var days: weather ? weather.forecast : []
-
+    property bool reducedMotion: (motionTokens ? motionTokens.reduced : !!theme && !!theme.config && theme.config.reducedMotion)
+        || (!!theme && theme.motionEnabled === false)
+    readonly property color ink: theme ? theme.textPrimary : "#f1f4f7"
+    readonly property color muted: theme ? theme.textSecondary : "#bac5ce"
+    readonly property color accent: theme ? (theme.accent || theme.accentPrimary || ink) : ink
+    readonly property string uiFont: theme ? (theme.bodyFont || theme.uiFont || "Sans Serif") : "Sans Serif"
+    readonly property var hours: weather && Array.isArray(weather.hourly) ? weather.hourly : []
+    readonly property var days: weather && Array.isArray(weather.forecast) ? weather.forecast.slice(0,4) : []
+    readonly property bool interactionHeld: chart.interactionHeld
     signal closeRequested()
     signal activated()
     signal pointerInsideChanged(bool inside)
 
+    function number(value) {
+        return value === undefined || value === null || String(value).trim() === "" ? NaN : Number(value)
+    }
     function temperature(value) {
-        if (value === undefined || value === null || String(value).trim() === "")
-            return "--"
-        const number = Number(value)
-        if (!isFinite(number)) return "--"
-        return String(Math.round(fahrenheit ? number * 9 / 5 + 32 : number))
+        const n = number(value)
+        return isFinite(n) ? String(Math.round(fahrenheit ? n * 9 / 5 + 32 : n)) : "—"
     }
-
-    function metricValue(entry) {
-        if (!entry) return 0
-        const number = Number(metric === 0 ? entry.temp
-            : (metric === 1 ? entry.rain : entry.wind))
-        return isFinite(number) ? number : 0
+    function measurement(value, suffix) {
+        const n = number(value)
+        return isFinite(n) ? Math.round(n) + suffix : "—"
     }
-
-    function metricLabel(entry) {
-        const value = metricValue(entry)
-        if (metric === 0) return temperature(entry ? entry.temp : "") + "°"
-        return metric === 1 ? Math.round(value) + "%" : Math.round(value) + " km/h"
+    function reading(key) { return weather ? weather[key] : undefined }
+    function dayLabel(day, index) {
+        if (day && String(day.label || "").toLowerCase() === "hoje") return "Hoje"
+        const date = new Date(String(day ? day.date : "") + "T12:00:00")
+        return isNaN(date.getTime()) ? "—" : Qt.locale("pt_BR").toString(date,"ddd").replace(/\./g,"")
     }
-
-    function weatherIcon(name) {
-        if (name === "sun") return "sun"
-        if (name === "rain" || name === "storm") return "rain"
-        if (name === "cloud") return "cloud"
-        if (name === "snow") return "cloud"
-        return "partly"
-    }
-
-    function dayLabel(day) {
-        if (!day || !day.date) return "—"
-        return Qt.locale("pt_BR").toString(new Date(day.date + "T12:00:00"), "ddd").toUpperCase()
-    }
-
     HoverHandler { onHoveredChanged: root.pointerInsideChanged(hovered) }
     Keys.onEscapePressed: root.closeRequested()
 
-    Rectangle {
-        anchors.fill: parent
-        radius: 24
-        color: root.embeddedInFrame ? "transparent" : root.barSurface
-        border.width: root.embeddedInFrame ? 0 : 1
-        border.color: root.line
-    }
-
-    Text {
-        x: 28; y: 18
-        text: "PREVISÃO DO TEMPO"
-        color: root.accent
-        font.family: root.uiFont
-        font.pixelSize: 11
-        font.weight: Font.DemiBold
-        font.letterSpacing: 1.2
-    }
-    Text {
-        x: 28; y: 38; width: 214
-        text: root.weather && root.weather.location
-            ? root.weather.location : "Localização atual"
-        color: root.muted
-        font.family: root.uiFont
-        font.pixelSize: 12
+    component Label: Text {
+        color: root.ink; font.family: root.uiFont; font.pixelSize: 11
         elide: Text.ElideRight
     }
-    MouseArea {
-        id: refreshButton
-        x: 202; y: 14; width: 28; height: 28
+    component Action: Button {
+        id: action
+        property string glyph: ""
+        property bool weatherGlyph: false
+        property bool selected: false
+        implicitWidth: 28; implicitHeight: 28
         hoverEnabled: true
-        cursorShape: Qt.PointingHandCursor
-        onClicked: if (root.weather) root.weather.refresh(true)
-        VeloraMaterialIcon {
-            anchors.centerIn: parent
-            width: 17; height: 17
-            iconName: "refresh"
-            iconColor: refreshButton.containsMouse ? root.ink : root.muted
+        scale: down ? .93 : 1
+        Behavior on scale { NumberAnimation { duration: root.reducedMotion ? 0 : 110; easing.type: Easing.OutCubic } }
+        background: Rectangle {
+            radius: 9
+            color: Qt.rgba(root.ink.r,root.ink.g,root.ink.b,action.down ? .19 : action.selected ? .12 : action.hovered ? .06 : 0)
+            border.width: action.activeFocus ? 1 : 0; border.color: root.muted
+            Behavior on color { ColorAnimation { duration: root.reducedMotion ? 0 : 120 } }
         }
-    }
-
-    VeloraMaterialIcon {
-        x: 28; y: 74; width: 58; height: 58
-        iconName: root.weather ? root.weatherIcon(root.weather.iconName) : "partly"
-        iconColor: root.accent
-        filled: true
-    }
-    Text {
-        x: 96; y: 67
-        text: root.temperature(root.weather ? root.weather.temperature : "") + "°"
-        color: root.ink
-        font.family: root.uiFont
-        font.pixelSize: 52
-        font.weight: Font.Light
-    }
-    Row {
-        x: 179; y: 81; spacing: 3
-        Repeater {
-            model: [{ label: "C", active: !root.fahrenheit },
-                    { label: "F", active: root.fahrenheit }]
-            Rectangle {
-                required property int index
-                required property var modelData
-                width: 24; height: 23; radius: 8
-                color: modelData.active
-                    ? Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.24)
-                    : "transparent"
-                border.width: 1
-                border.color: modelData.active ? root.accent : root.line
-                Text {
-                    anchors.centerIn: parent
-                    text: parent.modelData.label
-                    color: parent.modelData.active ? root.ink : root.muted
-                    font.family: root.uiFont; font.pixelSize: 10
-                }
-                MouseArea {
-                    anchors.fill: parent
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: root.fahrenheit = index === 1
-                }
+        contentItem: Item {
+            VeloraWeatherIcon {
+                visible: action.weatherGlyph
+                anchors.centerIn: parent; width: 20; height: 20
+                name: action.glyph; ink: root.ink
             }
+            VeloraMaterialIcon {
+                visible: !action.weatherGlyph && action.glyph.length > 0
+                anchors.centerIn: parent; width: 18; height: 18
+                iconName: action.glyph; iconColor: root.ink
+            }
+            Label { anchors.centerIn: parent; text: action.text; font.pixelSize: 11 }
         }
     }
-    Text {
-        x: 30; y: 139; width: 198
-        text: root.weather ? root.weather.description : "Clima indisponível"
-        color: root.ink
-        font.family: root.uiFont
-        font.pixelSize: 14
-        elide: Text.ElideRight
-    }
-    Text {
-        x: 30; y: 164; width: 206
-        text: "Máx. " + root.temperature(root.weather ? root.weather.maximum : "")
-            + "°   ·   Mín. " + root.temperature(root.weather ? root.weather.minimum : "") + "°"
-        color: root.muted
-        font.family: root.uiFont
-        font.pixelSize: 11
-    }
-    Rectangle { x: 28; y: 191; width: 205; height: 1; color: root.line; opacity: 0.45 }
-
-    Repeater {
-        model: [
-            { label: "Umidade", value: root.weather ? root.weather.humidity + "%" : "--" },
-            { label: "Precipitação", value: root.weather ? root.weather.rain + "%" : "--" },
-            { label: "Vento", value: root.weather ? root.weather.wind + " km/h" : "--" }
-        ]
+    Item {
+        id: body
+        anchors.fill: parent; anchors.margins: root.contentPadding
+        enabled: root.open
         Item {
-            required property var modelData
-            required property int index
-            x: 28; y: 201 + index * 27; width: 205; height: 25
-            Text {
-                anchors.left: parent.left
-                anchors.verticalCenter: parent.verticalCenter
-                text: parent.modelData.label
-                color: root.muted; font.family: root.uiFont; font.pixelSize: 11
+            width: parent.width; height: 28
+            Label {
+                anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
+                width: Math.max(0,parent.width - 72)
+                text: root.reading("location") || "Localização atual"
+                color: root.muted; font.pixelSize: 12
             }
-            Text {
+            Action {
+                objectName: "weatherUnit"
+                x: parent.width - 66; width: 32
+                text: root.fahrenheit ? "°F" : "°C"
+                Accessible.name: root.fahrenheit ? "Mudar para Celsius" : "Mudar para Fahrenheit"
+                onClicked: { root.fahrenheit = !root.fahrenheit; root.activated() }
+            }
+            Action {
+                id: refresh
+                objectName: "weatherRefresh"
                 anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                text: parent.modelData.value
-                color: root.ink; font.family: root.uiFont; font.pixelSize: 11
+                glyph: "refresh"
+                Accessible.name: "Atualizar previsão"
+                enabled: !!root.weather && !root.weather.refreshing
+                onClicked: { root.weather.refresh(true); root.activated() }
+                RotationAnimation {
+                    target: refresh.contentItem; property: "rotation"
+                    running: root.open && !root.reducedMotion && !!root.weather && root.weather.refreshing
+                    from: 0; to: 360; duration: 1200; loops: Animation.Infinite
+                    onStopped: refresh.contentItem.rotation = 0
+                }
             }
-            Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: root.line; opacity: 0.24 }
         }
-    }
-
-    Rectangle {
-        id: chartCard
-        x: 252; y: 16; width: parent.width - x - 28; height: 265
-        radius: 16
-        color: Qt.rgba(1, 1, 1, 0.025)
-        border.width: 1
-        border.color: root.line
-
+        Item {
+            objectName: "weatherSummary"
+            y: 36; width: parent.width; height: 64
+            VeloraWeatherIcon {
+                anchors.verticalCenter: parent.verticalCenter
+                width: 50; height: 50
+                name: root.reading("iconName") || "partly"
+                ink: root.ink
+            }
+            Label {
+                x: 60; width: parent.width < 300 ? 92 : 104; height: 64
+                text: root.temperature(root.reading("temperature")) + "°"
+                font.pixelSize: 42; font.weight: Font.Light
+                verticalAlignment: Text.AlignVCenter
+                Accessible.name: "Temperatura atual: " + text
+                MouseArea { anchors.fill: parent; onClicked: { root.metric = 0; root.activated() } }
+            }
+            Column {
+                x: parent.width < 300 ? 156 : 168; y: 4
+                width: Math.max(0,parent.width - x); spacing: 4
+                Label { width: parent.width; text: root.reading("description") || "Clima indisponível"; font.pixelSize: 12 }
+                Label { width: parent.width; text: "Sensação " + root.temperature(root.reading("feelsLike")) + "°"; color: root.muted; font.pixelSize: 10 }
+                Label { width: parent.width; text: "↑ " + root.temperature(root.reading("maximum")) + "°   ↓ " + root.temperature(root.reading("minimum")) + "°"; font.pixelSize: 10 }
+            }
+        }
         Row {
-            x: 14; y: 12; spacing: 4
+            y: 108; width: parent.width; height: 24
             Repeater {
-                model: ["Temperatura", "Precipitação", "Vento"]
-                Rectangle {
+                model: [
+                    {icon:"humidity", key:"humidity", unit:"%", label:"Umidade"},
+                    {icon:"rain", key:"rain", unit:"%", label:"Chance de chuva"},
+                    {icon:"wind", key:"wind", unit:" km/h", label:"Vento"}
+                ]
+                Item {
+                    id: fact
+                    required property var modelData
+                    width: body.width / 3; height: 24
+                    Accessible.role: Accessible.StaticText
+                    Accessible.name: modelData.label + ": " + value.text
+                    Row {
+                        anchors.verticalCenter: parent.verticalCenter; spacing: 6
+                        VeloraWeatherIcon { width: 18; height: 18; name: fact.modelData.icon; ink: root.muted }
+                        Label { id: value; anchors.verticalCenter: parent.verticalCenter; text: root.measurement(root.reading(fact.modelData.key),fact.modelData.unit) }
+                    }
+                }
+            }
+        }
+        Row {
+            y: 140; height: 28; spacing: 4
+            Repeater {
+                model: ["temperature","rain","wind"]
+                Action {
                     required property int index
                     required property string modelData
-                    width: label.implicitWidth + 20; height: 28; radius: 9
-                    color: root.metric === index ? Qt.rgba(1, 1, 1, 0.10) : "transparent"
-                    Text {
-                        id: label; anchors.centerIn: parent
-                        text: modelData
-                        color: root.metric === index ? root.ink : root.muted
-                        font.family: root.uiFont; font.pixelSize: 11
-                        font.weight: root.metric === index ? Font.DemiBold : Font.Normal
+                    objectName: "weatherMetric" + index
+                    glyph: modelData; weatherGlyph: true; selected: root.metric === index
+                    Accessible.name: ["Temperatura por hora","Chuva por hora","Vento por hora"][index]
+                    onClicked: { root.metric = index; root.activated() }
+                }
+            }
+        }
+        Label {
+            x: 104; y: 145; width: Math.max(0,parent.width - x)
+            horizontalAlignment: Text.AlignRight; color: root.muted
+            text: root.hours.length ? (chart.selectedHour.time || "—") + " · " + chart.label(chart.selectedHour) : ""
+        }
+        VeloraWeatherChart {
+            id: chart
+            objectName: "weatherChart"
+            y: 172; width: parent.width; height: 74
+            hours: root.hours; metric: root.metric; fahrenheit: root.fahrenheit
+            presented: root.open; reducedMotion: root.reducedMotion
+            ink: root.ink; muted: root.muted; accent: root.ink; uiFont: root.uiFont
+            emptyText: root.reading("error") || "Previsão indisponível"
+            onInteractionRequested: root.activated()
+        }
+        Row {
+            objectName: "weatherForecast"
+            y: 258; width: parent.width; height: 64
+            Repeater {
+                model: root.days
+                Item {
+                    id: day
+                    required property var modelData
+                    required property int index
+                    objectName: "weatherDay" + index
+                    width: body.width / Math.max(1,root.days.length); height: 64
+                    Accessible.role: Accessible.StaticText
+                    Accessible.name: root.dayLabel(modelData,index) + ", " + (modelData.desc || "")
+                        + ", máxima " + root.temperature(modelData.max) + ", mínima " + root.temperature(modelData.min)
+                    Label { width: parent.width; horizontalAlignment: Text.AlignHCenter; text: root.dayLabel(day.modelData,day.index); color: root.muted; font.pixelSize: 10 }
+                    VeloraWeatherIcon { anchors.horizontalCenter: parent.horizontalCenter; y: 18; width: 24; height: 24; name: day.modelData.icon || "partly"; ink: root.ink }
+                    Row {
+                        anchors.horizontalCenter: parent.horizontalCenter; y: 48; spacing: 6
+                        Label { text: root.temperature(day.modelData.max) + "°"; font.pixelSize: 10 }
+                        Label { text: root.temperature(day.modelData.min) + "°"; color: root.muted; font.pixelSize: 10 }
                     }
-                    MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.metric = index }
                 }
             }
-        }
-
-        Canvas {
-            id: graph
-            x: 15; y: 70; width: parent.width - 30; height: 125
-            antialiasing: true
-            onPaint: {
-                const ctx = getContext("2d")
-                ctx.clearRect(0, 0, width, height)
-                const values = root.hours.map(function(entry) { return root.metricValue(entry) })
-                if (values.length < 2) return
-                const low = Math.min.apply(null, values)
-                const high = Math.max.apply(null, values)
-                const span = Math.max(2, high - low)
-                const points = values.map(function(value, index) {
-                    return { x: index * width / (values.length - 1),
-                        y: 16 + (high - value) / span * (height - 35) }
-                })
-                ctx.beginPath()
-                ctx.moveTo(points[0].x, points[0].y)
-                for (let index = 1; index < points.length; index++)
-                    ctx.lineTo(points[index].x, points[index].y)
-                ctx.lineTo(width, height)
-                ctx.lineTo(0, height)
-                ctx.closePath()
-                const fill = ctx.createLinearGradient(0, 0, 0, height)
-                fill.addColorStop(0, root.metric === 1
-                    ? "rgba(93,146,171,0.5)" : "rgba(180,157,82,0.46)")
-                fill.addColorStop(1, "rgba(0,0,0,0)")
-                ctx.fillStyle = fill
-                ctx.fill()
-                ctx.beginPath()
-                ctx.moveTo(points[0].x, points[0].y)
-                for (let index = 1; index < points.length; index++)
-                    ctx.lineTo(points[index].x, points[index].y)
-                ctx.strokeStyle = root.ink
-                ctx.lineWidth = 1.7
-                ctx.stroke()
-            }
-        }
-        Repeater {
-            model: root.hours.length
-            Item {
-                required property int index
-                readonly property var hour: root.hours[index]
-                x: 14 + index * (chartCard.width - 28 - width) /
-                    Math.max(1, root.hours.length - 1)
-                y: 59; width: 55; height: 195
-                Text {
-                    anchors.top: parent.top; anchors.horizontalCenter: parent.horizontalCenter
-                    text: root.metricLabel(parent.hour)
-                    color: root.muted; font.family: root.uiFont; font.pixelSize: 10
-                }
-                Text {
-                    anchors.bottom: parent.bottom; anchors.horizontalCenter: parent.horizontalCenter
-                    text: parent.hour.time || "—"
-                    color: root.muted; font.family: root.uiFont; font.pixelSize: 10
-                }
-            }
-        }
-        Text {
-            anchors.centerIn: parent
-            visible: root.hours.length === 0
-            text: root.weather && root.weather.error ? root.weather.error : "Previsão horária indisponível"
-            color: root.muted; font.family: root.uiFont; font.pixelSize: 12
+            Label { visible: root.days.length === 0; text: "Próximos dias indisponíveis"; color: root.muted }
         }
     }
-
-    Rectangle { x: 28; y: 296; width: parent.width - 56; height: 1; color: root.line; opacity: 0.55 }
-    Row {
-        x: 28; y: 307; width: parent.width - 56; height: 72; spacing: 10
-        Repeater {
-            model: root.days.length
-            Rectangle {
-                required property int index
-                readonly property var day: root.days[index]
-                width: Math.max(100, (root.width - 56 - 20) / Math.max(1, root.days.length))
-                height: 68; radius: 13
-                color: index === 0 ? Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.16)
-                    : Qt.rgba(1, 1, 1, 0.035)
-                Text {
-                    x: 13; y: 7
-                    text: root.dayLabel(parent.day)
-                    color: root.muted; font.family: root.uiFont; font.pixelSize: 10
-                    font.weight: Font.DemiBold
-                }
-                VeloraMaterialIcon {
-                    x: 12; y: 27; width: 30; height: 30
-                    iconName: root.weatherIcon(parent.day.icon)
-                    iconColor: root.accent; filled: true
-                }
-                Text {
-                    x: 52; y: 34
-                    text: root.temperature(parent.day.max) + "° / "
-                        + root.temperature(parent.day.min) + "°"
-                    color: root.ink; font.family: root.uiFont; font.pixelSize: 12
-                }
-            }
-        }
-        Text {
-            visible: root.days.length === 0
-            text: "Próximos dias indisponíveis"
-            color: root.muted; font.family: root.uiFont; font.pixelSize: 12
-        }
-    }
-
-    Connections {
-        target: root.weather
-        function onHourlyChanged() { graph.requestPaint() }
-    }
-    onMetricChanged: graph.requestPaint()
-    Component.onCompleted: graph.requestPaint()
 }

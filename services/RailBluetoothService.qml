@@ -16,7 +16,9 @@ Scope {
     property string targetAddress: ""
     property string pairPrompt: ""
     property string lastPrompt: ""
-    readonly property bool busy: actionProcess.running
+    property bool cancelled: false
+    property bool operationActive: false
+    readonly property bool busy: operationActive
     readonly property bool needsPin: /enter.*(pin|passkey)/i.test(pairPrompt)
     property string controlScript: Quickshell.shellDir + "/scripts/velora-bluetooth-control"
 
@@ -32,14 +34,24 @@ Scope {
         scanAdapter = null
     }
     function run(actionName, address) {
-        if (busy || !available || !address) return
+        if (busy || !available || !address) return false
         stopScan(); error = ""; pairPrompt = ""; lastPrompt = ""
+        cancelled = false
         action = actionName; targetAddress = address
+        operationActive = true
         actionProcess.command = [controlScript, actionName === "pair" ? "pair-session" : actionName, address]
         actionProcess.running = true
+        return true
     }
     function pair(address) { run("pair", address) }
     function remove(address) { run("remove", address) }
+    function connectDevice(address) { return run("connect", address) }
+    function disconnectDevice(address) { return run("disconnect", address) }
+    function toggleDevice(device) {
+        if (!device || busy) return false
+        if (!device.paired && !device.bonded && !device.connected) return run("pair", device.address)
+        return run(device.connected ? "disconnect" : "connect", device.address)
+    }
     function powerOn() {
         if (available && !busy) { error = ""; adapter.enabled = true; powerCheck.restart() }
     }
@@ -50,7 +62,12 @@ Scope {
         }
     }
     function cancel() {
-        if (busy) { actionProcess.running = false; error = "Pareamento cancelado." }
+        if (busy) {
+            cancelled = true
+            error = action === "pair" ? "Pareamento cancelado."
+                : action === "connect" ? "Conexão cancelada." : "Operação cancelada."
+            actionProcess.running = false
+        }
         pairPrompt = ""
     }
     Component.onDestruction: stopScan()
@@ -75,9 +92,19 @@ Scope {
         stderr: StdioCollector { id: actionErrors }
         onExited: code => {
             const output = actionOutput.text + "\n" + actionErrors.text
-            if (code !== 0 || /failed|not available|ERR\|/i.test(output) || (root.action === "pair" && !/pairing successful/i.test(output)))
-                root.error = root.action === "pair" ? "Não foi possível parear. Deixe o dispositivo visível e tente novamente." : "Não foi possível remover o dispositivo."
+            const action = root.action, address = root.targetAddress
+            const failed = code !== 0 || /failed|not available|ERR\|/i.test(output)
+                || (action === "pair" && !/pairing successful/i.test(output))
+            if (!root.cancelled && failed) {
+                root.error = action === "pair" ? "Não foi possível parear. Deixe o dispositivo visível e tente novamente."
+                    : action === "connect" ? "Não foi possível conectar. Verifique se o dispositivo está ligado e disponível."
+                    : action === "disconnect" ? "Não foi possível desconectar. Tente novamente."
+                    : "Não foi possível remover o dispositivo."
+            }
+            const connectAfterPair = action === "pair" && !failed && !root.cancelled
             root.pairPrompt = ""; root.action = ""; root.targetAddress = ""
+            root.operationActive = false
+            if (connectAfterPair) Qt.callLater(() => root.connectDevice(address))
         }
     }
 }

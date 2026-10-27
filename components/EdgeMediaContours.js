@@ -33,9 +33,13 @@ function animatedSamples(mode, levels, phase, lyricMotion) {
     return base.map((value, i) => {
         // Keep both frame joins fixed, and all content inside its existing inset.
         const envelope = Math.sin(Math.PI * i / 20)
-        const audio = mediaWeight * envelope * Math.sqrt(levels[i] || 0) * (.03 + value)
-        const lyric = lyricsWeight * envelope * (.03 * Math.sin(i * .65 - phase * .85)
-            - value * .14 * (1 - Math.cos(i * .5 - phase * .6)))
+        // Amplify the original lobes rather than moving every sample toward
+        // one common ceiling, which fills the valleys on louder music.
+        // Zero input keeps the exact default silhouette and joins stay fixed.
+        const energy = Math.pow(Math.min(1, Math.max(0, levels[i] || 0)), .35)
+        const audio = mediaWeight * envelope * energy * value * 1.7
+        const lyric = lyricsWeight * envelope * (.075 * Math.sin(i * .65 - phase * .85)
+            - value * .28 * (1 - Math.cos(i * .5 - phase * .6)))
         return Math.max(0, Math.min(.40, value + audio + lyric))
     })
 }

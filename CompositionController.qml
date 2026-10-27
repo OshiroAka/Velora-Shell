@@ -15,11 +15,13 @@ Scope {
     readonly property bool lockOccluding: preview.occluding
     readonly property bool referenceAppearance: config.referenceAppearance
     readonly property bool connectedNotifications: config.topbarEnabled && config.referenceAppearance
+    readonly property var clockTimerService: topbarTimer
     readonly property real barHeight: 40
     readonly property bool reducedMotion: config.reducedMotion
     readonly property var motionTokens: motion
     readonly property string barMaterial: config.barMaterial
     readonly property bool barBlurEnabled: config.barBlurEnabled
+    readonly property bool infiniteDesktopTopbarEnabled: config.infiniteDesktopTopbarEnabled
     readonly property bool wallpaperSelectorGlassEnabled: config.wallpaperSelectorGlassEnabled
     function setWallpaperSelectorGlass(enabled) { config.setValue("desktop.wallpaperSelectorGlassEnabled", enabled) }
     readonly property real barWaveStrength: config.barWaveStrength
@@ -31,7 +33,9 @@ Scope {
     readonly property color unifiedBarAccentAlt: theme.accentAlt
     readonly property var forecastService: weather
     readonly property var mediaService: media
+    readonly property var whatsappService: whatsapp
     readonly property var audioVisualizer: visualizer
+    readonly property bool desktopVisualizerEnabled: config.desktopVisualizerEnabled
     readonly property bool desktopVisualizerSuppressed: !!root.shell && root.shell.edgeMediaOpen
     readonly property real visualizerDockProgress: root.shell ? root.shell.visualizerDockProgress : 0
     readonly property bool desktopVisualizerVisible: config.desktopVisualizerEnabled
@@ -49,7 +53,19 @@ Scope {
     property bool sidebarNetworkActive: false
     readonly property var fanPlusService: fanPlus
     readonly property var topbarTheme: theme
+    readonly property string activeTopbarType: topbarController.activeType
     function closeTopbarTool() { topbarController.close() }
+    function toggleTopbarWeather() { return topbarController.openByType("weather", compositor.focusedMonitorName) }
+    function showTopbarWeather() {
+        const entry = topbarController.items.find(entry => entry.type === "weather"
+            && entry.host.screen.name === compositor.focusedMonitorName)
+        if (!entry) return false
+        topbarController.show("weather", entry.item, entry.host, false)
+        return true
+    }
+    function toggleTopbarNotifications() {
+        return topbarController.openByType("notifications", compositor.focusedMonitorName)
+    }
     // No QML waves are painted on the bar. The compositor plugin moves only
     // the refracted wallpaper underneath this otherwise quiet surface.
     readonly property real unifiedBarWavePhase: 0
@@ -78,12 +94,40 @@ Scope {
 
     function syncNativeAppearance() {
         syncBarBlur()
+        syncTerminalLiquid()
         Platform.NativeBlur.dispatch("velora-blur:lock-layout "
             + (theme.editorial ? "editorial" : "panel"))
         Platform.NativeBlur.dispatch("velora-blur:appearance commit "
             + Number(config.blurStrength).toFixed(4) + " "
             + Number(config.appearanceContrast).toFixed(4) + " "
             + Number(config.reflectionStrength).toFixed(4))
+    }
+
+    function syncTerminalLiquid() {
+        if (!config.ready) return
+        syncKittyBarMaterial()
+        Platform.NativeBlur.dispatch("velora-blur:terminal-glass-control "
+            + (config.terminalLiquidEnabled ? "1 " : "0 ") + Number(config.terminalRefraction).toFixed(4))
+    }
+    function syncKittyBarMaterial() {
+        if (!config.ready) return
+        Platform.NativeBlur.dispatch("velora-blur:terminal-bar-match " + (config.barMatchKittyMaterial ? "1" : "0"))
+        Platform.NativeBlur.dispatch("velora-blur:terminal-follow-bar " + (config.terminalFollowBar ? "1" : "0"))
+        Platform.NativeBlur.dispatch("velora-blur:terminal-brightness " + Number(config.terminalBarBrightness).toFixed(4))
+    }
+    function controlTerminalLiquid(action, value) {
+        if (!config.ready) return JSON.stringify({error: "As configurações ainda estão carregando."})
+        if (action === "on" || action === "off" || action === "toggle")
+            config.setValue("appearance.terminalLiquidEnabled", action === "toggle"
+                ? !config.terminalLiquidEnabled : action === "on")
+        else if (action === "strength") {
+            if (!Number.isFinite(value) || value < 0 || value > 3)
+                return JSON.stringify({error: "A intensidade deve estar entre 0 e 3."})
+            config.setValue("appearance.terminalRefraction", value)
+        } else if (action !== "status")
+            return JSON.stringify({error: "Use on, off, toggle, strength ou status."})
+        return JSON.stringify({enabled: config.terminalLiquidEnabled, strength: config.terminalRefraction,
+            available: Platform.NativeBlur.supports("terminal-glass-control")})
     }
 
     function syncWallpaperEffects() {
@@ -93,8 +137,18 @@ Scope {
     function syncLiquidStyle() {
         Platform.NativeBlur.dispatch("velora-blur:liquid-style " + config.liquidGlassStyle + " " + (theme.light ? "1" : "0"))
     }
+    function syncBarRefraction() {
+        if (!config.ready) return
+        Platform.NativeBlur.dispatch("velora-blur:bar-refraction " + Number(config.barRefractionStrength).toFixed(4))
+    }
+    function syncBarBrightness() {
+        if (!config.ready) return
+        Platform.NativeBlur.dispatch("velora-blur:bar-brightness " + Number(config.barBrightness).toFixed(4))
+    }
     function syncBarBlur() {
         syncLiquidStyle()
+        syncBarRefraction()
+        syncBarBrightness()
         syncWallpaperEffects()
         Platform.NativeBlur.dispatch("velora-blur:bar-blur " + (config.barBlurEnabled ? "1" : "0"))
         Platform.NativeBlur.dispatch("velora-blur:widget-blur " + (config.widgetBlurEnabled ? "1" : "0"))
@@ -110,6 +164,12 @@ Scope {
         id: theme
         config: config
         palette: pywalPalette
+        kittyMaterial: terminalMaterial
+    }
+    Core.KittyMaterial { id: terminalMaterial; config: config }
+    Core.KittyBarSync {
+        config: config; theme: theme
+        available: Platform.NativeBlur.supports("terminal-follow-bar")
     }
     Core.Motion { id: motion; config: config }
     Core.PreviewController { id: preview; motion: motion }
@@ -123,7 +183,11 @@ Scope {
     Platform.CompositorService { id: compositor }
     Services.ClockService { id: clock; localeName: config.localeName }
     TopBarFeature.TopBarController { id: topbarController; motion: motion }
-    Services.TopBarTimerService { id: topbarTimer }
+    Services.TopBarTimerService {
+        id: topbarTimer
+        reducedMotion: config.reducedMotion
+        onCloseNotificationRequested: id => { if (root.shell) root.shell.dismissNotificationHistory(id) }
+    }
     Services.FanPlusService { id: fanPlus }
     Connections {
         target: topbarController
@@ -151,6 +215,7 @@ Scope {
         active: preview.mounted || config.topbarEnabled
             || config.widgetVisibleAtProgress("media", widgetTransition.progress)
     }
+    Services.WhatsAppService { id: whatsapp }
     Services.WeatherService {
         id: weather
         active: config.topbarEnabled || config.widgetVisibleAtProgress(
@@ -206,6 +271,8 @@ Scope {
     }
 
     Surfaces.TopBarHost {
+        edgeMediaPanels: root.shell ? root.shell.edgeMediaPanels : ({})
+        edgeFullHeightPanels: root.shell ? root.shell.edgeFullHeightPanels : ({})
         nativeBarMaterial: root.nativeBarMaterial
         notificationSource: root.shell
         executionStatus: executionStatus
@@ -323,12 +390,22 @@ Scope {
     Connections {
         target: config
         function onLiquidGlassStyleChanged() { root.syncLiquidStyle() }
+        function onBarRefractionStrengthChanged() { root.syncBarRefraction() }
+        function onBarBrightnessChanged() { root.syncBarBrightness() }
+        function onTerminalLiquidEnabledChanged() { root.syncTerminalLiquid() }
+        function onTerminalFollowBarChanged() { root.syncTerminalLiquid() }
+        function onTerminalBarBrightnessChanged() { root.syncTerminalLiquid() }
+        function onTerminalRefractionChanged() { root.syncTerminalLiquid() }
+        function onBarMatchKittyMaterialChanged() { root.syncBarBlur(); root.syncKittyBarMaterial() }
         function onColorSchemeChanged() { root.syncLiquidStyle() }
         function onWallpaperBlurEnabledChanged() { root.syncWallpaperEffects() }
         function onWallpaperBlurStrengthChanged() { root.syncWallpaperEffects() }
         function onBarBlurEnabledChanged() { root.syncBarBlur() }
         function onWidgetBlurEnabledChanged() { root.syncBarBlur() }
         function onReadyChanged() {
+            if (config.ready) root.syncBarRefraction()
+            if (config.ready) root.syncBarBrightness()
+            if (config.ready) root.syncTerminalLiquid()
             if (config.ready && Number(config.valueAt(config.userData, "appearance.referenceVersion", 0)) < 3)
                 config.applyReferenceAppearance()
         }
@@ -364,6 +441,9 @@ Scope {
             configurationError: config.error,
             nativeBlur: Platform.NativeBlur.state,
             nativeBarMaterial: { available: root.nativeBarMaterial, diagnostic: root.nativeBarMaterialDiagnostic },
+            infiniteDesktop: {enabled: !!root.shell && root.shell.infiniteDesktopCanvasEnabled,
+                progress: root.shell ? root.shell.infiniteDesktopMorphProgress : 0,
+                moving: !!root.shell && root.shell.infiniteDesktopMorphing},
             preview: preview.status(),
             settings: editorController.status(),
             editor: editorController.status(),
@@ -400,6 +480,7 @@ Scope {
             },
             topbar: {
                 enabled: config.topbarEnabled,
+                brightness: config.barBrightness,
                 layoutCount: config.topbarLayout.length,
                 leftCount: config.topbarItemsForSection("left", false).length,
                 centerCount: config.topbarItemsForSection("center", false).length,
@@ -441,7 +522,14 @@ Scope {
             return JSON.stringify({ready: pywalPalette.ready, generating: pywalPalette.generating,
                 error: pywalPalette.error, wallpaper: pywalPalette.sourcePath,
                 tone: pywalPalette.requestedTone, background: String(pywalPalette.background),
-                bar: String(theme.barSurface), foreground: String(theme.textPrimary),
+                // Keep terminal theme generation independent of the surface
+                // following that terminal, avoiding repeated tint/opacity feedback.
+                bar: String(theme.independentBarSurface), foreground: String(theme.textPrimary),
+                terminalFollowBar: config.terminalFollowBar && config.terminalLiquidEnabled
+                    && Platform.NativeBlur.supports("terminal-follow-bar"),
+                barColor: Qt.rgba(theme.independentBarSurface.r, theme.independentBarSurface.g,
+                    theme.independentBarSurface.b, 1).toString(),
+                barOpacity: theme.independentBarSurface.a,
                 exactSurface: pywalPalette.exactSurface})
         }
         function paletteShuffle(): void { pywalPalette.shuffle() }
@@ -465,6 +553,14 @@ Scope {
         function topbarMove(type: string, target: string): bool { return config.moveTopbarTool(type, target) }
         function topbarToggle(type: string): bool { return topbarController.openByType(type, compositor.focusedMonitorName) }
         function topbarClose(): void { topbarController.close() }
+        function timerState(): string {
+            return JSON.stringify({running: topbarTimer.countdown.running, finished: topbarTimer.finished,
+                duration: topbarTimer.duration, remaining: topbarTimer.remaining,
+                alertPhase: topbarTimer.alertPhase, alertStrength: topbarTimer.alertStrength})
+        }
+        function timerStart(seconds: int): bool { return topbarTimer.startDuration(seconds) }
+        function timerDismiss(): bool { return topbarTimer.dismissAlert() }
+        function timerSnooze(): bool { return topbarTimer.snoozeAlert() }
         target: "composition"
 
         function lockToggle(): void {
@@ -479,6 +575,19 @@ Scope {
             Platform.NativeBlur.refresh()
             root.opticsGeneration += 1
             root.syncNativeAppearance()
+        }
+        function terminalLiquid(action: string, strength: real): string {
+            return root.controlTerminalLiquid(action, strength)
+        }
+        function terminalBrightness(value: real): bool {
+            if (!config.ready || !Number.isFinite(value) || value < .8 || value > 1.2) return false
+            config.setValue("appearance.terminalBarBrightness", value)
+            return true
+        }
+        function barBrightness(value: real): bool {
+            if (!config.ready || !Number.isFinite(value) || value < .2 || value > 1.2) return false
+            config.setValue("bar.brightness", value)
+            return true
         }
         function referenceAppearanceApply(): void { config.applyReferenceAppearance() }
         function barAppearance(material: string, waveStrength: real): bool {

@@ -16,6 +16,7 @@ Item {
     property var theme: null
     property var mediaService: null
     property bool mediaEnabled: true
+    property bool profileMenuEnabled: false
     property var audioVisualizer: null
     property var toolsService: null
     property var fanPlusService: null
@@ -43,6 +44,7 @@ Item {
     property color unifiedAccent: "#8db8ff"
     property color unifiedAccentAlt: "#b99cff"
     property alias panelMaskItem: panelSurface
+    property real desktopSourceReveal: 1
     readonly property bool rightSoft: theme && theme.barPosition === "right"
     readonly property bool rightDark: rightSoft && theme && theme.themeMode === "dark"
     readonly property bool softStyle: true
@@ -175,6 +177,61 @@ Item {
         return customPath.length > 0 ? customPath : Qt.resolvedUrl("../assets/profile-avatar.svg")
     }
 
+    function toplevelClass(toplevel) {
+        if (!toplevel) return ""
+        const client = toplevel.lastIpcObject || ({})
+        return String(client.class || client.initialClass || toplevel.appId
+            || (toplevel.wayland ? toplevel.wayland.appId : "") || "").trim()
+    }
+
+    function desktopEntryFor(toplevel) {
+        const appClass = toplevelClass(toplevel).toLowerCase()
+        if (!appClass) return null
+        const entries = DesktopEntries.applications.values || []
+        for (let index = 0; index < entries.length; index += 1) {
+            const entry = entries[index]
+            if (!entry || entry.noDisplay) continue
+            const id = String(entry.id || "").toLowerCase().replace(/\.desktop$/, "")
+            const name = String(entry.name || "").toLowerCase()
+            if (id === appClass || name === appClass || id.split(".").pop() === appClass)
+                return entry
+        }
+        return null
+    }
+
+    function collectRunningApps() {
+        const windows = Hyprland.toplevels.values || []
+        const groups = []
+        for (let index = 0; index < windows.length; index += 1) {
+            const toplevel = windows[index]
+            const appClass = toplevelClass(toplevel)
+            if (!appClass) continue
+            const entry = desktopEntryFor(toplevel)
+            const key = String(entry && entry.id ? entry.id : appClass).toLowerCase().replace(/\.desktop$/, "")
+            let group = groups.find(item => item.key === key)
+            if (!group) {
+                group = { key: key, appClass: appClass, entry: entry, target: toplevel, windows: [], count: 0, active: false }
+                groups.push(group)
+            }
+            group.windows.push(toplevel)
+            group.count += 1
+            if (toplevel.activated || (toplevel.wayland && toplevel.wayland.activated)) {
+                group.target = toplevel
+                group.active = true
+            }
+        }
+        return groups
+    }
+
+    function activateRunningApp(group) {
+        if (!group || !group.windows || group.windows.length === 0) return
+        let index = group.windows.findIndex(window => window.address === group.target.address)
+        if (index < 0) index = 0
+        if (group.active && group.windows.length > 1)
+            index = (index + 1) % group.windows.length
+        group.windows[index].activate()
+    }
+
     function fontGlowEnabled() {
         return root.theme && root.theme.textGlow.a > 0.001
     }
@@ -207,6 +264,8 @@ Item {
     }
 
     function popupProbeAt(y) {
+        if (!root.profileMenuEnabled)
+            return null
         const pad = Math.round(4 * root.uiScale)
         const probes = [
             { item: slotAvatar, type: "quickSettings" }
@@ -561,7 +620,7 @@ Item {
             return
         }
 
-        if (focusTarget === "avatar") {
+        if (focusTarget === "avatar" && root.profileMenuEnabled) {
             root.quickPopupRequested("quickSettings", root.itemCenterY(slotAvatar))
             return
         }
@@ -922,6 +981,14 @@ Item {
 
     Flickable {
         id: railViewport
+        opacity: root.desktopSourceReveal
+        enabled: root.desktopSourceReveal > .99
+        layer.enabled: root.desktopSourceReveal > .001 && root.desktopSourceReveal < .999
+        layer.effect: MultiEffect {
+            blurEnabled: true
+            blurMax: 18
+            blur: 1 - root.desktopSourceReveal
+        }
         z: 10
         anchors.fill: panelSurface
         contentWidth: width
@@ -1162,6 +1229,99 @@ Item {
                     }
                 }
 
+            }
+        }
+
+        ColumnLayout {
+            id: openApplications
+            Layout.alignment: Qt.AlignHCenter
+            Layout.topMargin: Math.round(4 * root.uiScale)
+            Layout.bottomMargin: Math.round(5 * root.uiScale)
+            spacing: Math.round(3 * root.uiScale)
+            readonly property var groups: root.collectRunningApps()
+            visible: groups.length > 0
+
+            Repeater {
+                model: openApplications.groups
+
+                delegate: Item {
+                    id: runningApp
+                    required property var modelData
+                    readonly property var appGroup: modelData
+                    readonly property var toplevel: appGroup.target
+                    readonly property string appClass: appGroup.appClass
+                    readonly property var desktopEntry: appGroup.entry
+                    readonly property bool available: true
+                    Layout.alignment: Qt.AlignHCenter
+                    Layout.preferredWidth: Math.round(38 * root.uiScale)
+                    Layout.preferredHeight: Math.round(38 * root.uiScale)
+                    visible: available
+                    Accessible.role: Accessible.Button
+                    Accessible.name: desktopEntry ? String(desktopEntry.name || appClass) : appClass
+                    Accessible.description: appGroup.count > 1 ? String(appGroup.count) + " janelas abertas" : String(toplevel.title || "")
+
+                    Rectangle {
+                        id: runningAppSurface
+                        anchors.fill: parent
+                        anchors.margins: 2
+                        radius: Math.round(12 * root.uiScale)
+                        color: root.alpha(root.ink, runningApp.appGroup.active ? 0.16 : (runningAppHover.hovered ? 0.10 : 0))
+                        border.width: runningApp.appGroup.active ? 1 : 0
+                        border.color: root.alpha(root.pink, 0.58)
+                        Behavior on color { ColorAnimation { duration: root.motionHover; easing.type: root.motionEaseHover } }
+                    }
+
+                    Image {
+                        id: runningAppIcon
+                        anchors.centerIn: parent
+                        width: Math.round(25 * root.uiScale)
+                        height: width
+                        source: Quickshell.iconPath(runningApp.desktopEntry && runningApp.desktopEntry.icon
+                            ? String(runningApp.desktopEntry.icon) : runningApp.appClass, true)
+                        sourceSize: Qt.size(96, 96)
+                        fillMode: Image.PreserveAspectFit
+                        smooth: true
+                        visible: status === Image.Ready
+                    }
+
+                    VeloraMaterialIcon {
+                        anchors.centerIn: parent
+                        width: Math.round(23 * root.uiScale)
+                        height: width
+                        iconName: "apps"
+                        iconColor: root.ink
+                        visible: !runningAppIcon.visible
+                    }
+
+                    Rectangle {
+                        visible: runningApp.appGroup.count > 1
+                        anchors.right: parent.right
+                        anchors.bottom: parent.bottom
+                        width: Math.round(15 * root.uiScale)
+                        height: width
+                        radius: width / 2
+                        color: root.pink
+                        border.width: 1
+                        border.color: root.alpha(root.card, 0.9)
+                        Text {
+                            anchors.centerIn: parent
+                            text: runningApp.appGroup.count > 9 ? "9+" : String(runningApp.appGroup.count)
+                            color: root.theme ? root.theme.activeText : "white"
+                            font.family: root.monoFont
+                            font.pixelSize: Math.round(8 * root.uiScale)
+                            font.weight: Font.Bold
+                        }
+                    }
+
+                    HoverHandler { id: runningAppHover; blocking: false }
+                    TapHandler {
+                        acceptedButtons: Qt.LeftButton
+                        onTapped: root.activateRunningApp(runningApp.appGroup)
+                    }
+                    Keys.onReturnPressed: root.activateRunningApp(runningApp.appGroup)
+                    Keys.onSpacePressed: root.activateRunningApp(runningApp.appGroup)
+                    activeFocusOnTab: true
+                }
             }
         }
 
@@ -1629,23 +1789,14 @@ Item {
         VeloraIconMotion {
             id: iconMotion
             highlighted: button.hovered || (root.focusMode && root.focusTarget === button.iconName)
-            reducedMotion: root.reducedIconMotion
+            reducedMotion: root.reducedIconMotion || (!!root.theme && !root.theme.motionEnabled)
         }
 
-        radius: Math.round(8 * root.uiScale)
-        color: root.alpha(root.ink, selected ? 0.18 : hovered ? 0.13 : 0.07)
-        border.width: 1
-        border.color: root.alpha(root.ink, selected ? 0.28 : 0.16)
-        Behavior on color { ColorAnimation { duration: 120 } }
+        radius: Math.round(11 * root.uiScale)
+        color: root.alpha(root.ink, selected ? 0.10 : 0.08 * iconMotion.emphasis)
+        border.width: root.focusMode && root.focusTarget === button.iconName ? 1 : 0
+        border.color: root.alpha(root.ink, 0.5)
 
-        ToolTip {
-            visible: button.hovered && !(button.iconName === "caffeine" && root.caffeineMenuOpen)
-                && !(button.iconName === "notes" && root.notesMenuOpen)
-            delay: 600
-            text: ({ caffeine: "Café · manter acordado", notes: "Notas", discord: "Discord" })[button.iconName] || button.iconName
-            x: root.rightSoft ? -width - 10 : button.width + 10
-            y: (button.height - height) / 2
-        }
 
         Process {
             id: appProcess
@@ -1654,15 +1805,15 @@ Item {
             onExited: running = false
         }
 
-        VeloraIcon {
+        VeloraSidebarIcon {
             scale: iconMotion.zoom
             transform: Translate { y: iconMotion.lift }
             anchors.centerIn: parent
-            width: Math.round(26 * root.uiScale * root.configuredIconScale)
-            height: Math.round(26 * root.uiScale * root.configuredIconScale)
-            visible: button.iconName !== "caffeine" && button.iconName !== "notes"
+            width: Math.round(22 * root.uiScale * root.configuredIconScale)
+            height: Math.round(22 * root.uiScale * root.configuredIconScale)
+            visible: button.iconName !== "caffeine"
             iconName: button.iconName
-            lineColor: root.ink
+            ink: root.ink
             opacity: Math.max(0.88, root.configuredIconOpacity) * iconMotion.inkOpacity
         }
 
@@ -1670,21 +1821,18 @@ Item {
             scale: iconMotion.zoom
             transform: Translate { y: iconMotion.lift }
             anchors.centerIn: parent
-            width: Math.round(26 * root.uiScale * root.configuredIconScale)
+            width: Math.round(22 * root.uiScale * root.configuredIconScale)
             height: width
-            active: button.iconName === "caffeine" || button.iconName === "notes"
-            sourceComponent: button.iconName === "caffeine" ? coffeeGlyph : notesGlyph
+            opacity: Math.max(0.88, root.configuredIconOpacity) * iconMotion.inkOpacity
+            active: button.iconName === "caffeine"
+            sourceComponent: coffeeGlyph
             Component {
                 id: coffeeGlyph
                 TopBar.CoffeeIcon {
                     color: root.ink
                     active: !!root.toolsService && root.toolsService.caffeineActive
-                    animate: true
+                    animate: !root.reducedIconMotion && (!root.theme || root.theme.motionEnabled)
                 }
-            }
-            Component {
-                id: notesGlyph
-                TopBar.BarIcon { name: "notes"; color: root.ink }
             }
         }
 
@@ -1739,17 +1887,16 @@ Item {
         VeloraIconMotion {
             id: iconMotion
             highlighted: button.hovered || (root.focusMode && root.focusTarget === button.iconName)
-            reducedMotion: root.reducedIconMotion
+            reducedMotion: root.reducedIconMotion || (!!root.theme && !root.theme.motionEnabled)
         }
 
 
         Rectangle {
             anchors.fill: parent
-            radius: Math.round(7 * root.uiScale)
-            visible: button.selected || button.hovered
-            color: button.selected ? root.alpha(root.pink, 0.26) : root.alpha(root.card, 0.30)
-            border.width: button.selected ? 1 : 0
-            border.color: root.alpha(root.pink, 0.30)
+            radius: Math.round(10 * root.uiScale)
+            color: root.alpha(root.ink, button.selected ? 0.10 : 0.08 * iconMotion.emphasis)
+            border.width: root.focusMode && root.focusTarget === button.iconName ? 1 : 0
+            border.color: root.alpha(root.ink, 0.5)
         }
 
         Process {
@@ -1759,16 +1906,16 @@ Item {
             onExited: running = false
         }
 
-        VeloraIcon {
+        VeloraSidebarIcon {
             scale: iconMotion.zoom
             transform: Translate { y: iconMotion.lift }
             anchors.centerIn: parent
-            width: Math.round(26 * root.uiScale * root.configuredIconScale)
-            height: Math.round(26 * root.uiScale * root.configuredIconScale)
+            width: Math.round(22 * root.uiScale * root.configuredIconScale)
+            height: Math.round(22 * root.uiScale * root.configuredIconScale)
             iconName: button.iconName
-            lineColor: root.ink
+            ink: root.ink
             opacity: Math.max(0.88, root.configuredIconOpacity) * iconMotion.inkOpacity
-            value: button.iconName === "battery" ? root.normalizedBatteryLevel() : Math.max(0.08, Math.min(1, root.volume / 100))
+            level: button.iconName === "battery" ? root.normalizedBatteryLevel() : Math.max(0.08, Math.min(1, root.volume / 100))
             rotation: button.iconRotation
             transformOrigin: Item.Center
             layer.enabled: false
@@ -1918,6 +2065,7 @@ Item {
 
         MouseArea {
             anchors.fill: parent
+            enabled: root.profileMenuEnabled
             hoverEnabled: true
             acceptedButtons: Qt.LeftButton
             cursorShape: Qt.PointingHandCursor

@@ -72,6 +72,29 @@ Canvas {
             c.globalCompositeOperation="destination-out";oval(28,8,0.7,0.8,true)
         } else if(name === "clock") {
             oval(12,12,9,9,false);line(12,6,12,12);line(12,12,16,14)
+        } else if(name === "eyedropper") {
+            c.beginPath();c.moveTo(14,5);c.lineTo(17,2);c.quadraticCurveTo(18,1,20,3)
+            c.quadraticCurveTo(22,5,21,6);c.lineTo(18,9);c.stroke()
+            line(12,4,20,12)
+            c.beginPath();c.moveTo(13,7);c.lineTo(4,16);c.lineTo(3,21);c.lineTo(8,20);c.lineTo(17,11);c.stroke()
+            line(6,15,10,19)
+        } else if(name === "record") {
+            oval(12,12,9,9,false);oval(12,12,4,4,true)
+        } else if(name === "timer") {
+            oval(12,14,8,8,false);line(9,2,15,2);line(12,2,12,6)
+            line(18,6,20,8);line(12,10,12,15)
+        } else if(name === "calendar") {
+            round(3,5,18,16,2);line(3,10,21,10);line(8,3,8,7);line(16,3,16,7)
+            for(let row=0;row<2;row++) for(let col=0;col<3;col++) oval(7+col*5,14+row*4,.65,.65,true)
+        } else if(name === "markings") {
+            c.beginPath();c.moveTo(5,14);c.lineTo(15,4);c.quadraticCurveTo(16,3,18,5)
+            c.quadraticCurveTo(20,7,19,8);c.lineTo(9,18);c.lineTo(4,19);c.closePath();c.stroke()
+            line(13,6,17,10);line(5,14,9,18);line(4,22,20,22)
+        } else if(name === "documents") {
+            c.beginPath();c.moveTo(8,3);c.lineTo(15,3);c.lineTo(20,8);c.lineTo(20,18)
+            c.lineTo(8,18);c.closePath();c.moveTo(15,3);c.lineTo(15,8);c.lineTo(20,8);c.stroke()
+            c.beginPath();c.moveTo(5,6);c.lineTo(4,6);c.lineTo(4,22);c.lineTo(16,22);c.lineTo(16,21);c.stroke()
+            line(11,12,17,12);line(11,15,16,15)
         } else if(name === "close") { line(6,6,18,18);line(18,6,6,18) }
     }
 }

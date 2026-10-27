@@ -35,6 +35,10 @@ ShellRoot {
     property var sceneSnapshot: null
     function syncNativeAppearance() { nativeSyncs++ }
     function syncLiquidStyle() {}
+    function syncBarRefraction() {}
+    function syncBarBrightness() {}
+    function syncTerminalLiquid() {}
+    function syncKittyBarMaterial() {}
     function syncBarBlur() {}
     function syncWallpaperEffects() {}
     // The test runner inserts the production Connections and debounce timer.

@@ -31,7 +31,7 @@ Item {
     property real leftOpeningHalfHeight: 0
     readonly property bool leftOpeningActive: leftOpeningCenter >= 0
         && leftOpeningHalfHeight > 0.5
-    readonly property bool liquidMaterial: materialMode === "liquid"
+    readonly property bool liquidMaterial: ["liquid", "liquid-glass"].includes(materialMode)
     readonly property bool solidMaterial: materialMode === "solid"
     default property alias contentData: contentLayer.data
 

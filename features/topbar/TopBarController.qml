@@ -21,7 +21,7 @@ Scope {
     property string recoverType: ""
 
     function supportsHover(type) {
-        return ["thing", "caffeine", "timer", "notes", "battery", "monitor", "paint", "wifi", "search", "controls", "clock"].includes(type)
+        return ["thing", "caffeine", "timer", "notes", "battery", "monitor", "paint", "wifi", "weather", "clock"].includes(type)
     }
     function enter(type, item, host) {
         if (!supportsHover(type)) return
@@ -30,7 +30,10 @@ Scope {
         pendingHost = host
         leaveDelay.stop()
         if (blockedItem === item || (owner === host && anchorItem === item && opened)) return
-        openDelay.restart()
+        // Intent protects the first opening. Once a menu owns this bar, follow
+        // the pointer immediately, like the sidebar's handoff.
+        if (owner === host && opened) show(type, item, host, true)
+        else openDelay.restart()
     }
     function leave(item) {
         if (blockedItem === item) blockedItem = null

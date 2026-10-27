@@ -7,6 +7,14 @@ ShellRoot {
     property int stage: 0
     property int ticks: 0
     function check(value, message) { if (!value) throw new Error(message) }
+    function childByName(item, name) {
+        if (item.objectName === name) return item
+        for (const child of item.children || []) {
+            const found = childByName(child, name)
+            if (found) return found
+        }
+        return null
+    }
     QtObject { id: theme }
     QtObject { id: system }
     ListModel { id: history }
@@ -30,6 +38,14 @@ ShellRoot {
             onClearRequested: history.clear()
         }
     }
+    Components.VeloraRailNotifications {
+        id: embeddedNotifications
+        width: 310; height: 348
+        theme: theme; system: system
+        embedded: true
+        contentPadding: 0
+        notificationsModel: history
+    }
     Component.onCompleted: history.append({id: "n1", summary: "Teste", body: "Mensagem", app: "Fixture", timeText: "agora"})
     Timer {
         interval: 80; running: true; repeat: true
@@ -37,8 +53,17 @@ ShellRoot {
             if (++test.ticks > 55) { console.error("RAIL_SYSTEM_FAILED timeout", test.stage); Qt.quit(); return }
             try {
                 switch (test.stage) {
-                case 0: first.open(); break
+                case 0: {
+                    const viewport = test.childByName(embeddedNotifications, "railContentViewport")
+                    test.check(!!viewport, "embedded notification viewport exists")
+                    test.check(viewport.contentWidth === 310 && viewport.contentHeight === 348,
+                        "topbar history fits its actual width and keeps dismiss/clear controls in view")
+                    embeddedNotifications.width = 260
+                    first.open(); break
+                }
                 case 1:
+                    test.check(test.childByName(embeddedNotifications, "railContentViewport").contentWidth === 260,
+                        "embedded history adapts to a narrower topbar without horizontal clipping")
                     if (first.reveal < 0.99) return
                     second.open()
                     test.check(!first.mounted && second.mounted, "handoff closes old panel immediately")

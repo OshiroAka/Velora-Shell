@@ -36,6 +36,8 @@ Item {
     property real batteryCenter: 510
     property bool volumeOpen: false
     property bool brightnessOpen: false
+    property bool externalBrightnessActive: false
+    onExternalBrightnessActiveChanged: if (externalBrightnessActive) refreshBrightness()
     property bool batteryOpen: false
     property int refreshSerial: 0
     property alias volumeMask: volumePanel.maskItem
@@ -110,7 +112,7 @@ Item {
     }
 
     function refreshBrightness() {
-        if (brightnessOpen && !brightnessQuery.running && !brightnessWriter.running && pendingBrightness < 0)
+        if ((brightnessOpen || externalBrightnessActive) && !brightnessQuery.running && !brightnessWriter.running && pendingBrightness < 0)
             brightnessQuery.running = true
     }
 
@@ -144,7 +146,7 @@ Item {
     Timer {
         interval: 2000
         repeat: true
-        running: root.brightnessOpen
+        running: root.brightnessOpen || root.externalBrightnessActive
         onTriggered: root.refreshBrightness()
     }
     Timer {

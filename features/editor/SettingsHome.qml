@@ -42,7 +42,7 @@ Item {
     readonly property color ink: theme.textPrimary
     readonly property color mutedInk: theme.textSecondary
     readonly property color accent: theme.accent
-    readonly property bool liquidMaterial: config.barMaterial === "liquid" && !config.reduceTransparency
+    readonly property bool liquidMaterial: ["liquid", "liquid-glass"].includes(config.barMaterial) && !config.reduceTransparency
     readonly property bool blurMaterial: config.barMaterial !== "solid" && config.barBlurEnabled && !config.reduceTransparency
     readonly property color surfaceTint: config.reduceTransparency
         ? Qt.rgba(theme.barSurface.r, theme.barSurface.g, theme.barSurface.b, 1)

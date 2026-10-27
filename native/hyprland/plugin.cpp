@@ -3,6 +3,7 @@
 #include <hyprland/src/config/values/types/FloatValue.hpp>
 #include <hyprland/src/config/values/types/IntValue.hpp>
 #include <hyprland/src/desktop/view/LayerSurface.hpp>
+#include <hyprland/src/desktop/view/Window.hpp>
 #include <hyprland/src/event/EventBus.hpp>
 #include <hyprland/src/managers/EventManager.hpp>
 #include <hyprland/src/managers/eventLoop/EventLoopManager.hpp>
@@ -22,12 +23,19 @@
 #include <cmath>
 #include <cstdint>
 #include <format>
+#include <filesystem>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <vector>
 #include <hyprutils/utils/ScopeGuard.hpp>
 #include <lua.hpp>
+#include <drm_fourcc.h>
+#include "WallpaperTransition.hpp"
+#include "TerminalGlass.hpp"
+#include "BarRefraction.hpp"
+#include "LyricsBeat.hpp"
 
 namespace {
 constexpr auto DESKTOP_NAMESPACE = "velora-shell-lock-preview-desktop";
@@ -45,10 +53,21 @@ constexpr size_t SHARED_WIDGET_COUNT = 6;
 HANDLE         g_handle  = nullptr;
 CFunctionHook* g_drawTex = nullptr;
 CFunctionHook* g_drawGLTex = nullptr;
+CFunctionHook* g_drawGLPreBlur = nullptr;
 CHyprSignalListener g_tickListener;
 SP<CEventLoopTimer> g_causticsTimer;
 SP<Render::GL::CGLFramebuffer> g_clearBackdrop;
 std::unordered_map<std::string, SP<Render::GL::CGLFramebuffer>> g_frameBackdrops;
+// Retain the desktop source before its wave is shaded. Upper frame pixels
+// near that same wave must not sample and refract the already shaded wave.
+struct SFrameFusionBackdrop {
+    SP<Render::GL::CGLFramebuffer> sharp, blurred;
+};
+std::unordered_map<std::string, SFrameFusionBackdrop> g_frameFusionBackdrops;
+struct SOpticalBlurBuffers {
+    SP<Render::GL::CGLFramebuffer> horizontal, vertical;
+};
+std::unordered_map<std::string, SOpticalBlurBuffers> g_opticalBlurBuffers;
 uint64_t g_clearBackdropCopies = 0;
 
 SP<Config::Values::CIntValue> g_desktopSize;
@@ -105,6 +124,48 @@ bool                g_liquidShaderFailed = false;
 bool                g_desktopShaderFailed = false;
 SP<CShader>          g_liquidShader;
 SP<CShader>          g_desktopShader;
+SP<CShader>          g_opticalBlurShader;
+SP<CShader>          g_terminalShader;
+SP<CShader>          g_terminalBarShader;
+struct STerminalBackdrop {
+    PHLMONITORREF monitor;
+    SP<Render::GL::CGLFramebuffer> material, desktop;
+};
+std::unordered_map<std::string, STerminalBackdrop> g_terminalBackdrops;
+SP<Config::Values::CIntValue> g_terminalGlass;
+SP<Config::Values::CFloatValue> g_terminalStrength;
+std::optional<STerminalGlassControl> g_terminalControl;
+bool g_terminalBarMatch = false;
+bool g_terminalFollowBar = false;
+float g_terminalBarBrightness = 1.F;
+float g_barBrightness = 1.F;
+uint64_t g_terminalFollowBarDraws = 0;
+SP<Config::Values::CFloatValue> g_barRefraction;
+std::optional<float> g_barRefractionOverride;
+float barRefractionStrength() {
+    return g_barRefractionOverride.value_or(g_barRefraction ? g_barRefraction->value() : BAR_DEFAULT_REFRACTION);
+}
+uint64_t g_terminalBarMatchDraws = 0;
+bool terminalGlassEnabled() { return g_terminalControl ? g_terminalControl->enabled : g_terminalGlass && g_terminalGlass->value(); }
+float terminalGlassStrength() { return g_terminalControl ? g_terminalControl->strength : g_terminalStrength ? g_terminalStrength->value() : 1.F; }
+bool terminalOpticsActive() { return terminalGlassEnabled() && (g_terminalFollowBar || terminalGlassStrength() > 0.F); }
+bool g_terminalShaderFailed = false;
+uint64_t g_terminalGlassDraws = 0;
+uint64_t g_terminalSharpDraws = 0;
+uint64_t g_terminalDesktopCopies = 0;
+struct SKittyIdentity { PHLWINDOWREF window; bool kitty = false; };
+std::unordered_map<const Desktop::View::CWindow*, SKittyIdentity> g_kittyIdentities;
+
+struct SWallpaperTransition {
+    SWallpaperTransitionTiming timing;
+    std::unordered_map<std::string, SP<Render::IFramebuffer>> frames;
+    float mode = 0.F, phase = 0.F;
+    std::array<float, 2> direction{1.F, 0.F};
+};
+SWallpaperTransition g_wallpaperTransition;
+SP<CShader> g_wallpaperShader;
+SP<CEventLoopTimer> g_wallpaperTimer;
+int g_wallpaperLastDirection = -1;
 
 struct SBlurTransition {
     float current = 0.F;
@@ -167,8 +228,15 @@ struct STopbarMorph {
     float sideLabelY = 0.F;
     float sideLabelWidth = 0.F;
     float sideLabelHeight = 0.F;
+    float desktopFold = 0.F;
     // Optional execution/notification panel, independent of the open menu.
     std::array<float, 8> statusPanel{};
+    // Charging extends the same bar while menus and notifications stay open.
+    std::array<float, 8> chargingPanel{};
+    float chargingProgress = 1.F;
+    float chargingStrength = 0.F;
+    std::array<float, 8> timerPanel{};
+    std::array<float, 3> timerLight{}; // normalized anchor, pulse progress, intensity
 };
 
 constexpr size_t TOPBAR_SHAPE_COUNT = 3;
@@ -192,6 +260,13 @@ struct SDesktopBarMaterial {
     std::array<float, 96> bands{};
 };
 std::unordered_map<std::string, SDesktopBarMaterial> g_desktopBarMaterials;
+struct SLyricsBeatPulse {
+    float x, y, strength;
+    std::array<float, 6> colors;
+    std::chrono::steady_clock::time_point started;
+};
+std::unordered_map<std::string, std::vector<SLyricsBeatPulse>> g_lyricsBeats;
+uint64_t g_lyricsBeatCount = 0;
 const STopbarMorph& unifiedBarShape(const std::string& monitor) {
     static const STopbarMorph empty;
     const auto found = g_unifiedBarShapes.find(monitor);
@@ -264,6 +339,7 @@ bool g_sharedWidgetCaustics = false;
 
 using DrawTexFn = void (*)(Render::IElementRenderer*, WP<CTexPassElement>, const CRegion&);
 using DrawGLTexFn = void (*)(Render::GL::CGLElementRenderer*, WP<CTexPassElement>, const CRegion&);
+using DrawGLPreBlurFn = void (*)(Render::GL::CGLElementRenderer*, WP<CPreBlurElement>, const CRegion&);
 
 constexpr auto LIQUID_GLASS_VERTEX = R"GLSL(#version 300 es
 
@@ -315,6 +391,8 @@ uniform vec4 pointer_position;
 uniform vec4 pointer_shape;
 // Desktop interior in framebuffer coordinates; both frame windows use it.
 uniform vec4 frameInterior;
+uniform vec4 frameTopPanel; // topbar body, shared in framebuffer coordinates
+uniform vec4 frameTopMetrics; // anchor, neck, radius, join
 uniform vec4 oppositePanel; // center and half-size in framebuffer pixels
 uniform vec4 oppositeLabel;
 uniform float oppositeContour;
@@ -324,13 +402,36 @@ uniform float waveDockProgress;
 uniform float sideWaveWidth;
 uniform float sideCurve[21];
 uniform float frameRadius;
+uniform vec2 frameFold; // progress, moving bottom in framebuffer coordinates
 uniform vec4 sideLabel;
 uniform vec2 frost;
 uniform vec4 barTint;
 uniform vec4 barMaterial; // active, mode, blur, spectrum
+uniform float barRefractionStrength;
+uniform float opticalScale;
+uniform highp sampler2D frameBackdrop;
+uniform highp sampler2D frameBlur;
+uniform float frameFusion;
+float frameBackdropMix = 0.0;
+// A separate instance of this exact shader prepares Kitty's backdrop. The
+// original client pass still composites the foreground and rounds its corners.
+uniform float terminalBackdrop;
+uniform float terminalBrightness;
+uniform float barBrightness;
+uniform highp sampler2D kittyBlur;
+uniform vec4 kittyMatch; // enabled, strength, refraction pixels, rim width
+uniform vec4 kittyLensBox; // centre and half size in backdrop pixels
 uniform float barBands[96];
 uniform vec4 statusPanel; // center and half-size, in draw-local pixels
 uniform vec4 statusMetrics; // anchor, neck, radius, join
+uniform vec4 chargingPanel;
+uniform vec4 chargingMetrics;
+uniform vec4 chargingLight; // origin in framebuffer pixels, spread, fading intensity
+uniform vec4 timerLight;
+uniform vec4 musicLights[8];
+uniform vec3 musicColors[16];
+uniform vec4 timerPanel;
+uniform vec4 timerMetrics;
 uniform vec4 bottomPanel; // center and half-size in framebuffer pixels
 uniform vec2 bottomMetrics; // radius, smooth join
 
@@ -345,6 +446,10 @@ float smoothUnion(float first, float second, float softness) {
     float blend = clamp(0.5 + 0.5 * (second - first) / softness, 0.0, 1.0);
     return mix(second, first, blend) - softness * blend * (1.0 - blend);
 }
+
+float connectPanel(float distance, vec2 point, float barBottom, vec2 center,
+                   vec2 halfSize, float anchor, float neckWidth,
+                   float panelRadius, float join);
 
 float ellipseSdf(vec2 point, vec2 radii) {
     vec2 safeRadii = max(radii, vec2(0.5));
@@ -426,7 +531,12 @@ float oppositePanelSdf(vec2 pixel) {
         float panel = roundedBoxSdf(relative, oppositePanel.zw + vec2(0.0, overshoot), min(20.0, oppositePanel.z));
         float distance = panel;
         if (oppositeLabel.z > .01) {
-            float label = roundedBoxSdf(pixel - oppositeLabel.xy, oppositeLabel.zw, min(10.0, oppositeLabel.z));
+            // Extend the attached shelf into the panel, keeping its outer
+            // edge fixed. Merely touching leaves a shallow SDF inside their
+            // union and the liquid lens draws an internal optical seam.
+            float join = min(48.0, oppositeLabel.w * 1.2);
+            float label = roundedBoxSdf(pixel - oppositeLabel.xy - vec2(join * .5, 0.0),
+                oppositeLabel.zw + vec2(join * .5, 0.0), min(10.0, oppositeLabel.z));
             distance = smoothUnion(distance, label, min(8.0, oppositeLabel.z));
         }
         return distance;
@@ -445,27 +555,49 @@ float sideWaveSdf(vec2 pixel) {
     return pixel.x - edge;
 }
 
-float frameSdf(vec2 point) {
-    vec2 pixel = point + (windowTopLeft + windowBottomRight) * fullSize * 0.5;
+float frameBaseSdf(vec2 pixel) {
     float distance = -roundedBoxSdf(pixel - frameInterior.xy - frameInterior.zw * 0.5,
                          frameInterior.zw * 0.5, frameRadius);
+    // Retract the U-shaped frame upward, leaving the existing topbar intact.
+    // Clip its outside too: an inverted box otherwise fills below the bottom.
+    if (frameFold.x > 0.0) {
+        distance = frameFold.x >= .9999 ? pixel.y - frameInterior.y
+            : max(distance, pixel.y - frameFold.y);
+        // The bottom divides and retracts toward its two corners. Only the
+        // corner tails subsequently rise along the sides; no horizontal
+        // strip travels across the middle of the desktop.
+        float gather = clamp(frameFold.x / .35, 0.0, 1.0);
+        float middle = fullSize.x * .5;
+        float leftEnd = mix(middle, frameInterior.x + frameRadius, gather);
+        float rightStart = mix(middle, frameInterior.x + frameInterior.z - frameRadius, gather);
+        if (pixel.y >= frameInterior.y)
+            distance = max(distance, min(pixel.x - leftEnd, rightStart - pixel.x));
+    }
     if (barMaterial.x > .5 && oppositePanel.z > .01)
         distance = smoothUnion(distance, oppositePanelSdf(pixel), min(24.0, oppositePanel.z));
     if (barMaterial.x > .5) distance = min(distance, sideWaveSdf(pixel));
-    // The desktop pass owns the bottom corners, strip and moving contour as
-    // one surface. Upper passes still union their attached panels below.
-    // Partition inside the material, away from its antialiased outer edge.
-    float bottomJoin = frameInterior.y + frameInterior.w - frameRadius - 2.0;
-    if (barMaterial.x > 0.5 && barMaterial.x < 1.5 && pixel.y >= bottomJoin)
-        return 1e6;
+    if (frameTopPanel.w > .005)
+        distance = connectPanel(distance, pixel, frameInterior.y,
+            frameTopPanel.xy, frameTopPanel.zw, frameTopMetrics.x,
+            frameTopMetrics.y, frameTopMetrics.z, frameTopMetrics.w);
+    return distance;
+}
+
+float framePanelSdf(vec2 point) {
+    vec2 pixel = point + (windowTopLeft + windowBottomRight) * fullSize * 0.5;
+    float distance = frameBaseSdf(pixel);
     if (barMaterial.x > 1.5 && bottomPanel.w > 0.0) {
         float panel = roundedBoxSdf(pixel - bottomPanel.xy, bottomPanel.zw, bottomMetrics.x);
         distance = smoothUnion(distance, panel, max(0.01, bottomMetrics.y));
     }
-    if (barMaterial.w < 1.0) return distance;
+    return distance;
+}
+
+float desktopWaveSdf(vec2 pixel) {
+    if (barMaterial.w < 1.0 || frameFold.x > 0.0) return 1e6;
     float base = frameInterior.y + frameInterior.w;
     float scale = max(0.1, fullSize.x / barMaterial.w);
-    if (pixel.y < base - 182.0 * scale) return distance;
+    if (pixel.y < base - 182.0 * scale) return 1e6;
     float band = clamp(pixel.x / fullSize.x * 95.0, 0.0, 95.0);
     int index = int(floor(band));
     float t = fract(band);
@@ -480,13 +612,30 @@ float frameSdf(vec2 point) {
     float dock = clamp(waveDockProgress, 0.0, 1.0);
     float remaining = (1.0 - dock) * (1.0 - smoothstep(1.0 - dock,
         1.12 - dock, pixel.x / fullSize.x));
+    remaining *= 1.0 - frameFold.x;
     level *= remaining;
     float slope = 0.5 * ((-a+c) + 2.0*(2.0*a-5.0*b+4.0*c-d)*t
         + 3.0*(-a+3.0*b-3.0*c+d)*t*t) * 180.0 * 0.9948 * scale * 95.0 / fullSize.x * remaining;
     float wave = (base - level * 180.0 * 0.9948 * scale - pixel.y)
         / sqrt(1.0 + slope*slope);
-    distance = min(distance, wave);
-    return distance;
+    return wave;
+}
+
+float frameSdf(vec2 point) {
+    vec2 pixel = point + (windowTopLeft + windowBottomRight) * fullSize * 0.5;
+    return min(framePanelSdf(point), desktopWaveSdf(pixel));
+}
+
+vec3 sceneSample(vec2 uv) {
+    if (frameBackdropMix <= .001) return texture(tex, uv).rgb;
+    if (frameBackdropMix >= .999) return texture(frameBackdrop, uv).rgb;
+    return mix(texture(tex, uv).rgb, texture(frameBackdrop, uv).rgb, frameBackdropMix);
+}
+
+vec3 blurSample(vec2 uv) {
+    if (frameBackdropMix <= .001) return texture(kittyBlur, uv).rgb;
+    if (frameBackdropMix >= .999) return texture(frameBlur, uv).rgb;
+    return mix(texture(kittyBlur, uv).rgb, texture(frameBlur, uv).rgb, frameBackdropMix);
 }
 
 float connectPanel(float distance, vec2 point, float barBottom, vec2 center,
@@ -504,29 +653,45 @@ float connectPanel(float distance, vec2 point, float barBottom, vec2 center,
     return smoothUnion(smoothUnion(distance, neck, softness), body, softness);
 }
 
-float connectedTopbarSdf(vec2 point) {
+float connectTopbar(float distance, vec2 point) {
     float barBottom = topLeft.y + bottomRight.y;
-    float distance = frameRadius > 0.0 ? frameSdf(point) : point.y - barBottom;
-    distance = connectPanel(distance, point, barBottom, uvOffset, uvSize,
-        pointer_shape.x, pointer_shape.y, radius, radiusOuter);
-    return connectPanel(distance, point, barBottom, statusPanel.xy, statusPanel.zw,
+    // With a frame, the body is already in the common distance field. Adding
+    // it again would deepen only the topbar pass and change its optical rim.
+    if (frameTopPanel.w <= .005)
+        distance = connectPanel(distance, point, barBottom, uvOffset, uvSize,
+            pointer_shape.x, pointer_shape.y, radius, radiusOuter);
+    distance = connectPanel(distance, point, barBottom, statusPanel.xy, statusPanel.zw,
         statusMetrics.x, statusMetrics.y, statusMetrics.z, statusMetrics.w);
+    distance = connectPanel(distance, point, barBottom, chargingPanel.xy, chargingPanel.zw,
+        chargingMetrics.x, chargingMetrics.y, chargingMetrics.z, chargingMetrics.w);
+    return connectPanel(distance, point, barBottom, timerPanel.xy, timerPanel.zw,
+        timerMetrics.x, timerMetrics.y, timerMetrics.z, timerMetrics.w);
+}
+
+float connectedTopbarSdf(vec2 point) {
+    return connectTopbar(frameRadius > 0.0 || frameFold.x > 0.0
+        ? frameSdf(point) : point.y - topLeft.y - bottomRight.y, point);
+}
+
+float connectSidebar(float distance, vec2 point) {
+    if (uvSize.x > 0.005 && uvSize.y > 0.005) {
+        float body = roundedBoxSdf(point - uvOffset, uvSize, radiusOuter);
+        distance = smoothUnion(distance, body, max(0.01, radiusOuter));
+    }
+    if (sideLabel.z > 0.005 && sideLabel.w > 0.005) {
+        float label = roundedBoxSdf(point - sideLabel.xy, sideLabel.zw,
+                                    min(10.0, sideLabel.z));
+        distance = smoothUnion(distance, label, min(8.0, sideLabel.z));
+    }
+    return distance;
 }
 
 float compositionSdf(vec2 point) {
     if (thick > 3.5) {
         float edge = topLeft.x + pointer_shape.x * bottomRight.x;
-        float rail = frameRadius > 0.0 ? frameSdf(point) : (point.x - edge) * pointer_shape.x;
-        if (uvSize.x > 0.005 && uvSize.y > 0.005) {
-            float body = roundedBoxSdf(point - uvOffset, uvSize, radiusOuter);
-            rail = smoothUnion(rail, body, max(0.01, radiusOuter));
-        }
-        if (sideLabel.z > 0.005 && sideLabel.w > 0.005) {
-            float label = roundedBoxSdf(point - sideLabel.xy, sideLabel.zw,
-                                        min(10.0, sideLabel.z));
-            rail = smoothUnion(rail, label, min(8.0, sideLabel.z));
-        }
-        return frameRadius > 0.0 ? rail : smoothUnion(rail, pointer_shape.z - point.y, max(0.01, radius));
+        float rail = frameRadius > 0.0 || frameFold.x > 0.0 ? frameSdf(point) : (point.x - edge) * pointer_shape.x;
+        rail = connectSidebar(rail, point);
+        return frameRadius > 0.0 || frameFold.x > 0.0 ? rail : smoothUnion(rail, pointer_shape.z - point.y, max(0.01, radius));
     }
     if (thick > 2.5)
         return connectedTopbarSdf(point);
@@ -614,11 +779,137 @@ vec3 frostedBackdrop(vec2 uv, float scale) {
         float wy = y == 0 ? 6.0 : abs(y) == 1 ? 4.0 : 1.0;
         for (int x = -2; x <= 2; ++x) {
             float wx = x == 0 ? 6.0 : abs(x) == 1 ? 4.0 : 1.0;
-            result += texture(tex, clamp(uv + vec2(float(x), float(y)) * stride,
-                vec2(0.001), vec2(0.999))).rgb * wx * wy;
+            result += sceneSample(clamp(uv + vec2(float(x), float(y)) * stride,
+                vec2(0.001), vec2(0.999))) * wx * wy;
         }
     }
     return result / 256.0;
+}
+
+// TERMINAL_GLASS_OPTICS
+
+vec3 kittyBackdropFor(vec3 material) {
+    material = clamp(material * terminalBrightness, 0.0, 1.0);
+    float clientAlpha = floor(barTint.a * 255.0 + 0.5) / 255.0;
+    vec3 clientColor = floor(barTint.rgb * barTint.a * 255.0 + 0.5) / 255.0;
+    return (material - clientColor * clientAlpha) / max(1.0 - clientAlpha, 0.0001);
+}
+
+vec3 barMaterialBrightness(vec3 material) {
+    return barMaterial.x > 0.5 ? clamp(material * barBrightness, 0.0, 1.0) : material;
+}
+
+// Independent optical model for material 3. The distance field is the complete
+// connected surface, including joins; window ownership never creates a lens edge.
+vec3 opticalRead(vec2 coordinate, float smoothing) {
+    vec3 value = vec3(0.0);
+    for (int row=-1;row<=1;++row) for (int column=-1;column<=1;++column) {
+        float weight = (row==0 ? 2.0 : 1.0)*(column==0 ? 2.0 : 1.0);
+        vec2 sampleUv = (coordinate+vec2(float(column),float(row))*smoothing*0.86)/fullSize;
+        value += sceneSample(clamp(sampleUv,0.5/fullSize,1.0-0.5/fullSize))*weight;
+    }
+    return value/16.0;
+}
+
+vec3 opticalSurface(vec2 location, float distanceToSurface, vec2 outward) {
+    float unit = max(opticalScale, 0.1);
+    float interior = max(0.0, -distanceToSurface) / unit;
+    float sheetHeight = max(1.0,2.0*bottomRight.y);
+    float middle = (windowTopLeft.y+windowBottomRight.y)*fullSize.y*0.5+topLeft.y;
+    if (frameInterior.w>0.0) { middle=fullSize.y*0.5; sheetHeight=fullSize.y; }
+    float shoulder = 1.45*min(26.0,sheetHeight/unit*0.36);
+    float run = 1.0 - clamp(interior / shoulder, 0.0, 1.0);
+    // Differentiate y=(1-x^4)^(1/4), then build a 3D surface normal.
+    float elevation = pow(max(0.001, 1.0 - run*run*run*run), 0.25);
+    float tangent = min(7.0, pow(run / elevation, 3.0));
+    vec3 normal3 = normalize(vec3(outward * tangent, 1.0));
+    vec3 transmitted = refract(vec3(0.0, 0.0, -1.0), normal3, 2.0/3.0);
+    float strength = clamp(barRefractionStrength, 0.0, 10.0);
+    vec2 travel = transmitted.xy * (47.52 * unit * strength / max(0.2, -transmitted.z));
+
+    // Shared frame owners use one sheet centre and one vertical lens, so the
+    // optical field continues through a join without a second panel lens.
+    float vertical = (middle-location.y)*0.128*strength;
+    vec2 ray = location + vec2(0.0, vertical) + travel;
+    vec2 separation = travel * 0.0468;
+    float smoothing = 1.5*unit*mix(0.45,1.0,smoothstep(0.0,shoulder,interior));
+    vec3 result;
+    result.r = opticalRead(ray+separation,smoothing).r;
+    result.g = opticalRead(ray,smoothing).g;
+    result.b = opticalRead(ray-separation,smoothing).b;
+
+    float luminanceValue = dot(result,vec3(0.2126,0.7152,0.0722));
+    result = mix(vec3(luminanceValue),result,1.25);
+    vec3 pigment = mix(vec3(0.09,0.09,0.10),vec3(1.0),frost.y);
+    result = mix(result,pigment,clamp(barTint.a * 0.55,0.0,1.0));
+    result += mix(0.020,0.055,frost.y);
+    float downSheet = clamp((location.y-middle)/sheetHeight+0.5,0.0,1.0);
+    result += (1.0-downSheet)*mix(0.030,0.040,frost.y);
+    result *= 1.0 - 0.12*exp(-interior/6.0)*max(outward.y,0.0);
+    result *= 1.0 - 0.10*exp(-interior/(shoulder*0.45));
+
+    float facingLight = dot(outward,normalize(vec2(-0.55,-0.83)));
+    float reflection = pow(max(0.0,facingLight),1.6)
+        + 0.55*pow(max(0.0,-facingLight),2.2);
+    float contourLight = exp(-interior/1.1)*(0.18+0.78*reflection)
+        + exp(-interior/5.0)*(0.030+0.10*reflection);
+    float ringDistance = (interior-shoulder*0.5)/(shoulder*0.2+1.0);
+    contourLight += 0.07*(0.35+reflection)*exp(-ringDistance*ringDistance);
+    result += vec3(0.96,0.98,1.0)*contourLight*0.45*mix(1.0,0.85,frost.y);
+    // A fixed, neutral grain never shimmers with the frame timer.
+    float grainA = fract(sin(dot(floor(location),vec2(127.1,311.7)))*43758.5453);
+    float grainB = fract(sin(dot(floor(location)+19.0,vec2(269.5,183.3)))*41579.2341);
+    return clamp(result+(grainA+grainB-1.0)*0.006,0.0,1.0);
+}
+
+// Keep this color field aligned with shaders/topbar-connected.frag.
+float barLightWeight(vec2 point, vec4 light, float span) {
+    if (light.w <= 0.001) return 0.0;
+    float t = clamp(light.z, 0.0, 1.0);
+    vec2 offset = point - light.xy;
+    float distance = length(offset);
+    float reach = 36.0 + max(span, 320.0) * 0.82 * t;
+    float band = 50.0 + reach * 0.30;
+    float wave = exp(-pow((distance - reach) / band, 2.0));
+    float wake = exp(-distance / max(55.0, reach * 0.82)) * 0.32;
+    float vertical = exp(-abs(offset.y) / (85.0 + reach * 1.10));
+    return clamp((wave * 0.78 + wake) * vertical * light.w, 0.0, 0.60);
+}
+vec4 barLightField(vec2 point, vec4 light, float span, bool alert) {
+    float weight = barLightWeight(point, light, span);
+    if (weight <= 0.0) return vec4(0.0);
+    float t = clamp(light.z, 0.0, 1.0);
+    float distance = length(point - light.xy);
+    float spectrum = 0.5 + 0.5 * sin((point.x - light.x) * 0.012 - t * 5.0 + point.y * 0.018);
+    vec3 hue = mix(vec3(0.25, 0.50, 0.93), vec3(0.84, 0.32, 0.58), spectrum);
+    hue = mix(hue, vec3(0.53, 0.36, 0.86), 0.30 + 0.18 * sin(t * 6.0 + distance * 0.008));
+    if (alert) hue = vec3(0.84, 0.32, 0.38);
+    return vec4(hue, weight);
+}
+vec3 barLightColor(vec3 base, vec2 point, vec4 light, float span, bool alert) {
+    vec4 field = barLightField(point, light, span, alert);
+    return mix(base, field.rgb, field.a) + field.rgb * field.a * 0.035;
+}
+vec3 applyChargingLight(vec3 base, vec2 pixel) {
+    if (terminalBackdrop > 0.5 || thick < 2.5) return base;
+    base = barLightColor(base, pixel, chargingLight, fullSize.x, false);
+    // Let each beat travel to completion. Overlapping waves share a bounded
+    // field instead of accumulating eight layers of brightness/opacity.
+    vec3 musicHue = vec3(0.0);
+    float musicWeight = 0.0, musicIntensity = 0.0;
+    for (int i = 0; i < 8; ++i) {
+        vec4 light = musicLights[i];
+        float weight = barLightWeight(pixel, light, fullSize.x);
+        if (weight <= 0.0) continue;
+        float blend = .5 + .5 * sin((pixel.x - light.x) * .012 - light.z * 5.0 + pixel.y * .018);
+        vec4 field = vec4(mix(musicColors[i * 2], musicColors[i * 2 + 1], blend), weight);
+        musicHue += field.rgb * field.a;
+        musicWeight += field.a;
+        musicIntensity = max(musicIntensity, field.a);
+    }
+    musicHue /= max(musicWeight, 0.0001);
+    base = mix(base, musicHue, musicIntensity) + musicHue * musicIntensity * 0.035;
+    return barLightColor(base, pixel, timerLight, fullSize.x, true);
 }
 
 void main() {
@@ -636,34 +927,96 @@ void main() {
     float sdf = thick > 0.5 && thick < 1.5
         ? smoothUnion(mainDistance, dialDistance, joinSoftness)
         : mainDistance;
-    if (barMaterial.x > 1.5 && frameRadius > 0.0) {
+    if (barMaterial.x > 0.5 && (frameRadius > 0.0 || frameFold.x > 0.0)) {
+        bool desktopPass = barMaterial.x > 1.5;
+        if (desktopPass && frameFold.x >= .9999) discard;
         vec2 pixel = local + (windowTopLeft + windowBottomRight) * fullSize * 0.5;
-        float frameOnly = -roundedBoxSdf(pixel - frameInterior.xy - frameInterior.zw * 0.5,
-            frameInterior.zw * 0.5, frameRadius);
-        // Keep the bottom frame in the same draw as the wave. Cutting it out
-        // here left the upper pass to blur/tint a second backdrop at the base,
-        // producing a straight seam through an otherwise continuous surface.
-        float bottomJoin = frameInterior.y + frameInterior.w - frameRadius - 2.0;
-        if (pixel.y < bottomJoin && (frameOnly <= 0.0 || oppositePanelSdf(pixel) < 32.0
-                || sideWaveSdf(pixel) < 32.0)) discard;
+        if (!desktopPass && frameTopPanel.w > .005 && pixel.y >= frameInterior.y) {
+            float body = roundedBoxSdf(pixel - frameTopPanel.xy, frameTopPanel.zw,
+                min(frameTopMetrics.z, frameTopPanel.w));
+            if (body <= frameTopMetrics.w + 1.25) {
+                // Preserve sidebar controls above their own material. Only
+                // ownership changes at the rail; both passes use the complete
+                // field before refraction, with no old inner edge underneath.
+                bool rail = pixel.x < frameInterior.x
+                    || pixel.x > frameInterior.x + frameInterior.z;
+                if ((thick > 3.5) != rail) discard;
+            }
+        }
+        if (frameFold.x < .9999) {
+            // Partition ownership, never the geometric/optical field. Both
+            // passes evaluate the complete frame + wave before taking its
+            // normals, so a high peak removes the old rail/menu rim inside it.
+            // Include only the 1.25 px antialias fringe, not an empty 32 px
+            // exclusion margin beside a right-hand menu.
+            float upperShape = frameBaseSdf(pixel);
+            upperShape = thick > 3.5 ? connectSidebar(upperShape, local)
+                : connectTopbar(upperShape, local);
+            float bottomJoin = frameInterior.y + frameInterior.w - frameRadius - 2.0;
+            bool upperOwns = pixel.y < bottomJoin && upperShape <= 1.25;
+            if (desktopPass == upperOwns) discard;
+        }
         // The editor is above sidebar controls; leave their existing rail
-        // pixels intact. Only the corner inside the desktop and bottom strip
-        // transfer to this pass when Settings are connected.
-        if (bottomPanel.w > 0.0 && pixel.y < frameInterior.y + frameInterior.w
+        // pixels intact when Settings are connected.
+        if (desktopPass && bottomPanel.w > 0.0 && pixel.y < frameInterior.y + frameInterior.w
                 && (pixel.x < frameInterior.x || pixel.x > frameInterior.x + frameInterior.z)) discard;
-        sdf = frameSdf(local);
     }
-    float coverage = 1.0 - smoothstep(-1.25, 1.25, sdf);
+    if (frameFusion > .5 && barMaterial.x > .5) {
+        vec2 pixel = local + (windowTopLeft + windowBottomRight) * fullSize * .5;
+        float bottomJoin = frameInterior.y + frameInterior.w - frameRadius - 2.0;
+        // Use the very same unshaded source on both sides of the join. Blend
+        // only above the shared contour; the panel still shows live clients
+        // behind the rest of its body. The wave amplitude itself is unchanged.
+        float waveJoin = 1.0 - smoothstep(1.25, 33.25, desktopWaveSdf(pixel));
+        frameBackdropMix = max(waveJoin, smoothstep(bottomJoin - 36.0, bottomJoin - 2.0, pixel.y));
+    }
+    float coverage = terminalBackdrop > 0.5 ? 1.0 : 1.0 - smoothstep(-1.25, 1.25, sdf);
     if (coverage <= 0.001)
         discard;
+
+    if (barMaterial.x > 0.5 && kittyMatch.x > 0.5) {
+        vec2 basePixels = mix(windowTopLeft, windowBottomRight, panelUv) * fullSize;
+        vec4 optics = terminalGlassOptics(basePixels - kittyLensBox.xy,
+            kittyLensBox.zw, max(0.0, -sdf), kittyMatch.y, kittyMatch.z, kittyMatch.w);
+        vec2 uv = clamp((basePixels - optics.xy) / fullSize,
+            0.5 / fullSize, 1.0 - 0.5 / fullSize);
+        vec3 material = mix(blurSample(uv), sceneSample(uv), optics.z);
+        material = max(material + vec3(optics.w), vec3(0.0));
+        // Kitty applies its background colour/alpha in the original client
+        // pass. Bars apply that same managed colour/alpha after the lens.
+        material = mix(material, barTint.rgb, barTint.a);
+        material = applyChargingLight(material, basePixels);
+        material = barMaterialBrightness(material);
+        float outputAlpha = clamp(alpha * coverage, 0.0, 1.0);
+        fragColor = vec4(material * outputAlpha, outputAlpha);
+        return;
+    }
 
     if (barMaterial.x > 0.5 && barMaterial.y < 1.5) {
         vec2 uv = mix(windowTopLeft, windowBottomRight, panelUv);
         // tex already contains Hyprland's blur when enabled. Do not replace
         // the compositor's configured passes with a private sampling kernel.
-        vec3 background = texture(tex, uv).rgb;
+        vec3 background = sceneSample(uv);
         vec3 surface = mix(background, barTint.rgb, barTint.a);
+        surface = applyChargingLight(surface, uv * fullSize);
+        surface = barMaterialBrightness(surface);
+        if (terminalBackdrop > 0.5) surface = kittyBackdropFor(surface);
         fragColor = vec4(surface * coverage, coverage);
+        return;
+    }
+
+    if (barMaterial.x > 0.5 && barMaterial.y > 2.5) {
+        vec2 fieldGradient = vec2(
+            compositionSdf(local+vec2(0.5,0.0))-compositionSdf(local-vec2(0.5,0.0)),
+            compositionSdf(local+vec2(0.0,0.5))-compositionSdf(local-vec2(0.0,0.5)));
+        vec2 surfaceDirection = fieldGradient/max(length(fieldGradient),0.0001);
+        vec2 location = mix(windowTopLeft,windowBottomRight,panelUv)*fullSize;
+        vec3 material = opticalSurface(location,sdf,surfaceDirection);
+        material = applyChargingLight(material,location);
+        material = barMaterialBrightness(material);
+        if (terminalBackdrop > 0.5) material = kittyBackdropFor(material);
+        float outputAlpha = clamp(alpha*coverage,0.0,1.0);
+        fragColor = vec4(material*outputAlpha,outputAlpha);
         return;
     }
 
@@ -696,8 +1049,12 @@ void main() {
     float barLens = step(0.5, pointer_shape.w);
     float magnificationStrength = mix(0.025, 0.018, compactLens);
     magnificationStrength = mix(magnificationStrength, 0.0, barLens);
-    vec2 magnification = -shapeLocal * magnificationStrength / fullSize;
-    vec2 displacement = -normal * distort * lens / fullSize;
+    float barGain = barMaterial.x > 0.5 ? clamp(barRefractionStrength, 0.0, 10.0) : 1.0;
+    // Keep the established rim profile above 1x. Multiplying its narrow SDF
+    // lens by ten would fold the ray map at the centre of a thin bar.
+    float rimGain = min(barGain, 1.0);
+    vec2 magnification = -shapeLocal * magnificationStrength * rimGain / fullSize;
+    vec2 displacement = -normal * distort * lens * rimGain / fullSize;
     // The unified bar inherits the lockscreen lens, but without visible pool
     // waves. Two very slow, non-repeating bends move only the refracted
     // wallpaper and keep the QML icons perfectly still.
@@ -708,26 +1065,34 @@ void main() {
         cos(flowPoint.x * 0.014 - time * 0.34)
             + 0.42 * cos(flowPoint.y * 0.011 + time * 0.23));
     vec2 animatedBend = flow * distort * (0.20 + lens * 0.24)
-        * mix(0.60, 0.16, barLens) / fullSize;
+        * mix(0.60, 0.16, barLens) * rimGain / fullSize;
     float panelScale = max(0.55, pointer_position.w);
     vec2 designPoint = (local - topLeft) / panelScale + vec2(800.0, 408.0);
     vec3 caustics = pointer_position.z > 0.5
         ? poolCaustics(designPoint, pointer_position.x,
                        pointer_position.y) : vec3(0.0);
-    vec2 refractedUv = clamp(baseUv + magnification + displacement
+    vec2 refractedUv = baseUv + magnification + displacement
         + animatedBend
-        + caustics.xy * panelScale / fullSize,
-        vec2(0.001), vec2(0.999));
+        + caustics.xy * panelScale / fullSize;
+    // Strong settings add a continuous lens across the output. Both frame
+    // passes and every connected menu use the same coordinates, so a join
+    // cannot acquire two different optical fields. Each axis is independent:
+    // even the thin strip at the physical screen edge refracts visibly.
+    // At 10x the added map still has positive slopes (at least 0.73).
+    vec2 sceneQ = clamp(refractedUv * 2.0 - 1.0, vec2(-1.0), vec2(1.0));
+    refractedUv -= (refractedUv - 0.5) * (1.0 - sceneQ * sceneQ)
+        * (0.03 * max(barGain - 1.0, 0.0));
+    refractedUv = clamp(refractedUv, vec2(0.001), vec2(0.999));
 
     // The backdrop is copied with a straight framebuffer blit, so its texture
     // uses the same UV orientation as the window bounds above. Do not flip Y.
     // Clear glass keeps fine wallpaper details without a diffusion kernel.
-    vec3 glass = texture(tex, refractedUv).rgb;
+    vec3 glass = sceneSample(refractedUv);
 
     // Subtle wavelength separation is visible only at the curved rim.
-    vec2 spectral = normal * noise * lens / fullSize;
-    glass.r = texture(tex, clamp(refractedUv + spectral, 0.001, 0.999)).r;
-    glass.b = texture(tex, clamp(refractedUv - spectral, 0.001, 0.999)).b;
+    vec2 spectral = normal * noise * lens * rimGain / fullSize;
+    glass.r = sceneSample(clamp(refractedUv + spectral, 0.001, 0.999)).r;
+    glass.b = sceneSample(clamp(refractedUv - spectral, 0.001, 0.999)).b;
 
     if (frost.x > 0.5) {
         float bodyDiffusion = 0.96 - 0.50 * lens;
@@ -769,6 +1134,9 @@ void main() {
     glass = clamp(glass, 0.0, 1.0);
     if (barMaterial.x > 0.5)
         glass = mix(glass, barTint.rgb, barTint.a);
+    glass = applyChargingLight(glass, baseUv * fullSize);
+    glass = barMaterialBrightness(glass);
+    if (terminalBackdrop > 0.5) glass = kittyBackdropFor(glass);
 
     float outputAlpha = clamp(alpha * coverage, 0.0, 1.0);
     fragColor = vec4(glass * outputAlpha, outputAlpha);
@@ -814,6 +1182,40 @@ void main() {
     blurred *= brightness;
     float outputAlpha = clamp(alpha, 0.0, 1.0);
     fragColor = vec4(clamp(blurred, 0.0, 1.0) * outputAlpha, outputAlpha);
+}
+)GLSL";
+
+// Source-space Gaussian filtering: two perpendicular passes prepare a texture
+// before any optical displacement. Adjacent taps share one bilinear fetch.
+constexpr auto OPTICAL_BLUR_FRAGMENT = R"GLSL(#version 300 es
+precision highp float;
+in vec2 v_texcoord;
+uniform sampler2D tex;
+uniform vec2 fullSize;
+uniform vec2 uvOffset;
+uniform float radius;
+layout(location=0) out vec4 fragColor;
+void main() {
+    vec2 uv = vec2(v_texcoord.x,gl_FragCoord.y/fullSize.y);
+    vec2 minimumUv = 0.5/fullSize;
+    vec2 maximumUv = 1.0-minimumUv;
+    float sigmaSquared = max(0.01,radius*radius);
+    float limit = min(24.0,ceil(3.0*radius));
+    vec4 filtered = texture(tex,clamp(uv,minimumUv,maximumUv));
+    float normalization = 1.0;
+    for (int index=1;index<25;index+=2) {
+        float first = float(index);
+        if (first>limit) break;
+        float second = first+1.0;
+        float firstWeight = exp(-0.5*first*first/sigmaSquared);
+        float secondWeight = second<=limit ? exp(-0.5*second*second/sigmaSquared) : 0.0;
+        float combined = firstWeight+secondWeight;
+        vec2 stepUv = uvOffset*(first*firstWeight+second*secondWeight)/combined;
+        filtered += combined*(texture(tex,clamp(uv+stepUv,minimumUv,maximumUv))
+            + texture(tex,clamp(uv-stepUv,minimumUv,maximumUv)));
+        normalization += 2.0*combined;
+    }
+    fragColor = filtered/normalization;
 }
 )GLSL";
 
@@ -915,7 +1317,7 @@ bool ensureLiquidShader() {
         return false;
 
     auto shader = makeShared<CShader>();
-    if (!shader->createProgram(LIQUID_GLASS_VERTEX, LIQUID_GLASS_FRAGMENT, true, true)) {
+    if (!shader->createProgram(LIQUID_GLASS_VERTEX, withTerminalGlassOptics(LIQUID_GLASS_FRAGMENT), true, true)) {
         g_liquidShaderFailed = true;
         return false;
     }
@@ -987,6 +1389,23 @@ CBox liquidTopbarBox(const CBox& surfaceBox, const STopbarMorph& shape) {
         shape.width * surfaceBox.width,
         shape.height * surfaceBox.height,
     };
+}
+
+CBox connectedTopbarMaterialBox(const CBox& surface, const STopbarMorph& shape,
+                               const STopbarMorph& frame) {
+    CBox body = liquidTopbarBox(surface, shape);
+    if (frame.active && frame.x <= .5F && shape.height > .000001F) {
+        const double rail = frame.width * surface.width * .5;
+        const double gap = (shape.y - shape.barHeight) * surface.height;
+        // A corner expansion grows out of the entire rail, rather than a
+        // shallow overlap whose medial axis would refract as an internal line.
+        const double attachment = std::clamp(1.0 - gap / 14.0, 0.0, 1.0)
+            * std::clamp((rail + 12.0 - (body.x - surface.x)) / 12.0, 0.0, 1.0);
+        const double extension = (body.x - surface.x) * attachment;
+        body.x -= extension;
+        body.width += extension;
+    }
+    return body;
 }
 
 CBox liquidSettingsBox(const CBox& surfaceBox) {
@@ -1107,8 +1526,83 @@ bool captureClearBackdrop(SP<Render::GL::CGLFramebuffer>& destination = g_clearB
     return allocated;
 }
 
+SP<Render::ITexture> opticalBlurTexture(const SP<Render::ITexture>& source,
+    const std::string& monitor, CRegion region, float scale,
+    SP<Render::GL::CGLFramebuffer>* retained = nullptr) {
+    if (!source || !g_pHyprRenderer || !Render::GL::g_pHyprOpenGL) return nullptr;
+    if (!g_opticalBlurShader) {
+        auto shader = makeShared<CShader>();
+        if (!shader->createProgram(LIQUID_GLASS_VERTEX,OPTICAL_BLUR_FRAGMENT,true,true)) return nullptr;
+        g_opticalBlurShader = std::move(shader);
+    }
+    auto& buffers = g_opticalBlurBuffers[monitor];
+    if (!buffers.horizontal) buffers.horizontal = makeShared<Render::GL::CGLFramebuffer>("velora-optical-x");
+    if (!buffers.vertical) buffers.vertical = makeShared<Render::GL::CGLFramebuffer>("velora-optical-y");
+    const int width = sc<int>(source->m_size.x), height = sc<int>(source->m_size.y);
+    if (!buffers.horizontal->alloc(width,height,DRM_FORMAT_ABGR16161616F)
+            || !buffers.vertical->alloc(width,height,DRM_FORMAT_ABGR16161616F)) return nullptr;
+    const auto target = g_pHyprRenderer->m_renderData.currentFB;
+    GLint viewport[4]; glGetIntegerv(GL_VIEWPORT,viewport);
+    const bool blend = glIsEnabled(GL_BLEND);
+    Hyprutils::Utils::CScopeGuard restore{[target,viewport,blend]() {
+        g_pHyprRenderer->bindFB(target);
+        g_pHyprRenderer->setViewport(viewport[0],viewport[1],viewport[2],viewport[3]);
+        Render::GL::g_pHyprOpenGL->blend(blend);
+        Render::GL::g_pHyprOpenGL->scissor(nullptr);
+    }};
+    const float sigma = 3.5F*scale;
+    CRegion verticalRegion{region};
+    verticalRegion.intersect(CBox{0,0,sc<double>(width),sc<double>(height)});
+    // The second pass reads neighbouring rows of the first pass. Its halo
+    // must be valid too, especially after a tiny compositor damage update.
+    CRegion horizontalRegion{verticalRegion};
+    horizontalRegion.expand(static_cast<int>(std::ceil(3.F*sigma))+1);
+    horizontalRegion.intersect(CBox{0,0,sc<double>(width),sc<double>(height)});
+    const auto matrix = Mat3x3::outputProjection({width,height},HYPRUTILS_TRANSFORM_NORMAL)
+        .projectBox(CBox{0,0,sc<double>(width),sc<double>(height)},HYPRUTILS_TRANSFORM_NORMAL);
+    auto shader = Render::GL::g_pHyprOpenGL->useShader(g_opticalBlurShader);
+    if (!shader) return nullptr;
+    shader->setUniformMatrix3fv(SHADER_PROJ,1,GL_TRUE,matrix.getMatrix());
+    shader->setUniformInt(SHADER_TEX,0);
+    shader->setUniformFloat2(SHADER_FULL_SIZE,width,height);
+    shader->setUniformFloat(SHADER_RADIUS,sigma);
+    g_pHyprRenderer->setViewport(0,0,width,height);
+    Render::GL::g_pHyprOpenGL->blend(false);
+    glActiveTexture(GL_TEXTURE0);
+    auto pass = [&](const SP<Render::ITexture>& input,
+                    const SP<Render::GL::CGLFramebuffer>& output,
+                    const CRegion& damage, float dx, float dy) {
+        g_pHyprRenderer->bindFB(output);
+        shader->setUniformFloat2(SHADER_UV_OFFSET,dx,dy);
+        input->bind();
+        input->setTexParameter(GL_TEXTURE_MIN_FILTER,GL_LINEAR);
+        input->setTexParameter(GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+        glBindVertexArray(shader->getUniformLocation(SHADER_SHADER_VAO));
+        damage.forEachRect([](const auto& rect) {
+            Render::GL::g_pHyprOpenGL->scissor(&rect,false);
+            glDrawArrays(GL_TRIANGLE_STRIP,0,4);
+        });
+        glBindVertexArray(0);
+        input->unbind();
+    };
+    pass(source,buffers.horizontal,horizontalRegion,1.F/width,0.F);
+    pass(buffers.horizontal->getTexture(),buffers.vertical,verticalRegion,0.F,1.F/height);
+    auto texture = buffers.vertical->getTexture();
+    if (retained) {
+        if (!*retained) *retained = makeShared<Render::GL::CGLFramebuffer>("velora-optical-frame");
+        if (!(*retained)->alloc(width,height,DRM_FORMAT_ABGR16161616F)) return nullptr;
+        glDisable(GL_SCISSOR_TEST);
+        glBindFramebuffer(GL_READ_FRAMEBUFFER,buffers.vertical->getFBID());
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER,(*retained)->getFBID());
+        glBlitFramebuffer(0,0,width,height,0,0,width,height,GL_COLOR_BUFFER_BIT,GL_NEAREST);
+        texture = (*retained)->getTexture();
+    }
+    return texture;
+}
+
 SP<Render::ITexture> barBackdropTexture(const SP<Render::GL::CGLFramebuffer>& backdrop,
-                                       CRegion damage, const bool blur) {
+                                       CRegion damage, const bool blur,
+                                       SP<Render::GL::CGLFramebuffer>* retained = nullptr) {
     if (!blur)
         return backdrop->getTexture();
 
@@ -1119,10 +1613,22 @@ SP<Render::ITexture> barBackdropTexture(const SP<Render::GL::CGLFramebuffer>& ba
     GLint viewport[4];
     glGetIntegerv(GL_VIEWPORT, viewport);
     auto texture = g_pHyprRenderer->blurFramebuffer(backdrop, 1.F, &damage);
+    if (retained && captureClearBackdrop(*retained))
+        texture = (*retained)->getTexture();
     g_pHyprRenderer->bindFB(target);
     g_pHyprRenderer->setViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
     Render::GL::g_pHyprOpenGL->scissor(nullptr);
     return texture;
+}
+
+struct SBarLensParameters { float refraction, edgeWidth, dispersion; };
+SBarLensParameters barLensParameters(float scale, float halfThickness) {
+    const float reflection = std::sqrt(appearanceReflection());
+    return {
+        std::min(g_panelRefraction->value() * scale * 0.38F * reflection, halfThickness * 0.62F),
+        std::min(g_panelEdgeWidth->value() * scale * 0.48F * reflection, std::max(8.F, halfThickness * 0.88F)),
+        std::min(g_panelDispersion->value() * scale * reflection * 0.35F, std::max(0.45F, halfThickness * 0.07F)),
+    };
 }
 
 bool renderLiquidBackdrop(WP<CTexPassElement> element, const CRegion& damage,
@@ -1138,8 +1644,11 @@ bool renderLiquidBackdrop(WP<CTexPassElement> element, const CRegion& damage,
     const bool attachedSettings = layer && layer->m_namespace == EDITOR_NAMESPACE
         && topbar && hasBottomSettings(monitorName);
     const bool desktopWave = layer && (layer->m_namespace == SHARED_WIDGETS_NAMESPACE || attachedSettings);
-    const auto backdrop = topbar && !desktopWave && cachedFrame != g_frameBackdrops.end()
-        ? cachedFrame->second : g_clearBackdrop;
+    const auto fusedSource = g_frameFusionBackdrops.find(monitorName);
+    const auto backdrop = desktopWave && !attachedSettings && fusedSource != g_frameFusionBackdrops.end()
+        ? fusedSource->second.sharp
+        : topbar && !desktopWave && cachedFrame != g_frameBackdrops.end()
+            ? cachedFrame->second : g_clearBackdrop;
     if (!element || !backdrop || !backdrop->getTexture() || !ensureLiquidShader() ||
         !g_pHyprRenderer || !Render::GL::g_pHyprOpenGL)
         return false;
@@ -1154,7 +1663,10 @@ bool renderLiquidBackdrop(WP<CTexPassElement> element, const CRegion& damage,
     const bool connectedTopbar = topbar && independentShape && independentShape->connected;
     const bool connectedSidebar = topbar && independentShape
         && (independentShape->bottomHeight > 0.F || independentShape->sideBodyWidth > 0.F);
-    const CBox panelBox = rightMenu ? liquidRightMenuBox(surfaceBox)
+    const auto& frameShape = unifiedBarShape(monitorName);
+    const CBox panelBox = connectedTopbar
+        ? connectedTopbarMaterialBox(surfaceBox, *independentShape, frameShape)
+        : rightMenu ? liquidRightMenuBox(surfaceBox)
         : (settings ? liquidSettingsBox(surfaceBox)
                     : ((topbar || editor)
                         ? liquidTopbarBox(surfaceBox, *independentShape)
@@ -1174,16 +1686,28 @@ bool renderLiquidBackdrop(WP<CTexPassElement> element, const CRegion& damage,
     CBox drawBox = panelBox;
     CBox sideLabelBox = {0, 0, 0, 0};
     CBox statusBox = {0, 0, 0, 0};
+    CBox chargingBox = {0, 0, 0, 0};
+    CBox timerBox = {0, 0, 0, 0};
     if (connectedTopbar) {
         const auto& status = independentShape->statusPanel;
         statusBox = {surfaceBox.x + status[0] * surfaceBox.width,
             surfaceBox.y + status[1] * surfaceBox.height,
             status[2] * surfaceBox.width, status[3] * surfaceBox.height};
+        const auto& charging = independentShape->chargingPanel;
+        chargingBox = {surfaceBox.x + charging[0] * surfaceBox.width,
+            surfaceBox.y + charging[1] * surfaceBox.height,
+            charging[2] * surfaceBox.width, charging[3] * surfaceBox.height};
+        const auto& timer = independentShape->timerPanel;
+        timerBox = {surfaceBox.x + timer[0] * surfaceBox.width,
+            surfaceBox.y + timer[1] * surfaceBox.height,
+            timer[2] * surfaceBox.width, timer[3] * surfaceBox.height};
         railBox = {surfaceBox.x, surfaceBox.y, surfaceBox.width,
                    std::round(independentShape->barHeight * surfaceBox.height)};
         drawBox = {surfaceBox.x, surfaceBox.y, surfaceBox.width,
                    std::max({railBox.height, panelBox.y + panelBox.height - surfaceBox.y,
-                       statusBox.y + statusBox.height - surfaceBox.y})
+                       statusBox.y + statusBox.height - surfaceBox.y,
+                       chargingBox.y + chargingBox.height - surfaceBox.y,
+                       timerBox.y + timerBox.height - surfaceBox.y})
                        + independentShape->joinSize * surfaceBox.width};
     }
     if (hasDial) {
@@ -1247,7 +1771,18 @@ bool renderLiquidBackdrop(WP<CTexPassElement> element, const CRegion& damage,
     // column. Extend only the drawing/scissor bounds, not the frame geometry.
     if (connectedSidebar && independentShape->oppositeWidth > 0.F)
         drawBox.width += 2.0;
+    if (connectedSidebar && !desktopWave) {
+        drawBox.x -= 2.0; drawBox.width += 4.0;
+        drawBox.y -= 2.0; drawBox.height += 4.0;
+    }
     CRegion liquidDamage{connectedTopbar ? railBox : panelBox};
+    if (connectedSidebar)
+        // Ownership includes the SDF antialias fringe. Keep that fringe inside
+        // the draw/scissor as well, including a fractional rail edge at x=63.
+        liquidDamage.add(CBox{panelBox.x - 2.0, panelBox.y - 2.0,
+            panelBox.width + 4.0, panelBox.height + 4.0});
+    if (connectedSidebar && independentShape->desktopFold > 0.F)
+        liquidDamage.add(surfaceBox);
     if (connectedTopbar && panelBox.height > 0.01) {
         const double neck = independentShape->neckHalfWidth * surfaceBox.width;
         const double anchor = surfaceBox.x + independentShape->anchorX * surfaceBox.width;
@@ -1264,6 +1799,24 @@ bool renderLiquidBackdrop(WP<CTexPassElement> element, const CRegion& damage,
         const double right = std::max(statusBox.x + statusBox.width, anchor + neck) + 12;
         liquidDamage.add(CBox{left, railBox.y + railBox.height, right - left,
             statusBox.y + statusBox.height - railBox.y - railBox.height + 12});
+    }
+    if (connectedTopbar && chargingBox.height > 0.01) {
+        const auto& charging = independentShape->chargingPanel;
+        const double neck = charging[5] * surfaceBox.width;
+        const double anchor = surfaceBox.x + charging[4] * surfaceBox.width;
+        const double left = std::min(chargingBox.x, anchor - neck) - 12;
+        const double right = std::max(chargingBox.x + chargingBox.width, anchor + neck) + 12;
+        liquidDamage.add(CBox{left, railBox.y + railBox.height, right - left,
+            chargingBox.y + chargingBox.height - railBox.y - railBox.height + 12});
+    }
+    if (connectedTopbar && timerBox.height > 0.01) {
+        const auto& timer = independentShape->timerPanel;
+        const double neck = timer[5] * surfaceBox.width;
+        const double anchor = surfaceBox.x + timer[4] * surfaceBox.width;
+        const double left = std::min(timerBox.x, anchor - neck) - 12;
+        const double right = std::max(timerBox.x + timerBox.width, anchor + neck) + 12;
+        liquidDamage.add(CBox{left, railBox.y + railBox.height, right - left,
+            timerBox.y + timerBox.height - railBox.y - railBox.height + 12});
     }
     if (connectedSidebar) {
         if (independentShape->waveDockProgress > .001 && independentShape->x <= .5F) {
@@ -1325,14 +1878,44 @@ bool renderLiquidBackdrop(WP<CTexPassElement> element, const CRegion& damage,
         return true;
 
     const std::string frameMonitor = layer && layer->m_monitor ? layer->m_monitor->m_name : "";
-    const auto& frameShape = unifiedBarShape(frameMonitor);
     const auto material = g_desktopBarMaterials.find(frameMonitor);
     const bool sharedMaterial = (connectedTopbar || connectedSidebar)
         && material != g_desktopBarMaterials.end();
     static auto compositorBlur = CConfigValue<Config::INTEGER>("decoration:blur:enabled");
-    const bool nativeBlur = sharedMaterial && material->second.blur
-        && g_barBlurEnabled && *compositorBlur;
-    const auto backdropTexture = barBackdropTexture(backdrop, liquidDamage, nativeBlur);
+    const bool matchingKitty = sharedMaterial && g_terminalBarMatch;
+    const bool optical = sharedMaterial && material->second.mode == 3 && !matchingKitty;
+    const bool clearBar = sharedMaterial && material->second.mode > 1.5F
+        && !matchingKitty && !g_liquidFrosted;
+    const bool nativeBlur = sharedMaterial && !clearBar && (matchingKitty || material->second.blur)
+        && g_barBlurEnabled && (optical || *compositorBlur);
+    auto* fusion = fusedSource != g_frameFusionBackdrops.end() ? &fusedSource->second : nullptr;
+    CRegion samplingDamage{liquidDamage};
+    if (nativeBlur && (matchingKitty || material->second.mode > 1.5F)) {
+        const float width = backdrop->m_size.x;
+        const float height = backdrop->m_size.y;
+        const float scale = surfaceBox.width / 1600.F;
+        const float reflection = std::sqrt(appearanceReflection());
+        // blurFramebuffer expands for its own kernel, not for our refracted
+        // rays. Otherwise a strong lens samples cleared/stale work-buffer
+        // pixels beside a menu, especially during partial damage updates.
+        const float localPixels = (g_panelRefraction->value() * .38F * 1.11F
+            + g_panelDispersion->value() * .35F) * scale * reflection;
+        const float kittyStrength = terminalGlassStrength();
+        const float kittyOptical = 1.4F * kittyStrength / (1.F + .4F * kittyStrength);
+        const float kittyPixels = kittyOptical * (.14F * std::min(width, height)
+            / (3.F * std::sqrt(3.F)) + TERMINAL_REFRACTION_PIXELS
+                * (layer && layer->m_monitor ? layer->m_monitor->m_scale : 1.F));
+        samplingDamage.expand(barRefractionSamplePadding(matchingKitty ? 1.F : barRefractionStrength(),
+            std::max(width, height), matchingKitty ? kittyPixels : localPixels));
+        if (optical) samplingDamage.expand(opticalGlassSamplePadding(barRefractionStrength(),
+            layer && layer->m_monitor ? layer->m_monitor->m_scale : 1.F,std::max(width,height)));
+        samplingDamage.intersect(CBox{0, 0, width, height});
+    }
+    auto* retainedBlur = desktopWave && !attachedSettings && fusion ? &fusion->blurred : nullptr;
+    const auto backdropTexture = optical && nativeBlur
+        ? opticalBlurTexture(backdrop->getTexture(),frameMonitor,samplingDamage,
+            layer && layer->m_monitor ? layer->m_monitor->m_scale : 1.F,retainedBlur)
+        : barBackdropTexture(backdrop,samplingDamage,nativeBlur,retainedBlur);
     if (!backdropTexture)
         return false;
 
@@ -1354,12 +1937,23 @@ bool renderLiquidBackdrop(WP<CTexPassElement> element, const CRegion& damage,
 
     shader->setUniformMatrix3fv(SHADER_PROJ, 1, GL_TRUE, matrix.getMatrix());
     shader->setUniformInt(SHADER_TEX, 0);
+    const bool useFusion = connectedSidebar && !desktopWave && fusion && fusion->sharp
+        && (!nativeBlur || fusion->blurred) && !hasBottomSettings(monitorName);
+    glUniform1f(glGetUniformLocation(shader->program(), "frameFusion"), useFusion ? 1.F : 0.F);
+    glUniform1i(glGetUniformLocation(shader->program(), "frameBackdrop"), 2);
+    glUniform1i(glGetUniformLocation(shader->program(), "frameBlur"), 3);
     float commonFrameRadius = 0.F;
+    glUniform4f(glGetUniformLocation(shader->program(), "frameTopPanel"), 0, 0, 0, 0);
+    glUniform4f(glGetUniformLocation(shader->program(), "frameTopMetrics"), 0, 0, 0, 0);
+    glUniform2f(glGetUniformLocation(shader->program(), "frameFold"), 0.F, 0.F);
+    glUniform1f(glGetUniformLocation(shader->program(), "barRefractionStrength"), barRefractionStrength());
+    glUniform1f(glGetUniformLocation(shader->program(), "opticalScale"), layer && layer->m_monitor ? layer->m_monitor->m_scale : 1.F);
+    glUniform1f(glGetUniformLocation(shader->program(), "barBrightness"), g_barBrightness);
     glUniform4f(glGetUniformLocation(shader->program(), "barMaterial"),
         sharedMaterial ? (desktopWave ? 2.F : 1.F) : 0.F,
         sharedMaterial ? material->second.mode : 0.F,
         nativeBlur ? 1.F : 0.F,
-        sharedMaterial && desktopWave && material->second.spectrum && layer && layer->m_monitor
+        sharedMaterial && material->second.spectrum && layer && layer->m_monitor
             ? sc<float>(layer->m_monitor->m_size.x / layer->m_monitor->m_scale) : 0.F);
     if (attachedSettings) {
         const auto& panel = g_bottomSettings.at(monitorName);
@@ -1380,6 +1974,16 @@ bool renderLiquidBackdrop(WP<CTexPassElement> element, const CRegion& damage,
         glUniform4fv(glGetUniformLocation(shader->program(), "barTint"), 1, material->second.tint.data());
         glUniform1fv(glGetUniformLocation(shader->program(), "barBands"), 96, material->second.bands.data());
     }
+    const float kittyScale = layer && layer->m_monitor ? sc<float>(layer->m_monitor->m_scale) : 1.F;
+    // One lens field across connected bars/frame passes; changing the draw
+    // rectangle must not introduce an optical seam at their junctions.
+    const CBox kittyBox{0, 0, textureWidth, textureHeight};
+    glUniform4f(glGetUniformLocation(shader->program(), "kittyLensBox"),
+        sc<float>(kittyBox.x + kittyBox.width * .5), sc<float>(kittyBox.y + kittyBox.height * .5),
+        sc<float>(kittyBox.width * .5), sc<float>(kittyBox.height * .5));
+    glUniform4f(glGetUniformLocation(shader->program(), "kittyMatch"), matchingKitty ? 1.F : 0.F,
+        *compositorBlur ? terminalGlassStrength() : 0.F, TERMINAL_REFRACTION_PIXELS * kittyScale, TERMINAL_RIM_WIDTH * kittyScale);
+    glUniform1i(glGetUniformLocation(shader->program(), "kittyBlur"), 1);
     glUniform4f(glGetUniformLocation(shader->program(), "oppositePanel"), 0, 0, 0, 0);
     glUniform4f(glGetUniformLocation(shader->program(), "oppositeLabel"), 0, 0, 0, 0);
     glUniform1f(glGetUniformLocation(shader->program(), "oppositeContour"), 0);
@@ -1392,16 +1996,33 @@ bool renderLiquidBackdrop(WP<CTexPassElement> element, const CRegion& damage,
             ? g_connectedTopbars.find(layer->m_monitor->m_name) : g_connectedTopbars.end();
         const float top = found != g_connectedTopbars.end()
             ? found->second.barHeight * textureHeight : sc<float>(surfaceBox.y);
-        const float side = frameShape.width * textureWidth * 0.5F;
-        commonFrameRadius = frameShape.radius * textureWidth;
+        const float remaining = 1.F - frameShape.desktopFold;
+        const float rise = std::clamp((frameShape.desktopFold - .35F) / .65F, 0.F, 1.F);
+        const float railRemaining = std::min(1.F, remaining / .22F);
+        const float side = frameShape.width * textureWidth * 0.5F * railRemaining;
+        commonFrameRadius = frameShape.radius * textureWidth * (1.F - rise);
         const float farEdge = commonFrameRadius * 2.F;
         const float opposite = frameShape.oppositeWidth > 0.F
-            ? frameShape.oppositeWidth * textureWidth : -farEdge;
+            ? frameShape.oppositeWidth * textureWidth * railRemaining : -farEdge;
         const float left = frameShape.x > 0.5F ? opposite : side;
         const float interiorWidth = textureWidth - side - opposite;
-        const float bottom = frameShape.bottomHeight * (textureHeight - top);
+        const float extent = (textureHeight - top) * (1.F - rise);
+        const float bottom = std::min(extent * .5F, frameShape.bottomHeight * (textureHeight - top) * railRemaining);
+        glUniform2f(glGetUniformLocation(shader->program(), "frameFold"),
+            frameShape.desktopFold, top + extent);
         glUniform4f(glGetUniformLocation(shader->program(), "frameInterior"),
-                    left, top, interiorWidth, textureHeight - top - bottom);
+                    left, top, interiorWidth, std::max(0.01F, extent - bottom));
+        if (found != g_connectedTopbars.end() && found->second.height > .000001F) {
+            const auto& source = found->second;
+            const CBox body = connectedTopbarMaterialBox(
+                CBox{0, 0, textureWidth, textureHeight}, source, frameShape);
+            glUniform4f(glGetUniformLocation(shader->program(), "frameTopPanel"),
+                body.x + body.width * .5, body.y + body.height * .5,
+                body.width * .5, body.height * .5);
+            glUniform4f(glGetUniformLocation(shader->program(), "frameTopMetrics"),
+                source.anchorX * textureWidth, source.neckHalfWidth * textureWidth,
+                source.radius * textureWidth, source.joinSize * textureWidth);
+        }
         if (frameShape.x <= .5F) {
             glUniform1f(glGetUniformLocation(shader->program(), "waveDockProgress"), frameShape.waveDockProgress);
             glUniform1f(glGetUniformLocation(shader->program(), "sideWaveWidth"), frameShape.sideWaveWidth * textureWidth);
@@ -1435,12 +2056,66 @@ bool renderLiquidBackdrop(WP<CTexPassElement> element, const CRegion& damage,
         sc<float>(statusBox.x + statusBox.width * 0.5) - drawCenterX,
         sc<float>(statusBox.y + statusBox.height * 0.5) - drawCenterY,
         sc<float>(statusBox.width * 0.5), sc<float>(statusBox.height * 0.5));
+    glUniform4f(glGetUniformLocation(shader->program(), "chargingPanel"),
+        sc<float>(chargingBox.x + chargingBox.width * 0.5) - drawCenterX,
+        sc<float>(chargingBox.y + chargingBox.height * 0.5) - drawCenterY,
+        sc<float>(chargingBox.width * 0.5), sc<float>(chargingBox.height * 0.5));
+    glUniform4f(glGetUniformLocation(shader->program(), "timerPanel"),
+        sc<float>(timerBox.x + timerBox.width * 0.5) - drawCenterX,
+        sc<float>(timerBox.y + timerBox.height * 0.5) - drawCenterY,
+        sc<float>(timerBox.width * 0.5), sc<float>(timerBox.height * 0.5));
+    glUniform4f(glGetUniformLocation(shader->program(), "chargingLight"), 0, 0, 1, 0);
+    glUniform4f(glGetUniformLocation(shader->program(), "timerLight"), 0, 0, 0, 0);
+    std::array<float, LYRICS_BEAT_SLOTS * 4> musicLights{};
+    std::array<float, LYRICS_BEAT_SLOTS * 6> musicColors{};
+    if (connectedTopbar || connectedSidebar) {
+        const auto found = g_lyricsBeats.find(frameMonitor);
+        if (found != g_lyricsBeats.end()) {
+            const auto now = std::chrono::steady_clock::now();
+            for (size_t i = 0; i < found->second.size(); ++i) {
+                const auto& beat = found->second[i];
+                const float phase = std::clamp(std::chrono::duration<float>(now - beat.started).count()
+                    / LYRICS_BEAT_SECONDS, 0.F, 1.F);
+                musicLights[i * 4] = beat.x * textureWidth;
+                musicLights[i * 4 + 1] = beat.y * textureHeight;
+                musicLights[i * 4 + 2] = phase;
+                musicLights[i * 4 + 3] = std::min(1.F, phase * 10.F)
+                    * std::pow(1.F - phase, 1.4F) * .62F * beat.strength;
+                std::copy(beat.colors.begin(), beat.colors.end(), musicColors.begin() + i * 6);
+            }
+        }
+    }
+    glUniform4fv(glGetUniformLocation(shader->program(), "musicLights"), LYRICS_BEAT_SLOTS, musicLights.data());
+    glUniform3fv(glGetUniformLocation(shader->program(), "musicColors"), LYRICS_BEAT_SLOTS * 2, musicColors.data());
+    // All owners of this monitor's bar/frame use one color field in framebuffer
+    // coordinates. The sidebar starts below the topbar; its local surface box
+    // must not shift the origin or reset the wave at that physical join.
+    const auto chargingSource = g_connectedTopbars.find(frameMonitor);
+    if ((connectedTopbar || connectedSidebar) && chargingSource != g_connectedTopbars.end()) {
+        const auto& source = chargingSource->second;
+        glUniform4f(glGetUniformLocation(shader->program(), "chargingLight"),
+            source.chargingPanel[4] * textureWidth, source.barHeight * textureHeight,
+            source.chargingProgress, source.chargingStrength);
+        glUniform4f(glGetUniformLocation(shader->program(), "timerLight"),
+            source.timerLight[0] * textureWidth, source.barHeight * textureHeight,
+            source.timerLight[1], source.timerLight[2]);
+    }
     if (connectedTopbar) {
         const auto& status = independentShape->statusPanel;
         glUniform4f(glGetUniformLocation(shader->program(), "statusMetrics"),
             sc<float>(surfaceBox.x + status[4] * surfaceBox.width) - drawCenterX,
             status[5] * sc<float>(surfaceBox.width), status[6] * sc<float>(surfaceBox.width),
             status[7] * sc<float>(surfaceBox.width));
+        const auto& charging = independentShape->chargingPanel;
+        glUniform4f(glGetUniformLocation(shader->program(), "chargingMetrics"),
+            sc<float>(surfaceBox.x + charging[4] * surfaceBox.width) - drawCenterX,
+            charging[5] * sc<float>(surfaceBox.width), charging[6] * sc<float>(surfaceBox.width),
+            charging[7] * sc<float>(surfaceBox.width));
+        const auto& timer = independentShape->timerPanel;
+        glUniform4f(glGetUniformLocation(shader->program(), "timerMetrics"),
+            sc<float>(surfaceBox.x + timer[4] * surfaceBox.width) - drawCenterX,
+            timer[5] * sc<float>(surfaceBox.width), timer[6] * sc<float>(surfaceBox.width),
+            timer[7] * sc<float>(surfaceBox.width));
     }
     glUniform1f(glGetUniformLocation(shader->program(), "frameRadius"), commonFrameRadius);
     glUniform2f(glGetUniformLocation(shader->program(), "frost"),
@@ -1532,12 +2207,16 @@ bool renderLiquidBackdrop(WP<CTexPassElement> element, const CRegion& damage,
                 : connectedTopbar ? std::max(sc<float>(railBox.height),
                 sc<float>(std::min(panelBox.width, panelBox.height) * 0.5))
                 : sc<float>(std::min(panelBox.width, panelBox.height) * 0.5));
-        localRefraction = std::min(
-            localRefraction, topbarHalfThickness * 0.62F);
-        localEdgeWidth = std::min(
-            localEdgeWidth, std::max(8.F, topbarHalfThickness * 0.88F));
-        localDispersion = std::min(
-            localDispersion, std::max(0.45F, topbarHalfThickness * 0.07F));
+        if (topbar) {
+            const auto lens = barLensParameters(panelScale, topbarHalfThickness);
+            localRefraction = lens.refraction;
+            localEdgeWidth = lens.edgeWidth;
+            localDispersion = lens.dispersion;
+        } else {
+            localRefraction = std::min(localRefraction, topbarHalfThickness * 0.62F);
+            localEdgeWidth = std::min(localEdgeWidth, std::max(8.F, topbarHalfThickness * 0.88F));
+            localDispersion = std::min(localDispersion, std::max(0.45F, topbarHalfThickness * 0.07F));
+        }
     }
     shader->setUniformFloat(SHADER_DISTORT, localRefraction);
     shader->setUniformFloat(SHADER_CONTRAST, localEdgeWidth);
@@ -1571,9 +2250,25 @@ bool renderLiquidBackdrop(WP<CTexPassElement> element, const CRegion& damage,
                                  g_panelTint->value());
 
     glActiveTexture(GL_TEXTURE0);
-    backdropTexture->bind();
-    backdropTexture->setTexParameter(GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    backdropTexture->setTexParameter(GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    const auto sceneTexture = matchingKitty ? backdrop->getTexture() : backdropTexture;
+    sceneTexture->bind();
+    sceneTexture->setTexParameter(GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    sceneTexture->setTexParameter(GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    if (matchingKitty) {
+        glActiveTexture(GL_TEXTURE1);
+        backdropTexture->bind();
+        backdropTexture->setTexParameter(GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        backdropTexture->setTexParameter(GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        ++g_terminalBarMatchDraws;
+        glActiveTexture(GL_TEXTURE0);
+    }
+    const auto fusionScene = useFusion ? (matchingKitty || !nativeBlur
+        ? fusion->sharp->getTexture() : fusion->blurred->getTexture()) : nullptr;
+    const auto fusionBlur = useFusion && matchingKitty
+        ? (nativeBlur ? fusion->blurred->getTexture() : fusion->sharp->getTexture()) : nullptr;
+    if (fusionScene) { glActiveTexture(GL_TEXTURE2); fusionScene->bind(); }
+    if (fusionBlur) { glActiveTexture(GL_TEXTURE3); fusionBlur->bind(); }
+    glActiveTexture(GL_TEXTURE0);
     Render::GL::g_pHyprOpenGL->blend(true);
     glBindVertexArray(shader->getUniformLocation(SHADER_SHADER_VAO));
 
@@ -1583,7 +2278,15 @@ bool renderLiquidBackdrop(WP<CTexPassElement> element, const CRegion& damage,
     });
 
     glBindVertexArray(0);
-    backdropTexture->unbind();
+    if (matchingKitty) {
+        glActiveTexture(GL_TEXTURE1);
+        backdropTexture->unbind();
+        glActiveTexture(GL_TEXTURE0);
+    }
+    if (fusionScene) { glActiveTexture(GL_TEXTURE2); fusionScene->unbind(); }
+    if (fusionBlur) { glActiveTexture(GL_TEXTURE3); fusionBlur->unbind(); }
+    glActiveTexture(GL_TEXTURE0);
+    sceneTexture->unbind();
     Render::GL::g_pHyprOpenGL->scissor(nullptr);
     if (nativeBlur) {
         if (desktopWave) ++g_waveBlurDraws;
@@ -1596,7 +2299,7 @@ bool renderLiquidBackdrop(WP<CTexPassElement> element, const CRegion& damage,
         ++g_settingsRefractionDraws;
     else if (editor)
         ++g_editorRefractionDraws;
-    else if (topbar && (!sharedMaterial || material->second.mode == 2))
+    else if (topbar && (!sharedMaterial || material->second.mode >= 2))
         ++g_topbarRefractionDraws;
     else if (!topbar)
         ++g_refractionDraws;
@@ -1604,8 +2307,9 @@ bool renderLiquidBackdrop(WP<CTexPassElement> element, const CRegion& damage,
 }
 
 bool renderSharedWidgetsBackdrop(WP<CTexPassElement> element,
-                                 const CRegion& damage) {
-    if (!element || !g_clearBackdrop || !g_clearBackdrop->getTexture() || !ensureLiquidShader() ||
+                                 const CRegion& damage,
+                                 const SP<Render::GL::CGLFramebuffer>& backdrop = g_clearBackdrop) {
+    if (!element || !backdrop || !backdrop->getTexture() || !ensureLiquidShader() ||
         !g_pHyprRenderer || !Render::GL::g_pHyprOpenGL ||
         !g_sharedWidgetShapesActive)
         return false;
@@ -1614,19 +2318,43 @@ bool renderSharedWidgetsBackdrop(WP<CTexPassElement> element,
     if (surfaceBox.width <= 0 || surfaceBox.height <= 0)
         return false;
 
+    const auto layer = element->m_data.currentLS.lock();
+    const std::string monitorName = layer && layer->m_monitor ? layer->m_monitor->m_name : "";
+    const auto material = g_desktopBarMaterials.find(monitorName);
+    const bool optical = material != g_desktopBarMaterials.end() && material->second.mode == 3;
+    const float outputScale = layer && layer->m_monitor ? layer->m_monitor->m_scale : 1.F;
+    SP<Render::ITexture> widgetSource = backdrop->getTexture();
+    if (optical && g_widgetBlurEnabled && g_liquidFrosted) {
+        CRegion sampling{damage.empty() ? CRegion{surfaceBox} : damage};
+        sampling.expand(opticalGlassSamplePadding(barRefractionStrength(),outputScale,
+            std::max(backdrop->m_size.x,backdrop->m_size.y)));
+        widgetSource = opticalBlurTexture(widgetSource,monitorName,sampling,outputScale);
+        if (!widgetSource) return false;
+    }
     auto shader = Render::GL::g_pHyprOpenGL->useShader(g_liquidShader);
     if (!shader)
         return false;
 
     const float textureWidth = std::max(
-        1.F, sc<float>(g_clearBackdrop->getTexture()->m_size.x));
+        1.F, sc<float>(backdrop->getTexture()->m_size.x));
     const float textureHeight = std::max(
-        1.F, sc<float>(g_clearBackdrop->getTexture()->m_size.y));
+        1.F, sc<float>(backdrop->getTexture()->m_size.y));
     const float panelScale = sc<float>(std::min(
         surfaceBox.width / 1600.0, surfaceBox.height / 900.0));
 
     glUniform1f(glGetUniformLocation(shader->program(), "frameRadius"), 0.F);
-    glUniform4f(glGetUniformLocation(shader->program(), "barMaterial"), 0.F, 0.F, 0.F, 0.F);
+    glUniform2f(glGetUniformLocation(shader->program(), "frameFold"), 0.F, 0.F);
+    glUniform4f(glGetUniformLocation(shader->program(), "barMaterial"), optical ? 1.F : 0.F, optical ? 3.F : 0.F, 0.F, 0.F);
+    if (optical) {
+        glUniform4fv(glGetUniformLocation(shader->program(), "barTint"),1,material->second.tint.data());
+        glUniform1f(glGetUniformLocation(shader->program(), "opticalScale"),outputScale);
+        glUniform1f(glGetUniformLocation(shader->program(), "barBrightness"),g_barBrightness);
+        glUniform1f(glGetUniformLocation(shader->program(), "barRefractionStrength"),barRefractionStrength());
+        for (const auto name : {"frameInterior","frameTopPanel","oppositePanel","oppositeLabel",
+                "chargingLight","timerLight","musicLights[0]","musicLights[1]"})
+            glUniform4f(glGetUniformLocation(shader->program(),name),0,0,0,0);
+    }
+    glUniform1f(glGetUniformLocation(shader->program(), "frameFusion"), 0.F);
     glUniform2f(glGetUniformLocation(shader->program(), "frost"), g_liquidFrosted ? 1.F : 0.F, g_liquidLight ? 1.F : 0.F);
     shader->setUniformInt(SHADER_TEX, 0);
     shader->setUniformFloat2(SHADER_FULL_SIZE, textureWidth, textureHeight);
@@ -1647,9 +2375,9 @@ bool renderSharedWidgetsBackdrop(WP<CTexPassElement> element,
                              panelScale);
 
     glActiveTexture(GL_TEXTURE0);
-    g_clearBackdrop->getTexture()->bind();
-    g_clearBackdrop->getTexture()->setTexParameter(GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    g_clearBackdrop->getTexture()->setTexParameter(GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    widgetSource->bind();
+    widgetSource->setTexParameter(GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    widgetSource->setTexParameter(GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     Render::GL::g_pHyprOpenGL->blend(true);
     glBindVertexArray(shader->getUniformLocation(SHADER_SHADER_VAO));
 
@@ -1739,7 +2467,7 @@ bool renderSharedWidgetsBackdrop(WP<CTexPassElement> element,
     }
 
     glBindVertexArray(0);
-    g_clearBackdrop->getTexture()->unbind();
+    widgetSource->unbind();
     Render::GL::g_pHyprOpenGL->scissor(nullptr);
     if (drewShape)
         ++g_sharedWidgetRefractionDraws;
@@ -1955,6 +2683,30 @@ SDispatchResult dialDispatcher(std::string arguments) {
     return {};
 }
 
+SDispatchResult lyricsBeatDispatcher(std::string arguments) {
+    const auto command = parseLyricsBeat(arguments);
+    if (!command) return {.success = false, .error = "expected monitor x y strength in 0..1 or monitor reset"};
+    const auto& monitor = command->monitor;
+    if (command->reset) g_lyricsBeats.erase(monitor);
+    else {
+        // Only a known bar output may own a pulse queue.
+        if (!g_connectedTopbars.contains(monitor) || !g_connectedTopbars.at(monitor).active)
+            return {};
+        const auto now = std::chrono::steady_clock::now();
+        auto& beats = g_lyricsBeats[monitor];
+        std::erase_if(beats, [&](const auto& beat) {
+            return std::chrono::duration<float>(now - beat.started).count() >= LYRICS_BEAT_SECONDS;
+        });
+        if (!beats.empty() && std::chrono::duration<float>(now - beats.back().started).count() < .2F)
+            return {};
+        if (beats.size() == LYRICS_BEAT_SLOTS) beats.erase(beats.begin());
+        beats.push_back({command->x, command->y, command->strength, command->colors, now});
+        ++g_lyricsBeatCount;
+    }
+    damageTopbarMorph({}, unifiedBarShape(monitor), monitor);
+    return {};
+}
+
 SDispatchResult connectedTopbarDispatcher(std::string arguments) {
     std::istringstream input{arguments};
     std::string monitor;
@@ -1979,6 +2731,32 @@ SDispatchResult connectedTopbarDispatcher(std::string arguments) {
         for (auto& value : shape.statusPanel) {
             if (!(input >> value) || !std::isfinite(value) || value < 0.F || value > 1.1F)
                 return {.success = false, .error = "invalid normalized status panel geometry"};
+        }
+    }
+    input >> std::ws;
+    if (!input.eof()) {
+        for (auto& value : shape.chargingPanel) {
+            if (!(input >> value) || !std::isfinite(value) || value < 0.F || value > 1.1F)
+                return {.success = false, .error = "invalid normalized charging panel geometry"};
+        }
+    }
+    input >> std::ws;
+    if (!input.eof()) {
+        if (!(input >> shape.chargingProgress >> shape.chargingStrength)
+                || !std::isfinite(shape.chargingProgress) || !std::isfinite(shape.chargingStrength)
+                || shape.chargingProgress < 0.F || shape.chargingProgress > 1.F
+                || shape.chargingStrength < 0.F || shape.chargingStrength > 1.F)
+            return {.success = false, .error = "invalid charging light progress/intensity"};
+    }
+    input >> std::ws;
+    if (!input.eof()) {
+        for (auto& value : shape.timerPanel) {
+            if (!(input >> value) || !std::isfinite(value) || value < 0.F || value > 1.1F)
+                return {.success = false, .error = "invalid normalized timer panel geometry"};
+        }
+        for (auto& value : shape.timerLight) {
+            if (!(input >> value) || !std::isfinite(value) || value < 0.F || value > 1.F)
+                return {.success = false, .error = "invalid timer light anchor/progress/intensity"};
         }
     }
     g_connectedTopbars[monitor] = shape;
@@ -2026,7 +2804,7 @@ SDispatchResult desktopBarMaterialDispatcher(std::string arguments) {
     std::istringstream input{arguments};
     std::string name;
     int mode;
-    if (!(input >> name >> mode) || mode < -1 || mode > 2)
+    if (!(input >> name >> mode) || mode < -1 || mode > 3)
         return {.success = false, .error = "expected monitor mode tint blur spectrum and 96 bands"};
     if (mode == -1) { g_desktopBarMaterials.erase(name); damageAllMonitors(); return {}; }
     SDesktopBarMaterial next;
@@ -2115,6 +2893,12 @@ SDispatchResult unifiedBarShapeDispatcher(std::string arguments) {
     shape.waveDockProgress = std::isfinite(dock) ? std::clamp(dock, 0.F, 1.F) : 0.F;
     shape.sideWaveWidth = std::isfinite(sideWaveWidth) ? std::clamp(sideWaveWidth, 0.F, .25F) : 0.F;
     for (auto& value : shape.sideCurve) { float sample = 0.F; input >> sample; value = std::isfinite(sample) ? std::clamp(sample, 0.F, .5F) : 0.F; }
+    float fold = 0.F;
+    if (input >> fold) {
+        if (!std::isfinite(fold) || fold < 0.F || fold > 1.F)
+            return {.success = false, .error = "invalid desktop fold progress"};
+    }
+    shape.desktopFold = fold;
     shape.oppositeLabel = {std::clamp(oppositeLabel[0], 0.F, 1.F),
         std::clamp(oppositeLabel[1], 0.F, 0.25F), std::clamp(oppositeLabel[2], 0.F, 1.F)};
     shape.sideLabelY = std::clamp(labelY, 0.F, 1.F);
@@ -2125,6 +2909,8 @@ SDispatchResult unifiedBarShapeDispatcher(std::string arguments) {
     shape.sideBodyHeight = std::clamp(bodyHeight, 0.F, 1.F);
     shape.bottomHeight = std::clamp(bottomHeight, 0.F, 0.1F);
     damageTopbarMorph(previous, shape, monitor);
+    if (previous.desktopFold != shape.desktopFold)
+        damageAllMonitors();
     return {};
 }
 
@@ -2472,6 +3258,14 @@ void updateTransition() {
 }
 
 void onTick() {
+    const auto now = std::chrono::steady_clock::now();
+    for (auto it = g_lyricsBeats.begin(); it != g_lyricsBeats.end();) {
+        std::erase_if(it->second, [&](const auto& beat) {
+            return std::chrono::duration<float>(now - beat.started).count() >= LYRICS_BEAT_SECONDS;
+        });
+        if (it->second.empty() || !g_connectedTopbars.contains(it->first)) it = g_lyricsBeats.erase(it);
+        else ++it;
+    }
     updateTransition();
     if (g_transition.animating)
         damageAllMonitors();
@@ -2560,12 +3354,89 @@ SDispatchResult liquidStyleDispatcher(std::string arguments) {
     return {};
 }
 
+SDispatchResult barRefractionDispatcher(std::string arguments) {
+    const auto strength = parseBarRefraction(arguments);
+    if (!strength)
+        return {.success = false, .error = "expected finite bar refraction strength from 0 to 10"};
+    g_barRefractionOverride = *strength;
+    damageAllMonitors();
+    return {};
+}
+
 SDispatchResult wallpaperDispatcher(std::string arguments) {
     std::istringstream input{arguments};
     float amount = 0.F;
     if (!(input >> amount) || !std::isfinite(amount))
         return {.success = false, .error = "expected wallpaper blur strength from 0 to 1"};
     g_wallpaperBlur = std::clamp(amount, 0.F, 1.F);
+    damageAllMonitors();
+    return {};
+}
+
+SDispatchResult terminalBarMatchDispatcher(std::string arguments) {
+    if (arguments != "0" && arguments != "1")
+        return {.success = false, .error = "expected 0 or 1"};
+    g_terminalBarMatch = arguments == "1";
+    if (g_terminalBarMatch) g_terminalFollowBar = false;
+    damageAllMonitors();
+    return {};
+}
+
+SDispatchResult terminalBrightnessDispatcher(std::string arguments) {
+    std::istringstream input{arguments};
+    float brightness = 1.F;
+    std::string trailing;
+    if (!(input >> brightness) || (input >> trailing) || !std::isfinite(brightness)
+            || brightness < .8F || brightness > 1.2F)
+        return {.success = false, .error = "expected brightness from 0.8 to 1.2"};
+    g_terminalBarBrightness = brightness;
+    damageAllMonitors();
+    return {};
+}
+
+SDispatchResult barBrightnessDispatcher(std::string arguments) {
+    std::istringstream input{arguments};
+    float brightness = 1.F;
+    std::string trailing;
+    if (!(input >> brightness) || (input >> trailing) || !std::isfinite(brightness)
+            || brightness < .2F || brightness > 1.2F)
+        return {.success = false, .error = "expected bar brightness from 0.2 to 1.2"};
+    g_barBrightness = brightness;
+    for (const auto& monitor : State::monitorState()->monitors()) {
+        monitor->m_blurFBDirty = true;
+        monitor->m_blurFBShouldRender = true;
+    }
+    damageAllMonitors();
+    return {};
+}
+
+SDispatchResult terminalFollowBarDispatcher(std::string arguments) {
+    if (arguments != "0" && arguments != "1")
+        return {.success = false, .error = "expected 0 or 1"};
+    g_terminalFollowBar = arguments == "1";
+    if (g_terminalFollowBar) g_terminalBarMatch = false;
+    for (const auto& monitor : State::monitorState()->monitors()) {
+        monitor->m_blurFBDirty = true;
+        monitor->m_blurFBShouldRender = true;
+    }
+    damageAllMonitors();
+    return {};
+}
+
+SDispatchResult terminalGlassDispatcher(std::string arguments) {
+    const auto next = parseTerminalGlassControl(arguments);
+    if (!next) return {.success = false, .error = "expected 0 or 1 followed by strength from 0 to 3"};
+    const bool wasActive = terminalOpticsActive();
+    g_terminalControl = next;
+    if (!terminalOpticsActive()) {
+        Render::GL::g_pHyprOpenGL->makeEGLCurrent();
+        g_terminalBackdrops.clear();
+    } else if (!wasActive) {
+        for (const auto& monitor : State::monitorState()->monitors()) {
+            monitor->m_blurFBDirty = true;
+            monitor->m_blurFBShouldRender = true;
+        }
+    }
     damageAllMonitors();
     return {};
 }
@@ -2637,6 +3508,344 @@ void hkDrawTex(Render::IElementRenderer* renderer, WP<CTexPassElement> element, 
     element->m_data.blur = oldBlur;
 }
 
+bool isWallpaperLayer(const PHLLS& layer) {
+    return layer && layer->m_layer == 0 && layer->m_mapped
+        && (layer->m_namespace == "mpvpaper" || layer->m_namespace == "awww-daemon"
+            || layer->m_namespace == "swww-daemon");
+}
+
+void clearWallpaperTransition() {
+    if (Render::GL::g_pHyprOpenGL)
+        Render::GL::g_pHyprOpenGL->makeEGLCurrent();
+    g_wallpaperTransition = {};
+    if (g_wallpaperTimer) g_wallpaperTimer->updateTimeout(std::nullopt);
+}
+
+void onWallpaperTimer(SP<CEventLoopTimer>, void*) {
+    if (g_wallpaperTransition.timing.expired()) {
+        clearWallpaperTransition();
+        damageAllMonitors();
+        return;
+    }
+    if (g_wallpaperTransition.timing.revealing) {
+        damageAllMonitors();
+        g_wallpaperTimer->updateTimeout(std::chrono::milliseconds(16));
+    } else {
+        g_wallpaperTimer->updateTimeout(std::chrono::seconds(5));
+    }
+}
+
+SDispatchResult wallpaperTransitionDispatcher(std::string arguments) {
+    std::istringstream input(arguments);
+    std::string action, token, mode;
+    int duration = 420;
+    input >> action >> token;
+    if (token.empty() || token.size() > 80 || token.find_first_not_of("0123456789-") != std::string::npos)
+        return {.success = false, .error = "invalid wallpaper transition token"};
+    if (action == "cancel") {
+        if (g_wallpaperTransition.timing.matches(token)) {
+            clearWallpaperTransition();
+            damageAllMonitors();
+        }
+        return {};
+    }
+    if (action == "reveal") {
+        if (!g_wallpaperTransition.timing.matches(token))
+            return {.success = false, .error = "stale wallpaper transition"};
+        g_wallpaperTransition.timing.started = SWallpaperTransitionTiming::Clock::now();
+        g_wallpaperTransition.timing.revealing = true;
+        g_wallpaperTimer->updateTimeout(std::chrono::milliseconds(1));
+        damageAllMonitors();
+        return {};
+    }
+    if (action != "prepare" || !(input >> mode >> duration))
+        return {.success = false, .error = "expected prepare TOKEN MODE DURATION_MS"};
+    const std::unordered_map<std::string, float> modes{{"wave",0},{"grow",1},{"outer",2},{"fade",3},{"wipe",4}};
+    const auto effect = modes.find(mode);
+    if (effect == modes.end() || !g_pHyprRenderer || !Render::GL::g_pHyprOpenGL || !State::monitorState())
+        return {.success = false, .error = "wallpaper transition renderer unavailable"};
+    Render::GL::g_pHyprOpenGL->makeEGLCurrent();
+    if (!g_wallpaperShader) {
+        auto shader = makeShared<CShader>();
+        if (!shader->createProgram(LIQUID_GLASS_VERTEX, WALLPAPER_TRANSITION_FRAGMENT, true, true))
+            return {.success = false, .error = "wallpaper transition shader failed"};
+        g_wallpaperShader = std::move(shader);
+    }
+    SWallpaperTransition next;
+    next.timing.token = token;
+    next.timing.duration = std::clamp(duration / 1000.F, .15F, 3.F);
+    next.mode = effect->second;
+    // The compositor renders its existing wallpaper buffer into GPU memory.
+    // No readback, PNG, CPU decode, QML surface or readiness polling.
+    for (const auto& monitor : State::monitorState()->monitors()) {
+        if (!monitor) continue;
+        const auto& backgrounds = monitor->m_layerSurfaceLayers[0];
+        for (auto it = backgrounds.rbegin(); it != backgrounds.rend(); ++it) {
+            const auto layer = it->lock();
+            if (!isWallpaperLayer(layer)) continue;
+            const auto frame = g_pHyprRenderer->makeSnapshotFB(layer);
+            if (frame && frame->getTexture())
+                next.frames.emplace(monitor->m_name, frame);
+            break;
+        }
+    }
+    if (next.frames.empty())
+        return {.success = false, .error = "no mapped wallpaper background"};
+    constexpr std::array<std::array<float,2>,8> directions{{
+        {1,0},{-1,0},{0,1},{0,-1},{1,1},{1,-1},{-1,1},{-1,-1}}};
+    const auto now = SWallpaperTransitionTiming::Clock::now();
+    int direction = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count() % 8;
+    if (direction == g_wallpaperLastDirection) direction = (direction + 1) % 8;
+    g_wallpaperLastDirection = direction;
+    next.direction = directions[direction];
+    next.phase = std::fmod(std::chrono::duration<float>(now.time_since_epoch()).count(), 6.2831853F);
+    next.timing.prepared = now;
+    g_wallpaperTransition = std::move(next);
+    g_wallpaperTimer->updateTimeout(std::chrono::seconds(5));
+    return {};
+}
+
+void renderWallpaperTransition(const PHLLS& layer, const CRegion& damage) {
+    if (!isWallpaperLayer(layer) || !layer->m_monitor || !g_wallpaperShader
+        || g_wallpaperTransition.timing.token.empty() || g_wallpaperTransition.timing.expired())
+        return;
+    const auto found = g_wallpaperTransition.frames.find(layer->m_monitor->m_name);
+    if (found == g_wallpaperTransition.frames.end() || !found->second || !found->second->getTexture())
+        return;
+    const auto frame = found->second;
+    const CBox box{0,0,layer->m_monitor->m_transformedSize.x,layer->m_monitor->m_transformedSize.y};
+    CRegion region{box};
+    if (!damage.empty()) region.intersect(damage);
+    if (region.empty()) return;
+    const auto shader = Render::GL::g_pHyprOpenGL->useShader(g_wallpaperShader);
+    if (!shader) return;
+    shader->setUniformMatrix3fv(SHADER_PROJ,1,GL_TRUE,g_pHyprRenderer->projectBoxToTarget(box).getMatrix());
+    shader->setUniformInt(SHADER_TEX,0);
+    shader->setUniformFloat2(SHADER_FULL_SIZE,frame->m_size.x,frame->m_size.y);
+    glUniform1f(glGetUniformLocation(shader->program(),"progress"),g_wallpaperTransition.timing.progress());
+    glUniform1f(glGetUniformLocation(shader->program(),"mode"),g_wallpaperTransition.mode);
+    glUniform1f(glGetUniformLocation(shader->program(),"phase"),g_wallpaperTransition.phase);
+    glUniform2f(glGetUniformLocation(shader->program(),"direction"),
+        g_wallpaperTransition.direction[0],g_wallpaperTransition.direction[1]);
+    glActiveTexture(GL_TEXTURE0);
+    frame->getTexture()->bind();
+    frame->getTexture()->setTexParameter(GL_TEXTURE_MIN_FILTER,GL_LINEAR);
+    frame->getTexture()->setTexParameter(GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+    Render::GL::g_pHyprOpenGL->blend(true);
+    glBindVertexArray(shader->getUniformLocation(SHADER_SHADER_VAO));
+    region.forEachRect([](const auto& rect) {
+        Render::GL::g_pHyprOpenGL->scissor(&rect,g_pHyprRenderer->m_renderData.transformDamage);
+        glDrawArrays(GL_TRIANGLE_STRIP,0,4);
+    });
+    glBindVertexArray(0);
+    frame->getTexture()->unbind();
+    Render::GL::g_pHyprOpenGL->scissor(nullptr);
+}
+
+STerminalBackdrop& terminalBackdrop(const PHLMONITOR& monitor) {
+    std::erase_if(g_terminalBackdrops, [](const auto& entry) { return !entry.second.monitor; });
+    auto& cached = g_terminalBackdrops[monitor->m_name];
+    if (cached.monitor.lock() != monitor)
+        cached = {.monitor = monitor, .material = nullptr, .desktop = nullptr};
+    return cached;
+}
+
+void hkGLDrawPreBlur(Render::GL::CGLElementRenderer* renderer, WP<CPreBlurElement> element, const CRegion& damage) {
+    const auto original = reinterpret_cast<DrawGLPreBlurFn>(g_drawGLPreBlur->m_original);
+    const auto monitor = g_pHyprRenderer->m_renderData.pMonitor.lock();
+    if (!g_unloading && monitor && terminalOpticsActive()) {
+        auto& cached = terminalBackdrop(monitor);
+        if (captureClearBackdrop(cached.desktop)) {
+            const auto source = g_pHyprRenderer->m_renderData.currentFB;
+            cached.desktop->setImageDescription(source->imageDescription());
+            if (source->getTexture())
+                cached.desktop->getTexture()->m_transform = source->getTexture()->m_transform;
+            ++g_terminalDesktopCopies;
+        } else
+            cached.desktop.reset();
+    }
+    original(renderer, element, damage);
+}
+
+bool isKittySurface(WP<CTexPassElement> element) {
+    if (!element || !element->m_data.surface || element->m_data.currentLS)
+        return false;
+    const auto surface = Desktop::View::CWLSurface::fromResource(element->m_data.surface);
+    const auto view = surface ? surface->view() : nullptr;
+    if (!view || view->type() != Desktop::View::VIEW_TYPE_WINDOW)
+        return false;
+    const auto window = Desktop::View::CWindow::fromView(view);
+    if (!window || window->resource() != element->m_data.surface)
+        return false;
+    if (kittyClass(window->m_class) || kittyClass(window->m_initialClass))
+        return true;
+    const auto found = g_kittyIdentities.find(window.get());
+    if (found != g_kittyIdentities.end() && found->second.window.lock() == window)
+        return found->second.kitty;
+    if (g_kittyIdentities.size() >= 128)
+        std::erase_if(g_kittyIdentities, [](const auto& entry) { return !entry.second.window; });
+    std::error_code error;
+    const auto executable = std::filesystem::read_symlink(
+        std::filesystem::path("/proc") / std::to_string(window->getPID()) / "exe", error);
+    const bool kitty = !error && kittyExecutable(executable.string());
+    g_kittyIdentities[window.get()] = {window, kitty};
+    return kitty;
+}
+
+SP<Render::ITexture> terminalGlassBackdrop(WP<CTexPassElement> element, const CRegion& damage) {
+    if (!terminalOpticsActive() || !element->m_data.blur
+            || !element->m_data.blurredBG || !g_pHyprRenderer
+            || !Render::GL::g_pHyprOpenGL || !isKittySurface(element))
+        return nullptr;
+    const auto target = g_pHyprRenderer->m_renderData.currentFB;
+    if (!target || target->m_size.x <= 0 || target->m_size.y <= 0)
+        return nullptr;
+    auto& program = g_terminalFollowBar ? g_terminalBarShader : g_terminalShader;
+    if (!program) {
+        if (g_terminalShaderFailed) return nullptr;
+        auto shader = makeShared<CShader>();
+        if (!shader->createProgram(LIQUID_GLASS_VERTEX, withTerminalGlassOptics(g_terminalFollowBar ? LIQUID_GLASS_FRAGMENT : TERMINAL_GLASS_FRAGMENT), true, true)) {
+            g_terminalShaderFailed = true;
+            return nullptr;
+        }
+        program = std::move(shader);
+    }
+    CRegion drawDamage = element->m_data.damage.empty() ? damage : element->m_data.damage;
+    CBox drawBox = element->m_data.box;
+    g_pHyprRenderer->m_renderData.renderModif.applyToBox(drawBox);
+    // Native renderTextureInternal may draw the whole explicit clip instead
+    // of intersecting damage. Its backdrop must be valid throughout that draw,
+    // even when this reusable target last belonged to a different window.
+    if (!element->m_data.clipRegion.empty() || !g_pHyprRenderer->m_renderData.clipBox.empty())
+        drawDamage.add(drawBox);
+    drawDamage.intersect(drawBox);
+    if (drawDamage.empty()) return nullptr;
+    const auto monitor = g_pHyprRenderer->m_renderData.pMonitor.lock();
+    if (!monitor) return nullptr;
+    const auto material = g_desktopBarMaterials.find(monitor->m_name);
+    const bool follows = g_terminalFollowBar && !g_terminalBarMatch;
+    if (follows && (material == g_desktopBarMaterials.end() || material->second.mode == 0
+            || material->second.tint[3] >= .999F)) return nullptr;
+    auto& cached = terminalBackdrop(monitor);
+    if (!cached.material)
+        cached.material = makeShared<Render::GL::CGLFramebuffer>("velora-kitty-glass");
+    const auto backdrop = cached.material;
+    const auto background = element->m_data.blurredBG;
+    // Precomputed blur may skip repainting behind opaque client glyphs. Keep
+    // its sharp desktop at the same pre-window stage, so refraction cannot
+    // pick up this window's pixels from a previous frame. Live blur already
+    // tracks the scene damage and can sample the current render target safely.
+    const auto scene = element->m_data.blockBlurOptimization.value_or(false)
+        ? target->getTexture() : cached.desktop ? cached.desktop->getTexture() : nullptr;
+    const bool sharp = scene && scene->m_size == background->m_size
+        && scene->m_transform == background->m_transform
+        && monitor->m_transform == WL_OUTPUT_TRANSFORM_NORMAL
+        && (!scene->m_imageDescription || !background->m_imageDescription
+            || !scene->m_imageDescription->needsCM(background->m_imageDescription));
+    const auto opticalSource = sharp ? scene : background;
+    SP<Render::ITexture> preparedOptical;
+    if (follows && material->second.mode == 3 && material->second.blur
+            && g_barBlurEnabled && g_liquidFrosted) {
+        CRegion sampling{drawDamage};
+        sampling.expand(opticalGlassSamplePadding(barRefractionStrength(),monitor->m_scale,
+            std::max(opticalSource->m_size.x,opticalSource->m_size.y)));
+        preparedOptical = opticalBlurTexture(opticalSource,monitor->m_name,sampling,monitor->m_scale);
+        if (!preparedOptical) return nullptr;
+    }
+    if (!backdrop->alloc(sc<int>(background->m_size.x), sc<int>(background->m_size.y),
+                follows ? DRM_FORMAT_ABGR16161616F : target->m_drmFormat)
+            || !backdrop->getTexture())
+        return nullptr;
+    backdrop->setImageDescription(background->m_imageDescription);
+    backdrop->getTexture()->m_transform = background->m_transform;
+
+    // Reuse the blur already prepared by IElementRenderer. One reusable GPU
+    // target per output avoids reallocating between monitors of different
+    // sizes; no scene snapshot/readback or second blur per Kitty window.
+    GLint viewport[4];
+    glGetIntegerv(GL_VIEWPORT, viewport);
+    g_pHyprRenderer->bindFB(backdrop);
+    g_pHyprRenderer->setViewport(0, 0, sc<int>(background->m_size.x), sc<int>(background->m_size.y));
+    Hyprutils::Utils::CScopeGuard restoreTarget{[target, viewport]() {
+        g_pHyprRenderer->bindFB(target);
+        g_pHyprRenderer->setViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
+        Render::GL::g_pHyprOpenGL->scissor(nullptr);
+    }};
+    // Render in the prepared blur texture's coordinate system. The original
+    // client shader applies monitor rotation/mirroring when it samples this
+    // texture; applying the output projection here would rotate it twice.
+    const auto matrix = Mat3x3::outputProjection(background->m_size, HYPRUTILS_TRANSFORM_NORMAL)
+        .projectBox(drawBox, HYPRUTILS_TRANSFORM_NORMAL);
+    auto shader = Render::GL::g_pHyprOpenGL->useShader(program);
+    if (!shader) return nullptr;
+    const float scale = monitor->m_scale;
+    shader->setUniformMatrix3fv(SHADER_PROJ, 1, GL_TRUE, matrix.getMatrix());
+    shader->setUniformInt(SHADER_TEX, 0);
+    shader->setUniformFloat2(SHADER_FULL_SIZE, background->m_size.x, background->m_size.y);
+    if (follows) {
+        const float width = background->m_size.x, height = background->m_size.y;
+        const float panelScale = width / 1600.F;
+        const auto& frame = unifiedBarShape(monitor->m_name);
+        const auto lens = barLensParameters(panelScale, std::max(1.F,
+            frame.active ? frame.width * width * .5F : 20.F * scale));
+        shader->setUniformFloat2(SHADER_TOP_LEFT, 0, 0);
+        shader->setUniformFloat2(SHADER_BOTTOM_RIGHT, drawBox.width * .5F, drawBox.height * .5F);
+        shader->setUniformFloat(SHADER_RADIUS, element->m_data.round);
+        shader->setUniformFloat(SHADER_ALPHA, 1.F);
+        shader->setUniformFloat(SHADER_DISTORT, lens.refraction);
+        shader->setUniformFloat(SHADER_CONTRAST, lens.edgeWidth);
+        shader->setUniformFloat(SHADER_NOISE, lens.dispersion);
+        shader->setUniformFloat(SHADER_BRIGHTNESS, 1.025F);
+        shader->setUniformFloat(SHADER_VIBRANCY, 1.12F);
+        shader->setUniformFloat(SHADER_TIME, g_pHyprRenderer->m_globalTimer.getSeconds());
+        shader->setUniformFloat4(SHADER_POINTER, 0, 0, 0, panelScale);
+        shader->setUniformFloat4(SHADER_POINTER_SHAPE, 0, 0, 0, 1);
+        shader->setUniformFloat4(SHADER_COLOR, .94F, .97F, 1.F, g_panelTint->value() * .32F);
+        glUniform2f(glGetUniformLocation(shader->program(), "windowTopLeft"), drawBox.x / width, drawBox.y / height);
+        glUniform2f(glGetUniformLocation(shader->program(), "windowBottomRight"),
+            (drawBox.x + drawBox.width) / width, (drawBox.y + drawBox.height) / height);
+        glUniform1f(glGetUniformLocation(shader->program(), "barRefractionStrength"), barRefractionStrength());
+        glUniform1f(glGetUniformLocation(shader->program(), "opticalScale"), scale);
+        glUniform2f(glGetUniformLocation(shader->program(), "frost"), g_liquidFrosted ? 1.F : 0.F,g_liquidLight ? 1.F : 0.F);
+        glUniform1f(glGetUniformLocation(shader->program(), "terminalBackdrop"), 1.F);
+        glUniform1f(glGetUniformLocation(shader->program(), "terminalBrightness"), g_terminalBarBrightness);
+        glUniform1f(glGetUniformLocation(shader->program(), "barBrightness"), g_barBrightness);
+        glUniform4f(glGetUniformLocation(shader->program(), "barMaterial"), 1, material->second.mode, 1, 0);
+        glUniform4fv(glGetUniformLocation(shader->program(), "barTint"), 1, material->second.tint.data());
+    } else {
+    shader->setUniformInt(SHADER_BLURRED_BG, 1);
+    shader->setUniformFloat2(SHADER_BOTTOM_RIGHT, drawBox.width, drawBox.height);
+    shader->setUniformFloat(SHADER_RADIUS, element->m_data.round);
+    shader->setUniformFloat(SHADER_ROUNDING_POWER, element->m_data.roundingPower);
+    shader->setUniformFloat(SHADER_DISTORT, TERMINAL_REFRACTION_PIXELS * scale);
+    shader->setUniformFloat(SHADER_CONTRAST, TERMINAL_RIM_WIDTH * scale);
+    shader->setUniformFloat(SHADER_ALPHA, terminalGlassStrength());
+    shader->setUniformFloat(SHADER_VIBRANCY, sharp ? 1.F : 0.F);
+    }
+    const bool clearBar = follows && material->second.mode > 1 && !g_liquidFrosted;
+    const auto source = preparedOptical ? preparedOptical
+        : follows && !clearBar && material->second.blur && g_barBlurEnabled ? background : opticalSource;
+    glActiveTexture(GL_TEXTURE0);
+    source->bind();
+    glActiveTexture(GL_TEXTURE1);
+    background->bind();
+    Render::GL::g_pHyprOpenGL->blend(false);
+    glBindVertexArray(shader->getUniformLocation(SHADER_SHADER_VAO));
+    drawDamage.forEachRect([](const auto& rect) {
+        Render::GL::g_pHyprOpenGL->scissor(&rect, false);
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    });
+    glBindVertexArray(0);
+    background->unbind();
+    glActiveTexture(GL_TEXTURE0);
+    source->unbind();
+    Render::GL::g_pHyprOpenGL->blend(true);
+    ++g_terminalGlassDraws;
+    if (follows) ++g_terminalFollowBarDraws;
+    if (sharp) ++g_terminalSharpDraws;
+    return backdrop->getTexture();
+}
+
 void hkGLDrawTex(Render::GL::CGLElementRenderer* renderer, WP<CTexPassElement> element, const CRegion& damage) {
     const auto original = reinterpret_cast<DrawGLTexFn>(g_drawGLTex->m_original);
     if (g_unloading || !element) {
@@ -2644,7 +3853,24 @@ void hkGLDrawTex(Render::GL::CGLElementRenderer* renderer, WP<CTexPassElement> e
         return;
     }
 
+    if (const auto backdrop = terminalGlassBackdrop(element, damage)) {
+        const auto previous = element->m_data.blurredBG;
+        element->m_data.blurredBG = backdrop;
+        Hyprutils::Utils::CScopeGuard restoreBackdrop{[element, previous]() {
+            element->m_data.blurredBG = previous;
+        }};
+        // Preserve the compositor's client shader: glyphs, Kitty images,
+        // opacity, fade animations and rounded corners follow their normal path.
+        original(renderer, element, damage);
+        return;
+    }
+
     const auto layer = element->m_data.currentLS.lock();
+    if (isWallpaperLayer(layer)) {
+        original(renderer, element, damage);
+        renderWallpaperTransition(layer, damage);
+        return;
+    }
     if (layer && layer->m_namespace == WALLPAPER_EFFECTS_NAMESPACE) {
         if (g_wallpaperBlur > 0.F && captureClearBackdrop())
             renderDesktopBackdrop(element, damage);
@@ -2682,6 +3908,10 @@ void hkGLDrawTex(Render::GL::CGLElementRenderer* renderer, WP<CTexPassElement> e
         original(renderer, element, damage);
         return;
     }
+    if (sharedWidgets)
+        // Keep the existing capture, swapping buffers instead of copying the
+        // sharp desktop a second time or keeping a pointer that is overwritten.
+        std::swap(g_clearBackdrop, g_frameFusionBackdrops[monitorName].sharp);
     bool rendered = false;
     if (sharedWidgets) {
         const auto material = g_desktopBarMaterials.find(monitorName);
@@ -2690,7 +3920,7 @@ void hkGLDrawTex(Render::GL::CGLElementRenderer* renderer, WP<CTexPassElement> e
                 && unifiedBarShape(monitorName).active)
             rendered = renderLiquidBackdrop(element, damage, true, false,
                 false, &unifiedBarShape(monitorName));
-        rendered = renderSharedWidgetsBackdrop(element, damage) || rendered;
+        rendered = renderSharedWidgetsBackdrop(element, damage, g_frameFusionBackdrops[monitorName].sharp) || rendered;
     }
     else if (topbar) {
         const auto found = layer->m_monitor
@@ -2750,6 +3980,14 @@ int luaDispatch(lua_State* state) {
         {"caustics", causticsDispatcher}, {"topbar-connected", connectedTopbarDispatcher},
         {"bar-blur", barBlurDispatcher}, {"widget-blur", widgetBlurDispatcher},
         {"liquid-style", liquidStyleDispatcher}, {"wallpaper", wallpaperDispatcher},
+        {"wallpaper-transition", wallpaperTransitionDispatcher},
+        {"terminal-glass-control", terminalGlassDispatcher},
+        {"terminal-bar-match", terminalBarMatchDispatcher},
+        {"terminal-follow-bar", terminalFollowBarDispatcher},
+        {"terminal-brightness", terminalBrightnessDispatcher},
+        {"bar-brightness", barBrightnessDispatcher},
+        {"lyrics-beat", lyricsBeatDispatcher},
+        {"bar-refraction", barRefractionDispatcher},
         {"topbar-shape", topbarShapeDispatcher}, {"desktop-bar-material", desktopBarMaterialDispatcher},
         {"unified-bar-shape", unifiedBarShapeDispatcher}, {"topbar-settle", topbarSettleDispatcher},
         {"right-menu-shape", rightMenuShapeDispatcher}, {"settings-shape", settingsShapeDispatcher},
@@ -2809,8 +4047,11 @@ std::string status(eHyprCtlOutputFormat format, std::string) {
 
     if (format == FORMAT_JSON)
         return std::format(
-            R"({{"active":true,"abi":"{}","materials":{},"capabilities":[{}"alpha-mask","desktop-bar-material","transition","dial","caustics","topbar-connected","bar-blur","widget-blur","liquid-style","wallpaper","topbar-shape","unified-bar-shape","topbar-settle","right-menu-shape","settings-shape","settings-connected","editor-shape","selector-shape","appearance","lock-layout","shared-widgets-shape"],"wallpaperBlur":{:.3f},"liquidStyle":"{}","backdrop":"sharp-framebuffer","hyprlandBlur":{},"barBlur":{{"enabled":{},"source":"hyprland","topbarDraws":{},"sidebarDraws":{},"waveDraws":{}}},"appearance":{{"blur":{:.3f},"contrast":{:.3f},"reflection":{:.3f},"preview":{}}},"desktop":{{"size":{},"passes":{},"draws":{},"noise":{:.3f},"contrast":{:.3f},"brightness":{:.3f},"vibrancy":{:.3f},"vibrancyDarkness":{:.3f}}},"panel":{{"size":{},"passes":{},"draws":{},"refractionDraws":{},"noise":{:.3f},"contrast":{:.3f},"brightness":{:.3f},"vibrancy":{:.3f},"vibrancyDarkness":{:.3f},"refraction":{:.3f},"edgeWidth":{:.3f},"dispersion":{:.3f},"tint":{:.3f}}},"topbar":{{"size":{},"passes":{},"shapes":{},"draws":{},"refractionDraws":{},"noise":{:.3f},"contrast":{:.3f},"brightness":{:.3f},"vibrancy":{:.3f},"vibrancyDarkness":{:.3f}}},"rightMenu":{{"draws":{},"refractionDraws":{}}},"settings":{{"draws":{},"refractionDraws":{}}},"editor":{{"shapes":{},"draws":{},"refractionDraws":{},"connectedSettings":{}}},"sharedWidgets":{{"blurEnabled":{},"blurDraws":{},"active":{},"shapes":{},"draws":{},"refractionDraws":{},"caustics":{}}},"transition":{{"progress":{:.3f},"animating":{}}},"caustics":{{"enabled":{},"intensity":{:.3f},"lines":{},"animating":{},"frames":{}}}}})",
-            __hyprland_api_get_client_hash(), materials, g_luaDispatch ? "\"lua-dispatch\"," : "", g_wallpaperBlur, g_liquidFrosted ? "frosted" : "clear", g_barBlurEnabled, g_barBlurEnabled, g_topbarBlurDraws, g_sidebarBlurDraws, g_waveBlurDraws,
+            R"({{"active":true,"abi":"{}","materials":{},"capabilities":[{}"alpha-mask","desktop-bar-material","transition","dial","caustics","topbar-connected","bar-blur","widget-blur","liquid-style","wallpaper","topbar-shape","unified-bar-shape","topbar-settle","right-menu-shape","settings-shape","settings-connected","editor-shape","selector-shape","appearance","lock-layout","shared-widgets-shape","wallpaper-transition","terminal-glass","terminal-glass-control","terminal-bar-match","bar-refraction","terminal-follow-bar","terminal-brightness","bar-brightness","lyrics-beat","lyrics-beat-palette","optical-glass"],"terminalGlass":{{"enabled":{},"strength":{:.3f},"draws":{},"sharpDraws":{},"desktopCopies":{},"shaderFailed":{},"source":"live-framebuffer-and-hyprland-blur","barMatch":{},"barMatchDraws":{},"followsBar":{},"followBarDraws":{},"brightness":{:.3f}}},"wallpaperBlur":{:.3f},"barRefraction":{:.3f},"barBrightness":{:.3f},"lyricsBeatCount":{},"liquidStyle":"{}","backdrop":"sharp-framebuffer","hyprlandBlur":{},"barBlur":{{"enabled":{},"source":"hyprland","topbarDraws":{},"sidebarDraws":{},"waveDraws":{}}},"appearance":{{"blur":{:.3f},"contrast":{:.3f},"reflection":{:.3f},"preview":{}}},"desktop":{{"size":{},"passes":{},"draws":{},"noise":{:.3f},"contrast":{:.3f},"brightness":{:.3f},"vibrancy":{:.3f},"vibrancyDarkness":{:.3f}}},"panel":{{"size":{},"passes":{},"draws":{},"refractionDraws":{},"noise":{:.3f},"contrast":{:.3f},"brightness":{:.3f},"vibrancy":{:.3f},"vibrancyDarkness":{:.3f},"refraction":{:.3f},"edgeWidth":{:.3f},"dispersion":{:.3f},"tint":{:.3f}}},"topbar":{{"size":{},"passes":{},"shapes":{},"draws":{},"refractionDraws":{},"noise":{:.3f},"contrast":{:.3f},"brightness":{:.3f},"vibrancy":{:.3f},"vibrancyDarkness":{:.3f}}},"rightMenu":{{"draws":{},"refractionDraws":{}}},"settings":{{"draws":{},"refractionDraws":{}}},"editor":{{"shapes":{},"draws":{},"refractionDraws":{},"connectedSettings":{}}},"sharedWidgets":{{"blurEnabled":{},"blurDraws":{},"active":{},"shapes":{},"draws":{},"refractionDraws":{},"caustics":{}}},"transition":{{"progress":{:.3f},"animating":{}}},"caustics":{{"enabled":{},"intensity":{:.3f},"lines":{},"animating":{},"frames":{}}}}})",
+            __hyprland_api_get_client_hash(), materials, g_luaDispatch ? "\"lua-dispatch\"," : "",
+            terminalGlassEnabled() ? "true" : "false",
+            terminalGlassStrength(), g_terminalGlassDraws,
+            g_terminalSharpDraws, g_terminalDesktopCopies, g_terminalShaderFailed ? "true" : "false", g_terminalBarMatch ? "true" : "false", g_terminalBarMatchDraws, g_terminalFollowBar ? "true" : "false", g_terminalFollowBarDraws, g_terminalBarBrightness, g_wallpaperBlur, barRefractionStrength(), g_barBrightness, g_lyricsBeatCount, g_liquidFrosted ? "frosted" : "clear", g_barBlurEnabled, g_barBlurEnabled, g_topbarBlurDraws, g_sidebarBlurDraws, g_waveBlurDraws,
             g_activeAppearance.blur, g_activeAppearance.contrast,
             g_activeAppearance.reflection,
             g_activeAppearance.preview ? "true" : "false",
@@ -2894,6 +4135,18 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     if (!ensureLiquidShader() || !ensureDesktopShader())
         throw std::runtime_error("Velora native blur shaders could not be compiled by this renderer");
 
+    g_terminalGlass = makeShared<Config::Values::CIntValue>(
+        "plugin:velora-blur:kitty_glass", "Liquid glass in all Kitty windows", 1,
+        Config::Values::SIntValueOptions{.min = 0, .max = 1});
+    if (!addFloatValue(g_barRefraction, "plugin:velora-blur:bar_refraction_strength",
+            "Independent bar and frame refraction strength", BAR_DEFAULT_REFRACTION, 0.F, BAR_MAX_REFRACTION))
+        throw std::runtime_error("Bar refraction configuration could not be registered");
+
+    if (!HyprlandAPI::addConfigValueV2(g_handle, g_terminalGlass)
+            || !addFloatValue(g_terminalStrength, "plugin:velora-blur:kitty_glass_strength",
+                "Kitty lens refraction and reflection strength", 1.F, 0.F, TERMINAL_MAX_STRENGTH))
+        throw std::runtime_error("Kitty liquid glass configuration could not be registered");
+
     if (!addIntValue(g_desktopSize, "plugin:velora-blur:desktop_size", "Velora desktop blur radius", 7, 40) ||
         !addIntValue(g_desktopPasses, "plugin:velora-blur:desktop_passes", "Velora desktop blur passes", 3, 8) ||
         !addFloatValue(g_desktopNoise, "plugin:velora-blur:desktop_noise", "Velora desktop blur grain", 0.004F, 0.F, 1.F) ||
@@ -2945,6 +4198,20 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     if (!g_drawGLTex || !g_drawGLTex->hook())
         throw std::runtime_error("Velora Shell could not install its liquid glass render hook");
 
+    void* preBlurDraw = nullptr;
+    for (const auto& match : HyprlandAPI::findFunctionsByName(g_handle, "draw")) {
+        if (match.demangled.contains("CGLElementRenderer::draw(")
+                && match.demangled.contains("CPreBlurElement")) {
+            preBlurDraw = match.address;
+            break;
+        }
+    }
+    if (!preBlurDraw)
+        throw std::runtime_error("CGLElementRenderer::draw(CPreBlurElement) was not found");
+    g_drawGLPreBlur = HyprlandAPI::createFunctionHook(g_handle, preBlurDraw, reinterpret_cast<const void*>(&hkGLDrawPreBlur));
+    if (!g_drawGLPreBlur || !g_drawGLPreBlur->hook())
+        throw std::runtime_error("Could not install Kitty pre-blur desktop hook");
+
     if (!HyprlandAPI::addDispatcherV2(g_handle, "velora-blur:transition", transitionDispatcher))
         throw std::runtime_error("Velora Shell blur transition dispatcher could not be registered");
     if (!HyprlandAPI::addDispatcherV2(g_handle, "velora-blur:dial", dialDispatcher))
@@ -2959,8 +4226,23 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         throw std::runtime_error("Could not register widget blur dispatcher");
     if (!HyprlandAPI::addDispatcherV2(g_handle, "velora-blur:liquid-style", liquidStyleDispatcher))
         throw std::runtime_error("Could not register liquid glass style dispatcher");
+    if (!HyprlandAPI::addDispatcherV2(g_handle, "velora-blur:bar-refraction", barRefractionDispatcher))
+        throw std::runtime_error("Could not register bar refraction dispatcher");
     if (!HyprlandAPI::addDispatcherV2(g_handle, "velora-blur:wallpaper", wallpaperDispatcher))
         throw std::runtime_error("Could not register wallpaper blur dispatcher");
+    if (!HyprlandAPI::addDispatcherV2(g_handle, "velora-blur:terminal-brightness", terminalBrightnessDispatcher))
+        throw std::runtime_error("Could not register terminal brightness dispatcher");
+    if (!HyprlandAPI::addDispatcherV2(g_handle, "velora-blur:lyrics-beat", lyricsBeatDispatcher))
+        throw std::runtime_error("Could not register Lyrics beat dispatcher");
+
+    if (!HyprlandAPI::addDispatcherV2(g_handle, "velora-blur:bar-brightness", barBrightnessDispatcher))
+        throw std::runtime_error("Could not register bar brightness dispatcher");
+    if (!HyprlandAPI::addDispatcherV2(g_handle, "velora-blur:terminal-follow-bar", terminalFollowBarDispatcher))
+        throw std::runtime_error("Could not register terminal follow bar dispatcher");
+    if (!HyprlandAPI::addDispatcherV2(g_handle, "velora-blur:terminal-bar-match", terminalBarMatchDispatcher))
+        throw std::runtime_error("Could not register Kitty/bar material matching dispatcher");
+    if (!HyprlandAPI::addDispatcherV2(g_handle, "velora-blur:terminal-glass-control", terminalGlassDispatcher))
+        throw std::runtime_error("Could not register terminal liquid glass dispatcher");
     if (!HyprlandAPI::addDispatcherV2(g_handle, "velora-blur:topbar-shape", topbarShapeDispatcher))
         throw std::runtime_error("Velora Shell topbar shape dispatcher could not be registered");
     if (!HyprlandAPI::addDispatcherV2(g_handle, "velora-blur:desktop-bar-material", desktopBarMaterialDispatcher))
@@ -2991,6 +4273,11 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         if (!g_luaDispatch) throw std::runtime_error("Velora Lua transport could not be registered");
     }
 
+    if (!HyprlandAPI::addDispatcherV2(g_handle, "velora-blur:wallpaper-transition", wallpaperTransitionDispatcher))
+        throw std::runtime_error("Could not register wallpaper transition dispatcher");
+    g_wallpaperTimer = makeShared<CEventLoopTimer>(std::nullopt,onWallpaperTimer,nullptr);
+    g_pEventLoopManager->addTimer(g_wallpaperTimer);
+
     g_tickListener = Event::bus()->m_events.tick.listen(onTick);
     g_causticsTimer = makeShared<CEventLoopTimer>(
         std::nullopt, onCausticsTimer, nullptr);
@@ -3003,22 +4290,46 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 
     if (g_pEventManager)
         g_pEventManager->postEvent({"velora-blur", "ready"});
+    // Refresh the matching sharp/blurred desktop pair after hot load, including
+    // an idle static wallpaper. No recurring terminal animation is scheduled.
+    for (const auto& monitor : State::monitorState()->monitors()) {
+        monitor->m_blurFBDirty = true;
+        monitor->m_blurFBShouldRender = true;
+    }
+    damageAllMonitors();
 
     return {
         .name = "velora-blur",
         .description = "Clear live framebuffer refraction for Velora",
         .author = "Velora Shell",
-        .version = "0.16.0",
+        .version = "0.17.20",
     };
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {
     g_unloading = true;
+    HyprlandAPI::removeDispatcher(g_handle, "velora-blur:lyrics-beat");
+    g_lyricsBeats.clear();
+    HyprlandAPI::removeDispatcher(g_handle, "velora-blur:bar-refraction");
+    HyprlandAPI::removeDispatcher(g_handle, "velora-blur:terminal-bar-match");
+    HyprlandAPI::removeDispatcher(g_handle, "velora-blur:terminal-follow-bar");
+    HyprlandAPI::removeDispatcher(g_handle, "velora-blur:terminal-brightness");
+    HyprlandAPI::removeDispatcher(g_handle, "velora-blur:bar-brightness");
+    HyprlandAPI::removeDispatcher(g_handle, "velora-blur:terminal-glass-control");
     if (g_pEventManager)
         g_pEventManager->postEvent({"velora-blur", "unloaded"});
     if (g_causticsTimer && g_pEventLoopManager)
         g_pEventLoopManager->removeTimer(g_causticsTimer);
     g_causticsTimer.reset();
+    if (g_wallpaperTimer && g_pEventLoopManager) g_pEventLoopManager->removeTimer(g_wallpaperTimer);
+    g_wallpaperTimer.reset();
+    HyprlandAPI::removeDispatcher(g_handle, "velora-blur:wallpaper-transition");
+    clearWallpaperTransition();
+    if (Render::GL::g_pHyprOpenGL) Render::GL::g_pHyprOpenGL->makeEGLCurrent();
+    g_wallpaperShader.reset();
+    g_opticalBlurShader.reset();
+    g_opticalBlurBuffers.clear();
+
     HyprlandAPI::removeDispatcher(g_handle, "velora-blur:lock-layout");
     HyprlandAPI::removeDispatcher(g_handle, "velora-blur:appearance");
     HyprlandAPI::removeDispatcher(g_handle, "velora-blur:settings-connected");
@@ -3045,11 +4356,16 @@ APICALL EXPORT void PLUGIN_EXIT() {
     if (g_statusCommand)
         HyprlandAPI::unregisterHyprCtlCommand(g_handle, g_statusCommand);
     g_statusCommand.reset();
-    if ((g_liquidShader || g_desktopShader) && Render::GL::g_pHyprOpenGL) {
+    g_kittyIdentities.clear();
+    if ((g_liquidShader || g_desktopShader || g_terminalShader) && Render::GL::g_pHyprOpenGL) {
         Render::GL::g_pHyprOpenGL->makeEGLCurrent();
         g_clearBackdrop.reset();
         g_frameBackdrops.clear();
+        g_frameFusionBackdrops.clear();
         g_liquidShader.reset();
         g_desktopShader.reset();
+        g_terminalShader.reset();
+        g_terminalBarShader.reset();
+        g_terminalBackdrops.clear();
     }
 }

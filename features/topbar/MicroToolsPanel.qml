@@ -12,7 +12,7 @@ Loader {
     required property var actions
     readonly property bool interactionHeld: item ? item.popupOpen === true : false
     sourceComponent: ({cat: catPanel, caffeine: caffeinePanel, usb: usbPanel, thing: thingPanel,
-        notes: notesPanel, search: searchPanel, controls: controlsPanel})[type] || null
+        notes: notesPanel})[type] || null
     component Label: Text {
         color: root.theme.textPrimary; font.family: root.theme.bodyFont; font.pixelSize: 12
         elide: Text.ElideRight
@@ -104,16 +104,11 @@ Loader {
     }
     Component {
         id: thingPanel
-        ColumnLayout {
-            spacing: 10
-            Heading { text: "One Thing" }
-            Field {
-                text: root.system.oneThing; placeholderText: "What is the one thing?"
-                maximumLength: 200; Accessible.name: "Texto fixo na barra"
-                onTextEdited: root.system.oneThing=text
-            }
-            Detail { Layout.fillWidth: true; text: root.system.saveError || (root.system.saving ? "Salvando…" : "Seu foco permanece visível na barra. Salvo automaticamente.") }
-            Item { Layout.fillHeight: true }
+        Field {
+            objectName: "topbarFocusEditor"
+            text: root.system.oneThing; placeholderText: "Seu foco…"
+            maximumLength: 200; Accessible.name: "Texto fixo na barra"
+            onTextEdited: root.system.oneThing=text
         }
     }
     Component {
@@ -185,47 +180,6 @@ Loader {
                 BarAction { theme: root.theme; text: "☐ To-do"; onClicked: { noteEditor.forceActiveFocus(); noteEditor.insert(noteEditor.cursorPosition, "\n☐ ") } }
                 Detail { Layout.fillWidth: true; horizontalAlignment: Text.AlignRight; text: root.system.saveError || (root.system.saving ? "Salvando…" : "Salvo localmente") }
             }
-        }
-    }
-    Component {
-        id: searchPanel
-        ColumnLayout {
-            spacing: 10
-            Heading { text: "Buscar" }
-            Field {
-                id: search; placeholderText: "Aplicativos…"; Accessible.name: "Buscar aplicativos"
-                onTextEdited: results.currentIndex=0
-                Keys.onDownPressed: results.currentIndex=Math.min(results.count-1,results.currentIndex+1)
-                Keys.onUpPressed: results.currentIndex=Math.max(0,results.currentIndex-1)
-                onAccepted: if(results.currentItem) results.currentItem.launch()
-            }
-            ListView {
-                id: results
-                Layout.fillWidth: true; Layout.fillHeight: true; clip: true; spacing: 4
-                model: DesktopEntries.applications.values.filter(app => !app.noDisplay && (app.name+" "+app.genericName).toLowerCase().includes(search.text.toLowerCase())).sort((a,b)=>a.name.localeCompare(b.name)).slice(0,40)
-                currentIndex: 0
-                delegate: BarAction {
-                    required property var modelData
-                    required property int index
-                    width: ListView.view.width; theme: root.theme; text: modelData.name
-                    highlighted: ListView.isCurrentItem
-                    function launch() { modelData.execute(); root.controller.close() }
-                    onClicked: launch()
-                }
-                Detail { anchors.centerIn: parent; visible: parent.count===0; text: "Nenhum aplicativo encontrado" }
-                ScrollBar.vertical: ScrollBar {}
-            }
-        }
-    }
-    Component {
-        id: controlsPanel
-        ColumnLayout {
-            spacing: 10
-            Heading { text: "Controles" }
-            BarAction { Layout.fillWidth: true; theme: root.theme; text: root.system.caffeineActive ? "Manter acordado · ativo" : "Manter acordado"; highlighted: root.system.caffeineActive; onClicked: root.system.caffeineActive ? root.system.stopAwake() : root.system.keepAwake(0) }
-            BarAction { Layout.fillWidth: true; theme: root.theme; text: root.system.catAnimation ? "Animação do gato · ligada" : "Animação do gato · desligada"; onClicked: root.system.catAnimation=!root.system.catAnimation }
-            BarAction { Layout.fillWidth: true; theme: root.theme; text: "Configurações do Velora…"; onClicked: { root.controller.close(); root.actions.openSettings() } }
-            Item { Layout.fillHeight: true }
         }
     }
 }

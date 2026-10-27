@@ -10,15 +10,33 @@ state_dir=${XDG_CACHE_HOME:-$HOME/.cache}/velora-shell
 state_file=$state_dir/current_wallpaper
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 controller=$script_dir/velora-mpvpaper-control
+mkdir -p "$state_dir" "$runtime_dir/velora-shell"
+source "$script_dir/wallpaper-transition.sh"
+transition=fade
 transition_duration=0.26
+if [ -x "$script_dir/velora-theme-state" ]; then
+  IFS='|' read -r transition transition_duration _ < <("$script_dir/velora-theme-state" wallpaper-transition get)
+fi
+case "$transition" in
+  fade|wave|wipe|grow|outer) ;;
+  random) effects=(wave grow outer); transition="${effects[RANDOM % 3]}" ;;
+  *) transition=fade ;;
+esac
+transition_duration=$(awk -v duration="$transition_duration" 'BEGIN {
+  if (duration !~ /^[0-9]+([.][0-9]+)?$/) duration=.26;
+  if (duration<.15) duration=.15; if(duration>3) duration=3;
+  printf "%.3f",duration;
+}')
+# Coordinate profile changes with requests from the wallpaper picker.
+exec 9>"$state_dir/wallpaper-apply.lock"
+flock 9
+trap wallpaper_transition_cancel EXIT
 color_options="video-output-levels=full target-colorspace-hint=no target-prim=bt.709 target-trc=srgb saturation=0 brightness=0 contrast=0 gamma=0"
 
 case "${wallpaper_path,,}" in
   *.mp4|*.webm|*.mkv|*.mov) wallpaper_kind=live ;;
   *) wallpaper_kind=static ;;
 esac
-
-mkdir -p "$state_dir" "$runtime_dir/velora-shell"
 
 write_state() {
   local preview=${2:-$1}
@@ -117,9 +135,11 @@ stop_live_backend() {
 }
 
 apply_static() {
+  local backend_transition="$transition"
+  [ "$wallpaper_wave_prepared" -eq 0 ] || backend_transition=none
   if command -v awww >/dev/null 2>&1 && command -v awww-daemon >/dev/null 2>&1; then
     start_awww
-    awww img "$wallpaper_path" --transition-type fade \
+    awww img "$wallpaper_path" --transition-type "$backend_transition" \
       --transition-duration "$transition_duration" --transition-fps 60
     # awww owns the prepared frame now. Retire only our persistent live units;
     # the old wallpaper remains visible until the replacement is committed.
@@ -134,7 +154,7 @@ apply_static() {
       nohup swww-daemon >/tmp/velora-shell-swww.log 2>&1 9>&- &
       sleep 0.12
     fi
-    swww img "$wallpaper_path" --transition-type fade \
+    swww img "$wallpaper_path" --transition-type "$backend_transition" \
       --transition-duration "$transition_duration"
     sleep 0.04
     stop_live_backend
@@ -232,8 +252,20 @@ if equivalent_to_current; then
     fi
   fi
   write_state "$wallpaper_path" "$wallpaper_path"
-elif [ "$wallpaper_kind" = live ]; then
-  apply_live
 else
-  apply_static
+  old_kind="" old_path="" old_preview=""
+  if [ -s "$state_file" ]; then
+    IFS='|' read -r old_kind old_path old_preview < "$state_file" || true
+  fi
+  live_engine=$("$script_dir/velora-theme-state" wallpaper-live-transition get 2>/dev/null || printf shader)
+  if { [ "$wallpaper_kind" = live ] && [ "$live_engine" = shader ]; } \
+      || { [ "$wallpaper_kind" = static ] && { [ "$old_kind" = live ] || [ "$old_kind" = mpv ]; }; }; then
+    wallpaper_transition_prepare "$old_kind" "$old_path" "$transition" "$transition_duration" || true
+  fi
+  if [ "$wallpaper_kind" = live ]; then
+    apply_live
+  else
+    apply_static
+  fi
+  wallpaper_transition_reveal || true
 fi

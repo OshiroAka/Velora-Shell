@@ -7,6 +7,7 @@ Slider {
     property color accent: ink
     property bool reducedMotion: false
     property real handleSize: 14
+    property real trackHeight: 4
     readonly property real overflow: pressed && pointer.active
         ? pointer.point.position.x < leftPadding ? pointer.point.position.x - leftPadding
         : pointer.point.position.x > width - rightPadding ? pointer.point.position.x - width + rightPadding : 0 : 0
@@ -25,7 +26,7 @@ Slider {
     PointHandler { id: pointer; target: null; acceptedButtons: Qt.LeftButton }
     background: Item {
         x: root.leftPadding; y: (root.height - height) / 2
-        width: root.availableWidth; height: 4
+        width: root.availableWidth; height: root.trackHeight
         Rectangle {
             x: Math.min(0, root.overdrag)
             width: parent.width + Math.abs(root.overdrag); height: parent.height; radius: 2

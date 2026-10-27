@@ -118,6 +118,10 @@ def main(argv=None):
             return outcome('BLOCKED_MISSING_DEPENDENCIES')
         if requirements['packages'] and not install_packages(requirements['packages'], args):
             return outcome('BLOCKED_MISSING_DEPENDENCIES')
+        if 'velyrics-font' in requirements.get('sourceFeatures', []):
+            print('Fonte obrigatória VeLyrics: baixa Pixelon da página do autor e instala no diretório de fontes do usuário.')
+            if command([sys.executable, str(ROOT / 'scripts/install-velyrics-font')]).returncode:
+                return outcome('BLOCKED_MISSING_DEPENDENCIES', 'Pixelon não instalada; VeLyrics não está pronto.')
         if 'pywal16' in requirements.get('sourceFeatures', []):
             print('Efeito: instala pywal16 3.8.15 do PyPI (hash verificado) em ~/.local/share/velora-shell/runtime/pywal; Python do sistema preservado.')
             if not approve('Autoriza a instalação privada do pywal16?', args.install_pywal, args.non_interactive):

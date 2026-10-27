@@ -5,6 +5,7 @@ import Quickshell
 import Quickshell.Wayland
 import Quickshell.Hyprland
 import "../features/topbar" as TopBarFeature
+import "../components" as Components
 
 Variants {
     id: root
@@ -32,6 +33,11 @@ Variants {
     property real barWavePhase: 0
     property bool barOnRight: false
     property bool nativeBarMaterial: false
+    property var edgeMediaPanels: ({})
+    property var edgeFullHeightPanels: ({})
+    readonly property real desktopMorphProgress: notificationSource ? notificationSource.infiniteDesktopMorphProgress : 0
+    readonly property real desktopTargetReveal: notificationSource ? notificationSource.infiniteDesktopTargetReveal : 0
+    readonly property real desktopRailRemaining: notificationSource ? notificationSource.infiniteDesktopRailRemaining : 1
     readonly property int sidebarRailWidth: 64
     readonly property int screenCornerRadius: 24
 
@@ -74,7 +80,13 @@ Variants {
         function popoverState() {
             return { mounted: popover.mounted, anchor: popover.anchorX,
                 x: popover.panelRect.x, y: popover.panelRect.y,
-                width: popover.panelRect.width, height: popover.panelRect.height }
+                width: popover.panelRect.width, height: popover.panelRect.height,
+                timerAlert: { suppressed: timerAlert.suppressed, visible: timerAlert.visible,
+                    reveal: timerAlert.reveal, width: timerAlert.width, height: timerAlert.height },
+                charging: { connected: chargingMorph.charging, anchorAvailable: chargingMorph.anchorAvailable,
+                    suppressed: chargingMorph.suppressed, bodyDismissed: chargingMorph.bodyDismissed,
+                    presenting: chargingMorph.presenting, reveal: chargingMorph.reveal,
+                    progress: chargingMorph.gradientProgress, strength: chargingMorph.gradientStrength } }
         }
         function keyboardState() {
             return { mode: WlrLayershell.keyboardFocus, active: popover.Window.active,
@@ -98,9 +110,14 @@ Variants {
             }
 
             Region {
-                item: executionIndicator.notificationMode && executionIndicator.mounted
+                item: executionIndicator.notificationMode && executionIndicator.visible
                     ? executionIndicator : null
                 radius: executionIndicator.cornerRadius
+                intersection: Intersection.Combine
+            }
+            Region {
+                item: timerAlert.visible ? timerAlert : null
+                radius: timerAlert.cornerRadius
                 intersection: Intersection.Combine
             }
 
@@ -133,14 +150,24 @@ Variants {
                 && statusRect.x + statusRect.width <= width
                 && statusRect.y >= 0 && statusRect.y + statusRect.height <= height
                 ? statusRect : Qt.rect(0, 0, 0, 0)
+            const c = chargingMorph.surfaceRect
+            const t = timerAlert.surfaceRect
             const values = [stripHeight / height, p.x / width, p.y / height,
                 p.width / width, p.height / height, anchor / width,
                 neck / width, radius / width, join / width,
                 s.x / width, s.y / height, s.width / width, s.height / height,
                 0.5, executionIndicator.neckHalfWidth / width,
-                executionIndicator.cornerRadius / width, executionIndicator.joinRadius / width]
+                executionIndicator.cornerRadius / width, executionIndicator.joinRadius / width,
+                c.x / width, c.y / height, c.width / width, c.height / height,
+                chargingMorph.anchorX / width, chargingMorph.neckHalfWidth / width,
+                chargingMorph.cornerRadius / width, chargingMorph.joinRadius / width,
+                chargingMorph.gradientProgress, chargingMorph.gradientStrength,
+                t.x / width, t.y / height, t.width / width, t.height / height,
+                timerAlert.anchorX / width, timerAlert.neckHalfWidth / width,
+                timerAlert.cornerRadius / width, timerAlert.joinRadius / width,
+                timerAlert.anchorX / width, root.timerService.alertPhase, root.timerService.alertStrength]
             Platform.NativeBlur.dispatch("velora-blur:topbar-connected " + screen.name + " "
-                + (root.config.barMaterial === "liquid" || root.nativeBarMaterial ? 1 : 0) + " "
+                + (["liquid", "liquid-glass"].includes(root.config.barMaterial) || root.nativeBarMaterial ? 1 : 0) + " "
                 + values.map(value => Number(value).toFixed(8)).join(" "))
         }
         property bool surfaceDirty: true
@@ -169,7 +196,9 @@ Variants {
             visible: root.config.referenceAppearance
             width: topbarWindow.width
             height: Math.max(topbarWindow.stripHeight, popover.panelRect.y + popover.panelRect.height + 12,
-                executionIndicator.mounted ? executionIndicator.y + executionIndicator.height + 12 : 0)
+                executionIndicator.mounted ? executionIndicator.y + executionIndicator.height + 12 : 0,
+                timerAlert.visible ? timerAlert.y + timerAlert.height + 12 : 0,
+                chargingMorph.visible ? chargingMorph.y + chargingMorph.height + 12 : 0)
             barHeight: topbarWindow.stripHeight
             panelRect: popover.panelRect
             anchorX: popover.anchorX
@@ -179,9 +208,36 @@ Variants {
             executionNeck: executionIndicator.neckHalfWidth
             executionRadius: executionIndicator.cornerRadius
             executionJoin: executionIndicator.joinRadius
+            chargingRect: chargingMorph.surfaceRect
+            chargingAnchor: chargingMorph.anchorX
+            chargingNeck: chargingMorph.neckHalfWidth
+            chargingRadius: chargingMorph.cornerRadius
+            chargingJoin: chargingMorph.joinRadius
+            chargingProgress: chargingMorph.gradientProgress
+            chargingStrength: chargingMorph.gradientStrength
+            timerAnchor: timerAlert.anchorX
+            timerRect: timerAlert.surfaceRect
+            timerNeck: timerAlert.neckHalfWidth
+            timerRadius: timerAlert.cornerRadius
+            timerJoin: timerAlert.joinRadius
+            timerProgress: root.timerService.alertPhase
+            timerStrength: root.timerService.alertStrength
             fillColor: root.nativeBarMaterial ? "transparent" : root.theme.barSurface
-            lineColor: root.config.barMaterial === "liquid" || root.nativeBarMaterial ? "transparent" : root.theme.borderSubtle
+            lineColor: ["liquid", "liquid-glass"].includes(root.config.barMaterial) || root.nativeBarMaterial ? "transparent" : root.theme.borderSubtle
             onNeckHalfWidthChanged: topbarWindow.surfaceDirty = true
+        }
+        Components.VeloraMediaBackdrop {
+            readonly property var edgePanel: root.edgeMediaPanels[topbarWindow.modelData.name] || null
+            x: topbarWindow.width - width - (edgePanel ? edgePanel.railWidth : 0)
+            width: edgePanel ? edgePanel.bodyWidth : 0
+            height: topbarWindow.stripHeight
+            z: 1
+            visible: !!edgePanel && edgePanel.page === "media" && width > 0
+            opacity: edgePanel ? edgePanel.contentReveal : 0
+            source: visible && root.media.hasPlayer ? root.media.artUrl : ""
+            artworkHeight: Math.min(650, Math.max(280, (edgePanel ? Math.max(640, edgePanel.targetHeight) : 0) * .64)) + 40
+            topInset: 0
+            animated: !root.motion.reduced
         }
         MouseArea {
             id: outsideInput
@@ -193,12 +249,13 @@ Variants {
         }
         TopBarFeature.ConnectedPopover {
             id: popover
-            leftInset: root.barOnRight ? 8 : root.sidebarRailWidth + 8
-            rightInset: root.barOnRight ? root.sidebarRailWidth + 8 : 8
+            leftInset: root.barOnRight ? 8 : root.sidebarRailWidth * root.desktopRailRemaining + 8
+            rightInset: root.barOnRight ? root.sidebarRailWidth * root.desktopRailRemaining + 8 : 8
             z: 3
             width: topbarWindow.width
             height: topbarWindow.height
             host: topbarWindow
+            shell: root.notificationSource
             motionTokens: root.motion
             controller: root.controller; config: root.config; theme: root.theme
             status: root.status; system: root.system; timerService: root.timerService
@@ -247,12 +304,57 @@ Variants {
             }
         }
 
+        TopBarFeature.TimerAlertMorph {
+            id: timerAlert
+            z: 5
+            theme: root.theme
+            service: root.timerService
+            reducedMotion: root.config.reducedMotion
+            suppressed: popover.mounted || !!root.edgeFullHeightPanels[topbarWindow.modelData.name]
+            barHeight: topbarWindow.stripHeight
+            availableWidth: topbarWindow.width
+            leftInset: popover.leftInset
+            rightInset: popover.rightInset
+            anchorX: Math.max(leftInset, Math.min(topbarWindow.width - rightInset,
+                barLoader.item ? barLoader.item.timerAnchorX : topbarWindow.width / 2))
+            onSurfaceRectChanged: topbarWindow.surfaceDirty = true
+            onNeckHalfWidthChanged: topbarWindow.surfaceDirty = true
+            onAnchorXChanged: topbarWindow.surfaceDirty = true
+        }
+        Connections {
+            target: root.timerService
+            function onAlertPhaseChanged() { topbarWindow.surfaceDirty = true }
+            function onAlertStrengthChanged() { topbarWindow.surfaceDirty = true }
+        }
+
+        TopBarFeature.ChargingMorph {
+            id: chargingMorph
+            z: 1
+            theme: root.theme
+            charging: root.config.referenceAppearance && root.status.hasBattery && root.status.batteryCharging
+            anchorAvailable: !!barLoader.item && barLoader.item.batteryAnchorVisible
+            suppressed: !!root.edgeFullHeightPanels[topbarWindow.modelData.name]
+            percentage: root.status.batteryPercent
+            reducedMotion: root.config.reducedMotion
+            barHeight: topbarWindow.stripHeight
+            anchorX: Math.max(leftInset, Math.min(topbarWindow.width - rightInset,
+                barLoader.item ? barLoader.item.batteryAnchorX : 0))
+            availableWidth: topbarWindow.width
+            availableHeight: topbarWindow.height
+            leftInset: popover.leftInset
+            rightInset: popover.rightInset
+            onSurfaceRectChanged: topbarWindow.surfaceDirty = true
+            onNeckHalfWidthChanged: topbarWindow.surfaceDirty = true
+            onGradientProgressChanged: topbarWindow.surfaceDirty = true
+            onGradientStrengthChanged: topbarWindow.surfaceDirty = true
+        }
+
         Rectangle {
             id: sidebarSeamBridge
             z: 2
             x: root.barOnRight ? topbarWindow.width - root.sidebarRailWidth : 0
             y: topbarWindow.stripHeight
-            width: root.sidebarRailWidth
+            width: root.sidebarRailWidth * root.desktopRailRemaining
             height: 3
             color: root.config.referenceAppearance ? "transparent" : root.theme.barSurface
         }
@@ -309,6 +411,9 @@ Variants {
         Component {
             id: referenceComponent
             TopBarFeature.ReferenceBar {
+                shell: root.notificationSource
+                desktopMorphProgress: root.desktopMorphProgress
+                desktopTargetReveal: root.desktopTargetReveal
                 onGeometryChanged: Qt.callLater(popover.refreshAnchor)
                 controller: root.controller; host: topbarWindow
                 system: root.system; timerService: root.timerService

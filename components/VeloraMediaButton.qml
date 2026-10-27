@@ -15,9 +15,6 @@ AbstractButton {
     implicitHeight: implicitWidth
     hoverEnabled: true
     Accessible.name: hint
-    ToolTip.visible: hovered && hint.length > 0
-    ToolTip.text: hint
-    ToolTip.delay: 700
     background: Rectangle {
         radius: root.cornerRadius
         color: root.primary ? root.accent : Qt.rgba(root.ink.r, root.ink.g, root.ink.b, root.down ? 0.15 : root.hovered ? 0.10 : root.highlighted ? 0.06 : 0)

@@ -34,16 +34,9 @@ Item {
     readonly property var motionEmphasizedCurve: theme ? theme.motionEmphasizedCurve : [0.05, 0, 0.133, 0.06, 0.166, 0.4, 0.208, 0.82, 0.25, 1, 1, 1]
 
     property date currentDate: new Date()
-    property var alarms: [
-        { time: "07:00", detail: "Weekday", enabled: true },
-        { time: "08:30", detail: "Weekend", enabled: true },
-        { time: "22:00", detail: "Daily", enabled: true }
-    ]
-    property string lastAlarmMinute: ""
     property int timerSeconds: 1800
     property int timerRemaining: 1800
     property bool timerRunning: false
-    readonly property var clockAlarms: clockState ? clockState.alarms : alarms
     readonly property date clockCurrentDate: clockState ? clockState.currentDate : currentDate
     readonly property int clockTimerSeconds: clockState ? clockState.timerSeconds : timerSeconds
     readonly property int clockTimerRemaining: clockState ? clockState.timerRemaining : timerRemaining
@@ -96,95 +89,6 @@ Item {
         const m = Math.floor((safe % 3600) / 60)
         const s = safe % 60
         return String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0")
-    }
-
-    function alarmAt(index) {
-        if (index >= 0 && index < clockAlarms.length)
-            return clockAlarms[index]
-        return { time: "07:00", detail: "", enabled: false }
-    }
-
-    function setAlarmList(next) {
-        if (clockState)
-            clockState.replaceAlarms(next)
-        else {
-            alarms = next
-            lastAlarmMinute = ""
-        }
-    }
-
-    function setAlarmEnabled(index, enabled) {
-        if (index < 0 || index >= clockAlarms.length)
-            return
-        var next = clockAlarms.slice()
-        var item = Object.assign({}, next[index])
-        item.enabled = enabled
-        next[index] = item
-        setAlarmList(next)
-    }
-
-    function alarmTime(index) {
-        return alarmAt(index).time || "07:00"
-    }
-
-    function addAlarm() {
-        if (clockState) {
-            clockState.addAlarm()
-            return
-        }
-        var d = new Date(clockCurrentDate.getTime() + 60 * 60 * 1000)
-        var next = clockAlarms.slice()
-        next.push({
-            time: String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0"),
-            detail: "Custom",
-            enabled: true
-        })
-        setAlarmList(next)
-    }
-
-    function shiftAlarmMinutes(index, delta) {
-        if (clockState) {
-            clockState.shiftAlarmMinutes(index, delta)
-            return
-        }
-        if (index < 0 || index >= clockAlarms.length)
-            return
-        var item = Object.assign({}, clockAlarms[index])
-        var parts = String(item.time || "07:00").split(":")
-        var total = ((parseInt(parts[0]) || 0) * 60 + (parseInt(parts[1]) || 0) + delta + 1440) % 1440
-        item.time = String(Math.floor(total / 60)).padStart(2, "0") + ":" + String(total % 60).padStart(2, "0")
-        var next = clockAlarms.slice()
-        next[index] = item
-        setAlarmList(next)
-    }
-
-    function removeAlarm(index) {
-        if (clockState) {
-            clockState.removeAlarm(index)
-            return
-        }
-        if (clockAlarms.length <= 1 || index < 0 || index >= clockAlarms.length)
-            return
-        var next = clockAlarms.slice()
-        next.splice(index, 1)
-        setAlarmList(next)
-    }
-
-    function checkAlarms() {
-        if (clockState) {
-            clockState.checkAlarms()
-            return
-        }
-        const hhmm = Qt.formatTime(clockCurrentDate, "HH:mm")
-        const dayKey = Qt.formatDate(clockCurrentDate, "yyyyMMdd") + "-" + hhmm
-        for (var i = 0; i < clockAlarms.length; ++i) {
-            if (alarmAt(i).enabled && hhmm === alarmTime(i) && lastAlarmMinute !== dayKey) {
-                lastAlarmMinute = dayKey
-                notifyProcess.command = ["bash", "-lc", "notify-send 'Velora' 'Alarm " + alarmTime(i) + "' >/dev/null 2>&1 || true"]
-                notifyProcess.running = true
-                break
-            }
-        }
     }
 
     function adjustTimerSeconds(delta) {
@@ -307,10 +211,7 @@ Item {
         running: !root.clockState && root.detailType === "clock"
         repeat: true
         triggeredOnStart: true
-        onTriggered: {
-            root.currentDate = new Date()
-            root.checkAlarms()
-        }
+        onTriggered: root.currentDate = new Date()
     }
 
     Timer {
@@ -397,11 +298,9 @@ Item {
         const lang = root.theme ? root.theme.language : "pt-BR"
         const texts = {
             "ja": {
-                "clockTitle": "クロック / アラーム",
-                "nextAlarm": "次のアラーム",
+                "clockTitle": "クロック / タイマー",
                 "timer": "タイマー",
                 "customTimer": "カスタムタイマー",
-                "addAlarm": "アラームを追加",
                 "paintTitle": "画筆",
                 "paintSub": "自由線",
                 "brushSize": "ブラシサイズ",
@@ -426,18 +325,12 @@ Item {
                 "live": "MPV",
                 "engine": "Engine",
                 "noWallpapers": "壁紙なし",
-                "applying": "適用中...",
-                "weekday": "平日",
-                "weekend": "週末",
-                "daily": "毎日",
-                "custom": "カスタム"
+                "applying": "適用中..."
             },
             "en": {
-                "clockTitle": "Clock / Alarm",
-                "nextAlarm": "Next alarm",
+                "clockTitle": "Clock / Timer",
                 "timer": "Timer",
                 "customTimer": "Custom timer",
-                "addAlarm": "Add alarm",
                 "paintTitle": "Paint",
                 "paintSub": "Free draw",
                 "brushSize": "Brush size",
@@ -462,18 +355,12 @@ Item {
                 "live": "MPV",
                 "engine": "Engine",
                 "noWallpapers": "No wallpapers",
-                "applying": "Applying...",
-                "weekday": "Weekday",
-                "weekend": "Weekend",
-                "daily": "Daily",
-                "custom": "Custom"
+                "applying": "Applying..."
             },
             "pt-BR": {
-                "clockTitle": "Relogio / Alarme",
-                "nextAlarm": "Proximo alarme",
+                "clockTitle": "Relogio / Timer",
                 "timer": "Timer",
                 "customTimer": "Timer customizado",
-                "addAlarm": "Adicionar alarme",
                 "paintTitle": "Desenhar",
                 "paintSub": "Traco livre",
                 "brushSize": "Tamanho do pincel",
@@ -498,28 +385,11 @@ Item {
                 "live": "MPV",
                 "engine": "Engine",
                 "noWallpapers": "Sem wallpapers",
-                "applying": "Aplicando...",
-                "weekday": "Dia útil",
-                "weekend": "Fim de semana",
-                "daily": "Todo dia",
-                "custom": "Customizado"
+                "applying": "Aplicando..."
             }
         }
         const table = texts[lang] || texts["pt-BR"]
         return table[key] || texts["pt-BR"][key] || key
-    }
-
-    function alarmDetailLabel(detail) {
-        const value = String(detail || "").toLowerCase()
-        if (value === "weekday")
-            return tr("weekday")
-        if (value === "weekend")
-            return tr("weekend")
-        if (value === "daily")
-            return tr("daily")
-        if (value === "custom")
-            return tr("custom")
-        return detail || ""
     }
 
     ClockDetail {
@@ -797,34 +667,6 @@ Item {
             }
 
             Card {
-                Layout.preferredHeight: 210
-                delay: 60
-
-                LabelText { text: root.tr("nextAlarm") }
-
-                Repeater {
-                    model: root.clockAlarms
-
-                    AlarmRow {
-                        required property int index
-                        required property var modelData
-
-                        alarmIndex: index
-                        timeText: modelData.time
-                        detailText: root.alarmDetailLabel(modelData.detail)
-                        checked: modelData.enabled
-                    }
-                }
-
-                SoftButton {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 34
-                    label: "+ " + root.tr("addAlarm")
-                    onClicked: root.addAlarm()
-                }
-            }
-
-            Card {
                 Layout.preferredHeight: 106
                 delay: 110
 
@@ -873,54 +715,6 @@ Item {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 210
             }
-        }
-    }
-
-    component AlarmRow: RowLayout {
-        id: alarmRow
-
-        property int alarmIndex: 0
-        property string timeText: ""
-        property string detailText: ""
-        property bool checked: true
-
-        Layout.fillWidth: true
-        spacing: 10
-
-        LabelText {
-            text: parent.timeText
-            font.family: root.monoFont
-            font.pixelSize: 16
-        }
-        SmallText {
-            Layout.fillWidth: true
-            text: parent.detailText
-            horizontalAlignment: Text.AlignRight
-        }
-        SoftButton {
-            Layout.preferredWidth: 30
-            Layout.preferredHeight: 24
-            label: "-"
-            onClicked: root.shiftAlarmMinutes(alarmRow.alarmIndex, -1)
-        }
-        SoftButton {
-            Layout.preferredWidth: 30
-            Layout.preferredHeight: 24
-            label: "+"
-            onClicked: root.shiftAlarmMinutes(alarmRow.alarmIndex, 1)
-        }
-        Toggle {
-            checked: alarmRow.checked
-            onClicked: function(value) {
-                root.setAlarmEnabled(alarmRow.alarmIndex, value)
-            }
-        }
-        SoftButton {
-            Layout.preferredWidth: 28
-            Layout.preferredHeight: 24
-            label: "×"
-            enabled: root.clockAlarms.length > 1
-            onClicked: root.removeAlarm(alarmRow.alarmIndex)
         }
     }
 

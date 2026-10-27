@@ -64,7 +64,18 @@ Scope {
     property real topbarGap: 4
     property real topbarMargin: 8
     property string barMaterial: "glass"
+    property string barIndependentMaterial: "glass"
     property string liquidGlassStyle: "frosted"
+    property real barRefractionStrength: 1.0
+    readonly property string barRefractionKey: barMaterial === "liquid-glass"
+        ? "bar.opticalRefractionStrength" : "bar.refractionStrength"
+    property real barBrightness: 1.0
+    property bool barMatchKittyMaterial: false
+    property bool infiniteDesktopTopbarEnabled: true
+    property bool terminalLiquidEnabled: true
+    property bool terminalFollowBar: false
+    property real terminalBarBrightness: 1.0
+    property real terminalRefraction: 1.0
     property bool barBlurEnabled: true
     property real barOpacity: 0.52
     property real barWaveStrength: 0.28
@@ -449,13 +460,22 @@ Scope {
         wallpaperDimming = limitedNumber(resolved, "desktop.wallpaperDimming", 0, 0, 1)
         wallpaperSelectorGlassEnabled = Boolean(valueAt(resolved, "desktop.wallpaperSelectorGlassEnabled", true))
         widgetBlurEnabled = Boolean(valueAt(resolved, "lockPreview.sharedWidgets.blurEnabled", true))
-        barBlurEnabled = Boolean(valueAt(resolved, "bar.blurEnabled", true))
+        barMatchKittyMaterial = Boolean(valueAt(resolved, "bar.matchKittyMaterial", false))
+        infiniteDesktopTopbarEnabled = Boolean(valueAt(resolved, "bar.infiniteDesktopTopbarEnabled", true))
+        barBlurEnabled = barMatchKittyMaterial || Boolean(valueAt(resolved, "bar.blurEnabled", true))
         const requestedBarMaterial = String(valueAt(
             resolved, "bar.material", "glass"))
-        barMaterial = ["solid", "glass", "liquid"].includes(requestedBarMaterial)
+        barIndependentMaterial = ["solid", "glass", "liquid", "liquid-glass"].includes(requestedBarMaterial)
             ? requestedBarMaterial : "glass"
+        barMaterial = barMatchKittyMaterial ? "liquid" : barIndependentMaterial
         const requestedLiquidStyle = String(valueAt(resolved, "bar.liquidStyle", "frosted"))
         liquidGlassStyle = ["clear", "frosted"].includes(requestedLiquidStyle) ? requestedLiquidStyle : "frosted"
+        barRefractionStrength = limitedNumber(resolved, barRefractionKey, 1.0, 0, 10)
+        barBrightness = limitedNumber(resolved, "bar.brightness", 1.0, .2, 1.2)
+        terminalLiquidEnabled = Boolean(valueAt(resolved, "appearance.terminalLiquidEnabled", true))
+        terminalFollowBar = !barMatchKittyMaterial && Boolean(valueAt(resolved, "appearance.terminalFollowBar", false))
+        terminalBarBrightness = limitedNumber(resolved, "appearance.terminalBarBrightness", 1.0, .8, 1.2)
+        terminalRefraction = limitedNumber(resolved, "appearance.terminalRefraction", 1.0, 0, 3)
         barOpacity = limitedNumber(resolved, "bar.opacity", 0.52, 0.08, 0.96)
         barWaveStrength = limitedNumber(
             resolved, "bar.waveStrength", 0.28, 0, 1)
@@ -1111,8 +1131,9 @@ Scope {
     function setBarAppearance(material, waveStrength) {
         const requested = String(material || barMaterial)
         let next = isObject(userData) ? clone(userData) : ({})
+        if (requested !== "liquid") next = setAt(next, "bar.matchKittyMaterial", false)
         next = setAt(next, "bar.material",
-            ["solid", "glass", "liquid"].includes(requested)
+            ["solid", "glass", "liquid", "liquid-glass"].includes(requested)
                 ? requested : "glass")
         next = setAt(next, "bar.waveStrength", Math.max(0,
             Math.min(1, Number(waveStrength === undefined
@@ -1589,6 +1610,10 @@ Scope {
     function setValue(path, value) {
         let next = isObject(userData) ? clone(userData) : ({})
         next.schemaVersion = supportedSchemaVersion
+        if (value && path === "appearance.terminalFollowBar")
+            next = setAt(next, "bar.matchKittyMaterial", false)
+        if (value && path === "bar.matchKittyMaterial")
+            next = setAt(next, "appearance.terminalFollowBar", false)
         userData = setAt(next, path, value)
         recompute()
         saveTimer.restart()
@@ -1608,6 +1633,10 @@ Scope {
             blurStrength: blurStrength,
             contrast: appearanceContrast,
             reflection: reflectionStrength,
+            terminalLiquidEnabled: terminalLiquidEnabled,
+            terminalFollowBar: terminalFollowBar,
+            terminalBarBrightness: terminalBarBrightness,
+            terminalRefraction: terminalRefraction,
             accentMode: accentMode,
             pywalTone: pywalTone,
             accentColor: String(accentColor),
@@ -1933,7 +1962,9 @@ Scope {
         next = setAt(next, "topbar.scale", topbarScale)
         next = setAt(next, "topbar.gap", topbarGap)
         next = setAt(next, "topbar.margin", topbarMargin)
-        next = setAt(next, "bar.material", barMaterial)
+        next = setAt(next, "bar.material", barIndependentMaterial)
+        next = setAt(next, barRefractionKey, barRefractionStrength)
+        next = setAt(next, "bar.brightness", barBrightness)
         next = setAt(next, "bar.opacity", barOpacity)
         next = setAt(next, "bar.waveStrength", barWaveStrength)
         userData = next

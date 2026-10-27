@@ -3,12 +3,9 @@
 import argparse
 import json
 import os
-import random
-import re
 import select
 import socket
 import sys
-import tempfile
 import time
 
 
@@ -334,87 +331,6 @@ def set_property(socket_paths: list[str], name: str, value: object, timeout: flo
     return success
 
 
-def prepare_overlay(socket_paths: list[str], shader_path: str, position_ms: int, timeout: float) -> bool:
-    try:
-        position_seconds = max(0.0, float(position_ms) / 1000.0)
-    except (TypeError, ValueError):
-        position_seconds = 0.0
-
-    if not os.path.isfile(shader_path):
-        return False
-    if not set_property(socket_paths, "time-pos", position_seconds, timeout):
-        return False
-    time.sleep(0.04)
-    return set_property(socket_paths, "glsl-shaders", [os.path.abspath(shader_path)], timeout)
-
-
-def make_shader(template_path: str, output_path: str, duration: float, fps: float, state_path: str, transition: str) -> bool:
-    directions = (
-        (1.0, 0.0),
-        (-1.0, 0.0),
-        (0.0, 1.0),
-        (0.0, -1.0),
-        (1.0, 1.0),
-        (1.0, -1.0),
-        (-1.0, 1.0),
-        (-1.0, -1.0),
-    )
-    try:
-        with open(template_path, "r", encoding="utf-8") as handle:
-            shader = handle.read()
-    except OSError:
-        return False
-
-    last_direction = -1
-    try:
-        with open(state_path, "r", encoding="utf-8") as handle:
-            last_direction = int(handle.read().strip())
-    except (OSError, ValueError):
-        pass
-
-    choices = [index for index in range(len(directions)) if index != last_direction]
-    direction_index = random.SystemRandom().choice(choices)
-    direction_x, direction_y = directions[direction_index]
-    phase = random.SystemRandom().uniform(0.0, 6.283185307179586)
-    duration_frames = max(9.0, min(600.0, duration * fps))
-    transition_mode = {"wave": 0.0, "grow": 1.0, "outer": 2.0}.get(transition, 0.0)
-
-    replacements = {
-        "VELORA_DURATION_FRAMES": f"const float veloraDurationFrames = {duration_frames:.3f}; // VELORA_DURATION_FRAMES",
-        "VELORA_DIRECTION_X": f"const float veloraDirectionX = {direction_x:.1f}; // VELORA_DIRECTION_X",
-        "VELORA_DIRECTION_Y": f"const float veloraDirectionY = {direction_y:.1f}; // VELORA_DIRECTION_Y",
-        "VELORA_WAVE_PHASE": f"const float veloraWavePhase = {phase:.6f}; // VELORA_WAVE_PHASE",
-        "VELORA_TRANSITION_MODE": f"const float veloraTransitionMode = {transition_mode:.1f}; // VELORA_TRANSITION_MODE",
-    }
-    for marker, replacement in replacements.items():
-        shader, count = re.subn(rf"^const float .* // {marker}$", replacement, shader, count=1, flags=re.MULTILINE)
-        if count != 1:
-            return False
-
-    output_dir = os.path.dirname(os.path.abspath(output_path))
-    state_dir = os.path.dirname(os.path.abspath(state_path))
-    try:
-        os.makedirs(output_dir, exist_ok=True)
-        os.makedirs(state_dir, exist_ok=True)
-        output_fd, temporary_output = tempfile.mkstemp(prefix=".wave-", suffix=".glsl", dir=output_dir)
-        with os.fdopen(output_fd, "w", encoding="utf-8") as handle:
-            handle.write(shader)
-        os.replace(temporary_output, output_path)
-
-        state_fd, temporary_state = tempfile.mkstemp(prefix=".direction-", dir=state_dir)
-        with os.fdopen(state_fd, "w", encoding="utf-8") as handle:
-            handle.write(f"{direction_index}\n")
-        os.replace(temporary_state, state_path)
-    except OSError:
-        return False
-
-    print(f"DIRECTION_INDEX={direction_index}")
-    print(f"DIRECTION_X={direction_x:.1f}")
-    print(f"DIRECTION_Y={direction_y:.1f}")
-    print(f"PHASE={phase:.6f}")
-    return True
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description="Coordinate persistent mpvpaper instances for Velora Shell.")
     action = parser.add_mutually_exclusive_group(required=True)
@@ -422,22 +338,11 @@ def main() -> int:
     action.add_argument("--load", metavar="PATH", help="load a wallpaper in the existing mpv instances")
     action.add_argument("--wait-ready", action="store_true", help="wait until every mpv output has video parameters")
     action.add_argument("--play", action="store_true", help="unpause every mpv instance")
-    action.add_argument("--prepare-overlay", nargs=2, metavar=("SHADER", "POSITION_MS"), help="seek a hidden overlay and make its transition shader visible")
-    action.add_argument("--make-shader", nargs=2, metavar=("TEMPLATE", "OUTPUT"), help="generate a randomized wave shader")
     parser.add_argument("--timeout", type=float, default=2.5)
-    parser.add_argument("--duration", type=float, default=1.0)
-    parser.add_argument("--fps", type=float, default=60.0)
-    parser.add_argument("--transition", choices=("wave", "grow", "outer"), default="wave")
-    parser.add_argument("--direction-state", default=os.path.expanduser("~/.cache/velora-shell/wallpaper-wave-direction"))
     parser.add_argument("socket", nargs="*", help="mpv IPC socket paths")
     args = parser.parse_args()
 
     timeout = min(8.0, max(0.25, args.timeout))
-    if args.make_shader:
-        template_path, output_path = args.make_shader
-        duration = min(10.0, max(0.15, args.duration))
-        fps = min(240.0, max(10.0, args.fps))
-        return 0 if make_shader(template_path, output_path, duration, fps, args.direction_state, args.transition) else 4
     if not args.socket:
         parser.error("at least one socket is required for this action")
     if args.describe:
@@ -446,9 +351,6 @@ def main() -> int:
         return 0 if load_file(args.socket, os.path.abspath(args.load), timeout) else 2
     if args.play:
         return 0 if set_pause(args.socket, False, timeout) else 5
-    if args.prepare_overlay:
-        shader_path, position_ms = args.prepare_overlay
-        return 0 if prepare_overlay(args.socket, shader_path, int(position_ms), timeout) else 6
     return 0 if wait_ready(args.socket, timeout) else 3
 
 

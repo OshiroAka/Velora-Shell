@@ -17,9 +17,12 @@ FocusScope {
     property real preferredHeight: 268
     property Component customContent: null
     property real contentPadding: 16
-    property real contentMinimumWidth: preferredWidth - 2 * contentPadding
-    property real contentMinimumHeight: preferredHeight - 2 * contentPadding
+    property real contentSlideX: 0
+    property real contentSlideY: -6
+    property real contentMinimumWidth: (embedded ? width : preferredWidth) - 2 * contentPadding
+    property real contentMinimumHeight: (embedded ? height : preferredHeight) - 2 * contentPadding
     property bool extraHovered: false
+    property bool embedded: false
     property var extension: null
     property bool closeOnLeave: true
     property bool rightSide: false
@@ -41,12 +44,12 @@ FocusScope {
     property real handoffFromWidth: 0
     property real handoffFromHeight: 0
     property real handoffFromY: 0
-    readonly property real targetWidth: Math.min(preferredWidth, Math.max(0, width - railWidth - 16))
-    readonly property real targetHeight: Math.min(preferredHeight, Math.max(0, height - 2 * verticalMargin))
-    readonly property real bodyWidth: Math.min(Math.max(0, width - railWidth - 16), handoffActive ? (handoffFromWidth + (targetWidth - handoffFromWidth) * handoffProgress) * reveal : targetWidth * reveal)
-    readonly property real bodyHeight: fullHeightSurface ? targetHeight : Math.min(Math.max(0, height - 2 * verticalMargin), handoffActive ? 34 + (handoffFromHeight + (targetHeight - handoffFromHeight) * handoffProgress - 34) * reveal : 34 + (targetHeight - 34) * reveal)
+    readonly property real targetWidth: embedded ? width : Math.min(preferredWidth, Math.max(0, width - railWidth - 16))
+    readonly property real targetHeight: embedded ? height : Math.min(preferredHeight, Math.max(0, height - 2 * verticalMargin))
+    readonly property real bodyWidth: embedded ? width : Math.min(Math.max(0, width - railWidth - 16), handoffActive ? (handoffFromWidth + (targetWidth - handoffFromWidth) * handoffProgress) * reveal : targetWidth * reveal)
+    readonly property real bodyHeight: embedded ? height : fullHeightSurface ? targetHeight : Math.min(Math.max(0, height - 2 * verticalMargin), handoffActive ? 34 + (handoffFromHeight + (targetHeight - handoffFromHeight) * handoffProgress - 34) * reveal : 34 + (targetHeight - 34) * reveal)
     readonly property real targetY: Math.max(verticalMargin, Math.min(height - targetHeight - verticalMargin, anchorY - targetHeight / 2))
-    readonly property real bodyY: fullHeightSurface ? targetY : Math.max(verticalMargin, Math.min(height - bodyHeight - verticalMargin, handoffActive ? handoffFromY + (targetY - handoffFromY) * handoffProgress : anchorY - bodyHeight / 2))
+    readonly property real bodyY: embedded ? 0 : fullHeightSurface ? targetY : Math.max(verticalMargin, Math.min(height - bodyHeight - verticalMargin, handoffActive ? handoffFromY + (targetY - handoffFromY) * handoffProgress : anchorY - bodyHeight / 2))
     readonly property var outline: ({visible: mounted, y: bodyY, width: bodyWidth, height: bodyHeight, extension: extension})
     property alias maskItem: presenceArea
     readonly property bool panelHovered: presence.hovered || extraHovered
@@ -62,6 +65,10 @@ FocusScope {
         updatePresence()
     }
     onEnabledChanged: if (!enabled) close()
+    Component.onCompleted: if (embedded) {
+        closeOnLeave = false
+        mounted = true; opened = true; reveal = 1; contentReveal = 1
+    }
 
     function updatePresence() {
         if ((triggerHovered && !blocked) || panelHovered || panelHeld) {
@@ -129,6 +136,8 @@ FocusScope {
         if (opened) { blocked = triggerHovered; close() }
         else { blocked = false; open() }
     }
+    // Custom page transitions own their content fade until their morph ends.
+    function holdContentEntrance() { contentDelay.stop(); entering.stop() }
     Keys.onEscapePressed: { blocked = triggerHovered; close() }
     Timer { id: enterDelay; interval: root.motion.intent; onTriggered: root.open() }
     Timer { id: leaveDelay; interval: root.motion.leaveGrace; onTriggered: if (root.closeOnLeave && !root.triggerHovered && !root.panelHovered && !root.panelHeld) root.close() }
@@ -145,10 +154,10 @@ FocusScope {
     Item {
         id: presenceArea
         // Include the rail's edge and the curved join while crossing to buttons.
-        x: root.rightSide ? root.width - root.railWidth - root.bodyWidth : root.railWidth - 16
-        y: root.bodyY - 12
-        width: root.mounted ? root.bodyWidth + 16 : 0
-        height: root.mounted ? root.bodyHeight + 24 : 0
+        x: root.embedded ? 0 : root.rightSide ? root.width - root.railWidth - root.bodyWidth : root.railWidth - 16
+        y: root.embedded ? 0 : root.bodyY - 12
+        width: root.mounted ? root.bodyWidth + (root.embedded ? 0 : 16) : 0
+        height: root.mounted ? root.bodyHeight + (root.embedded ? 0 : 24) : 0
         visible: root.mounted
         HoverHandler { id: presence; blocking: false }
         PointHandler { id: hold; acceptedButtons: Qt.LeftButton | Qt.RightButton }
@@ -160,12 +169,14 @@ FocusScope {
             onPressed: mouse => mouse.accepted = true
         }
         Item {
-            x: root.rightSide ? 0 : 16; y: 12
+            x: root.embedded || root.rightSide ? 0 : 16; y: root.embedded ? 0 : 12
             width: root.bodyWidth; height: root.bodyHeight
             clip: true
             Flickable {
                 id: contentViewport
-                x: root.contentPadding; y: root.contentPadding - (1 - root.contentReveal) * 6
+                objectName: "railContentViewport"
+                x: root.contentPadding + (1 - root.contentReveal) * root.contentSlideX
+                y: root.contentPadding + (1 - root.contentReveal) * root.contentSlideY
                 width: Math.max(0, root.targetWidth - 2 * root.contentPadding); height: Math.max(0, root.targetHeight - 2 * root.contentPadding)
                 contentWidth: Math.max(width, root.contentMinimumWidth)
                 contentHeight: Math.max(height, root.contentMinimumHeight)
