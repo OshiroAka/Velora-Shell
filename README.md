@@ -6,6 +6,8 @@
 
 You can customize the top bar, widgets, panels, colors, and wallpapers. The project also includes audio, brightness, network, and Bluetooth controls, media features, and optional Spotify and WhatsApp integrations.
 
+![Velora Shell - Linux Desktop](assets/preview.png)
+
 ## Installation
 
 Open a terminal **inside an active Hyprland session** and run:
