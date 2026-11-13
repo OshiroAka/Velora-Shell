@@ -1,0 +1,141 @@
+#!/usr/bin/env python3
+"""Wallpaper surface selection and persisted, contrast-checked palette variations."""
+from __future__ import annotations
+import colorsys
+import hashlib
+import json
+import os
+from pathlib import Path
+import random
+import sys
+from PIL import Image
+
+
+def rgb(value):
+    return tuple(int(value.lstrip('#')[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def color(value):
+    return '#' + ''.join(f'{max(0, min(255, round(c))):02x}' for c in value)
+
+
+def mix(a, b, amount):
+    return tuple(x + (y - x) * amount for x, y in zip(a, b))
+
+
+def luminance(value):
+    channels = [c / 3294.6 if c <= 10.31475 else ((c / 255 + .055) / 1.055) ** 2.4 for c in value]
+    return sum(c * w for c, w in zip(channels, (.2126, .7152, .0722)))
+
+
+def contrast(a, b):
+    x, y = sorted((luminance(a), luminance(b)))
+    return (y + .05) / (x + .05)
+
+
+def readable(value, background, minimum=4.5):
+    target = (0, 0, 0) if contrast(background, (0, 0, 0)) >= contrast(background, (255, 255, 255)) else (255, 255, 255)
+    for step in range(101):
+        result = tuple(round(c) for c in mix(value, target, step / 100))
+        if contrast(result, background) >= minimum:
+            return result
+    return target
+
+
+def candidates(image_path, tone):
+    with Image.open(image_path) as source:
+        image = source.convert('RGB')
+        image.thumbnail((192, 192), Image.Resampling.LANCZOS)
+        indexed = image.quantize(colors=24, method=Image.Quantize.MEDIANCUT)
+        palette = indexed.getpalette()
+        histogram = sorted(indexed.getcolors(), reverse=True)
+    result = []
+    for count, index in histogram:
+        value = tuple(palette[index * 3:index * 3 + 3])
+        lum = luminance(value)
+        if tone == 'light' and lum < .20:
+            continue
+        if tone == 'dark' and lum > .18:
+            continue
+        # Avoid variants that are visually indistinguishable.
+        if any(sum((a-b)**2 for a,b in zip(value, rgb(item['color']))) < 28**2 for item in result):
+            continue
+        result.append({'color': color(value), 'weight': count})
+    if not result:
+        value = tuple(palette[histogram[0][1]*3:histogram[0][1]*3+3])
+        value = mix(value, (255,255,255) if tone == 'light' else (0,0,0), .55)
+        result.append({'color': color(value), 'weight': histogram[0][0]})
+    if tone == 'dark' and not any(item['color'] == '#000000' for item in result):
+        result.append({'color': '#000000', 'weight': max(1, result[0]['weight'] // 3)})
+    return result
+
+
+def build(document, image_path, tone, previous=None, shuffle=False, rng=None):
+    rng = rng or random.SystemRandom()
+    options = candidates(image_path, tone)
+    if previous and not shuffle:
+        surface = previous
+    else:
+        choices = [item for item in options if item['color'] != previous] or options
+        # A monochrome image still offers two sensible tonal variations.
+        if shuffle and len(choices) == 1 and choices[0]['color'] == previous:
+            value = mix(rgb(previous), (255,255,255) if tone == 'light' else (0,0,0), .18)
+            choices = [{'color': color(value), 'weight': 1}]
+        surface = rng.choices(choices, weights=[item['weight'] ** .5 for item in choices])[0]['color'] if shuffle else choices[0]['color']
+    bg = rgb(surface)
+    fg = readable((25, 24, 26) if luminance(bg) > .179 else (246, 244, 241), bg, 7)
+    muted = readable(mix(fg, bg, .26), bg, 4.5)
+    velora = document.setdefault('velora', {})
+    accents = [rgb(document['colors'][f'color{i}']) for i in range(1,7)]
+    # Nearby wallpaper hues keep each variation coherent; contrast is measured
+    # against the actual surface, not the light/dark preference.
+    h = colorsys.rgb_to_hsv(*(v / 255 for v in bg))[0]
+    accents.sort(key=lambda c: abs((colorsys.rgb_to_hsv(*(v/255 for v in c))[0] - h + .5) % 1 - .5))
+    primary = readable(accents[0], bg, 3)
+    secondary = readable(accents[min(2, len(accents)-1)], bg, 3)
+    velora.update(exactSurface=True, primary=color(primary), secondary=color(secondary),
+                  soft=color(readable(mix(primary, fg, .22), bg, 3)), muted=color(muted),
+                  surfaces=[item['color'] for item in options])
+    document['special'].update(background=surface, foreground=color(fg), cursor=color(primary))
+    document['colors'].update(color0=surface, color7=color(fg), color8=color(muted), color15=color(fg))
+    for index in (*range(1, 7), *range(9,15)):
+        document['colors'][f'color{index}'] = color(readable(rgb(document['colors'][f'color{index}']), bg, 3))
+    return document
+
+
+def atomic(path, document):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + '.next')
+    temporary.write_text(json.dumps(document, ensure_ascii=False, indent=2) + '\n')
+    temporary.replace(path)
+
+
+def main():
+    image, palette_path, source, tone, cache, operation = sys.argv[1:]
+    cache = Path(cache)
+    document = json.loads(Path(palette_path).read_text())
+    key = hashlib.sha256((source + '\0' + tone).encode()).hexdigest()
+    state_path = cache / 'surface-choices.json'
+    try:
+        state = json.loads(state_path.read_text())
+    except (FileNotFoundError, ValueError):
+        state = {}
+    document = build(document, image, tone, state.get(key), operation == 'shuffle')
+    document.update(wallpaper=source, tone=tone)
+    state[key] = document['special']['background']
+    atomic(state_path, state)
+    atomic(Path(palette_path), document)
+    if operation == 'shuffle':
+        from pywal import export, sequences
+        wal_cache = Path(os.environ.get('XDG_CACHE_HOME', str(Path.home() / '.cache'))) / 'wal'
+        wal_cache.mkdir(parents=True, exist_ok=True)
+        document.setdefault('checksum', key)
+        document.setdefault('alpha', '100')
+        export.every(document, str(wal_cache))
+        atomic(wal_cache / 'colors.json', document)
+        sequences.send(document, cache_dir=str(wal_cache))
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

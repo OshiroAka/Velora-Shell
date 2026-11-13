@@ -1,0 +1,19 @@
+{
+  "name": "velora-whatsapp-client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local WhatsApp chat, pairing and media bridge for Velora Shell",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "baileys": "7.0.0-rc14",
+    "pino": "10.3.1",
+    "qrcode": "1.5.4",
+    "sharp": "0.35.5"
+  }
+}

@@ -1,0 +1,232 @@
+#!/usr/bin/env python3
+"""Emit a lightweight GLava-like spectrum for Velora Shell.
+
+The helper deliberately produces a compact logarithmic spectrum. QML resamples
+the values to the number of bars required by each visible component. Keeping
+the FFT and transport small is considerably cheaper than building a dense
+BAR_COUNT x FFT_SIZE sampling matrix for every frame.
+"""
+
+from __future__ import annotations
+
+import os
+import queue
+import shutil
+import signal
+import subprocess
+import sys
+import threading
+import time
+from pathlib import Path
+
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+
+try:
+    import numpy as np
+except Exception:
+    np = None
+
+
+def integer_arg(index: int, default: int, minimum: int, maximum: int) -> int:
+    try:
+        value = int(sys.argv[index])
+    except (IndexError, TypeError, ValueError):
+        value = default
+    return max(minimum, min(maximum, value))
+
+
+# More display bars are produced by QML interpolation. The analyzer itself is
+# capped so wide monitors do not multiply audio work and text IPC traffic.
+BAR_COUNT = min(96, integer_arg(1, 96, 32, 512))
+FRAME_RATE = integer_arg(2, 60, 12, 60)
+TARGET_HEIGHT = integer_arg(3, 46, 12, 240)
+
+SAMPLE_RATE = 16000
+FFT_SIZE = 2048
+CHUNK_FRAMES = max(128, int(round(SAMPLE_RATE / float(FRAME_RATE))))
+MIN_FREQUENCY = 35.0
+MAX_FREQUENCY = min(7600.0, SAMPLE_RATE * 0.475)
+ATTACK = 0.72
+RELEASE = 0.20
+NOISE_FLOOR = 0.035
+AMPLIFY = 1.72
+
+RUNNING = True
+CAPTURE_PROCESS: subprocess.Popen[bytes] | None = None
+
+
+def stop(_signum: int, _frame: object) -> None:
+    global RUNNING
+    RUNNING = False
+    if CAPTURE_PROCESS is not None and CAPTURE_PROCESS.poll() is None:
+        CAPTURE_PROCESS.terminate()
+
+
+def fallback_to_cava() -> None:
+    fallback = Path(__file__).with_name("velora-cava")
+    if fallback.exists() and os.access(fallback, os.X_OK):
+        os.execv(str(fallback), [str(fallback), str(BAR_COUNT), str(FRAME_RATE)])
+    raise SystemExit(1)
+
+
+def main() -> int:
+    global CAPTURE_PROCESS
+
+    if np is None or shutil.which("parec") is None:
+        fallback_to_cava()
+
+    signal.signal(signal.SIGINT, stop)
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGHUP, stop)
+
+    capture_command = [
+        "parec",
+        "--device=@DEFAULT_MONITOR@",
+        "--raw",
+        f"--rate={SAMPLE_RATE}",
+        "--format=float32le",
+        "--channels=2",
+        f"--latency={CHUNK_FRAMES * 2 * 4 * 2}",
+        f"--process-time={CHUNK_FRAMES * 2 * 4}",
+        "--client-name=velora-glava-spectrum",
+        "--stream-name=Velora GLava spectrum",
+    ]
+
+    try:
+        CAPTURE_PROCESS = subprocess.Popen(
+            capture_command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            bufsize=0,
+        )
+    except OSError:
+        fallback_to_cava()
+
+    captured_chunks: queue.Queue[bytes] = queue.Queue(maxsize=8)
+    capture_finished = threading.Event()
+
+    def collect_audio() -> None:
+        assert CAPTURE_PROCESS is not None
+        assert CAPTURE_PROCESS.stdout is not None
+        read_size = CHUNK_FRAMES * 2 * 4
+        try:
+            while RUNNING:
+                payload = CAPTURE_PROCESS.stdout.read(read_size)
+                if not payload:
+                    break
+                try:
+                    captured_chunks.put_nowait(payload)
+                except queue.Full:
+                    try:
+                        captured_chunks.get_nowait()
+                    except queue.Empty:
+                        pass
+                    try:
+                        captured_chunks.put_nowait(payload)
+                    except queue.Full:
+                        pass
+        finally:
+            capture_finished.set()
+
+    capture_thread = threading.Thread(
+        target=collect_audio,
+        name="velora-glava-capture",
+        daemon=True,
+    )
+    capture_thread.start()
+
+    audio_buffer = np.zeros(FFT_SIZE, dtype=np.float32)
+    window = np.hanning(FFT_SIZE).astype(np.float32)
+    fft_bins = np.fft.rfftfreq(FFT_SIZE, 1.0 / SAMPLE_RATE)
+    target_frequencies = np.geomspace(
+        MIN_FREQUENCY,
+        MAX_FREQUENCY,
+        BAR_COUNT,
+    ).astype(np.float32)
+    smoothed = np.zeros(BAR_COUNT, dtype=np.float32)
+    pending_payload = b""
+    previous_encoded: np.ndarray | None = None
+    skipped_frames = 0
+    frame_interval = 1.0 / float(FRAME_RATE)
+    next_frame = time.monotonic()
+
+    try:
+        while RUNNING:
+            now = time.monotonic()
+            if now < next_frame:
+                time.sleep(next_frame - now)
+                now = time.monotonic()
+            elif now - next_frame > frame_interval * 2:
+                next_frame = now
+            next_frame += frame_interval
+
+            payloads: list[bytes] = []
+            while True:
+                try:
+                    payloads.append(captured_chunks.get_nowait())
+                except queue.Empty:
+                    break
+
+            if payloads:
+                pending_payload += b"".join(payloads)
+                usable_bytes = len(pending_payload) // 8 * 8
+                if usable_bytes:
+                    interleaved = np.frombuffer(
+                        pending_payload[:usable_bytes],
+                        dtype="<f4",
+                    )
+                    pending_payload = pending_payload[usable_bytes:]
+                    frames = interleaved.reshape((-1, 2))
+                    mono = frames.mean(axis=1, dtype=np.float32)
+                    frame_count = min(mono.size, FFT_SIZE)
+                    if frame_count < FFT_SIZE:
+                        audio_buffer[:-frame_count] = audio_buffer[frame_count:]
+                    audio_buffer[-frame_count:] = mono[-frame_count:]
+            elif capture_finished.is_set() and CAPTURE_PROCESS.poll() is not None:
+                break
+
+            spectrum = np.abs(np.fft.rfft(audio_buffer * window))
+            spectrum = np.log1p(spectrum).astype(np.float32)
+            peak = float(spectrum.max())
+            if peak > 0.0001:
+                spectrum /= peak
+
+            bars = np.interp(target_frequencies, fft_bins, spectrum).astype(np.float32)
+            bars = np.maximum(0.0, bars - NOISE_FLOOR) * AMPLIFY
+            np.clip(bars, 0.0, 1.0, out=bars)
+            rising = bars >= smoothed
+            smoothed[rising] += (bars[rising] - smoothed[rising]) * ATTACK
+            smoothed[~rising] += (bars[~rising] - smoothed[~rising]) * RELEASE
+
+            encoded = np.rint(smoothed * 1000.0).astype(np.int16)
+            if previous_encoded is not None and np.max(np.abs(encoded - previous_encoded)) <= 1:
+                skipped_frames += 1
+                if skipped_frames < max(2, FRAME_RATE // 12):
+                    continue
+            skipped_frames = 0
+            previous_encoded = encoded.copy()
+
+            try:
+                sys.stdout.write(";".join(str(int(value)) for value in encoded) + ";\n")
+                sys.stdout.flush()
+            except BrokenPipeError:
+                return 0
+    finally:
+        if CAPTURE_PROCESS is not None:
+            if CAPTURE_PROCESS.poll() is None:
+                CAPTURE_PROCESS.terminate()
+                try:
+                    CAPTURE_PROCESS.wait(timeout=0.8)
+                except subprocess.TimeoutExpired:
+                    CAPTURE_PROCESS.kill()
+            CAPTURE_PROCESS = None
+
+    if RUNNING:
+        fallback_to_cava()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

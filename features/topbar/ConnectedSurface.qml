@@ -1,0 +1,44 @@
+import QtQuick
+
+ShaderEffect {
+    property real barHeight: 40
+    property rect panelRect: Qt.rect(0, 0, 0, 0)
+    // Optional execution status shares this fill/stroke with the original menu.
+    property rect executionRect: Qt.rect(0, 0, 0, 0)
+    property real executionAnchor: 0
+    property real executionNeck: 0
+    property real executionRadius: 18
+    property real executionJoin: 8
+    property rect chargingRect: Qt.rect(0, 0, 0, 0)
+    property real chargingAnchor: 0
+    property real chargingNeck: 0
+    property real chargingRadius: 28
+    property real chargingJoin: 8
+    property real chargingProgress: 1
+    property real chargingStrength: 0
+    property real timerAnchor: 0
+    property rect timerRect: Qt.rect(0, 0, 0, 0)
+    property real timerNeck: 0
+    property real timerRadius: 18
+    property real timerJoin: 8
+    readonly property vector4d timerPanel: Qt.vector4d(timerRect.x, timerRect.y, timerRect.width, timerRect.height)
+    readonly property vector4d timerMetrics: Qt.vector4d(barHeight, timerAnchor, timerNeck, timerJoin)
+    property real timerProgress: 0
+    property real timerStrength: 0
+    readonly property vector4d timerLight: Qt.vector4d(timerAnchor, barHeight, timerProgress, timerStrength)
+    readonly property vector4d chargingLight: Qt.vector4d(chargingAnchor, barHeight, chargingProgress, chargingStrength)
+    readonly property vector4d chargingPanel: Qt.vector4d(chargingRect.x, chargingRect.y, chargingRect.width, chargingRect.height)
+    readonly property vector4d chargingMetrics: Qt.vector4d(barHeight, chargingAnchor, chargingNeck, chargingJoin)
+    readonly property vector4d executionPanel: Qt.vector4d(executionRect.x, executionRect.y, executionRect.width, executionRect.height)
+    readonly property vector4d executionMetrics: Qt.vector4d(barHeight, executionAnchor, executionNeck, executionJoin)
+    property real anchorX: 0
+    property real neckHalfWidth: 120
+    property real panelRadius: 18
+    property real panelJoin: 8
+    property color fillColor: "transparent"
+    property color lineColor: "transparent"
+    readonly property vector2d surfaceSize: Qt.vector2d(width, height)
+    readonly property vector4d panel: Qt.vector4d(panelRect.x, panelRect.y, panelRect.width, panelRect.height)
+    readonly property vector4d shapeMetrics: Qt.vector4d(barHeight, anchorX, neckHalfWidth, panelJoin)
+    fragmentShader: Qt.resolvedUrl("../../shaders/topbar-connected.frag.qsb")
+}

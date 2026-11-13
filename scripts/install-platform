@@ -1,0 +1,158 @@
+#!/usr/bin/env python3
+"""Provision Arch packages and user package managers before desktop validation."""
+import os
+import json
+from pathlib import Path
+import shutil
+import subprocess
+import tempfile
+
+# Required session infrastructure, including packages whose D-Bus services have no CLI.
+SESSION_PACKAGES = ('base-devel', 'git', 'curl', 'ca-certificates', 'kitty',
+    'pipewire', 'pipewire-pulse', 'wireplumber', 'networkmanager', 'upower',
+    'xdg-utils', 'xdg-desktop-portal-hyprland', 'xdg-desktop-portal-gtk',
+    'hyprpolkitagent', 'qt6-imageformats', 'ttf-dejavu', 'flatpak')
+AUR_FALLBACK = frozenset(('yay', 'paru', 'mpvpaper', 'awww', 'quickshell'))
+FLATHUB = 'https://flathub.org/repo/flathub.flatpakrepo'
+
+
+def arch_system():
+    values = {}
+    for line in Path('/etc/os-release').read_text().splitlines():
+        if '=' in line:
+            key, value = line.split('=', 1)
+            values[key] = value.strip('"\'')
+    return 'arch' in (values.get('ID', '') + ' ' + values.get('ID_LIKE', '')).split()
+
+
+def run(argv, **kwargs):
+    return subprocess.run(argv, text=True, **kwargs)
+
+
+def capture(argv):
+    return run(argv, capture_output=True)
+
+
+def managers(args):
+    return ('yay', 'paru') if args.aur_helper == 'both' else (args.aur_helper,)
+
+
+def missing_packages(args):
+    if not shutil.which('pacman') or not arch_system():
+        return []
+    packages = list(SESSION_PACKAGES) + list(managers(args))
+    return [p for p in packages if capture(['pacman', '-T', p]).returncode != 0]
+
+
+def privileged(argv):
+    if os.geteuid() == 0:
+        raise RuntimeError('Execute ./install.sh como usuário normal com sudo configurado; AUR não pode ser compilado como root.')
+    if not shutil.which('sudo'):
+        raise RuntimeError('sudo ausente. Como root instale sudo e configure seu usuário no sudoers; depois execute como usuário normal.')
+    return ['sudo', *argv]
+
+
+def checked(argv, **kwargs):
+    if run(argv, **kwargs).returncode:
+        raise RuntimeError('Comando falhou: ' + ' '.join(argv))
+
+
+def repository_package(package):
+    return capture(['pacman', '-Si', '--', package]).returncode == 0
+
+
+def bootstrap_helper(name, args):
+    if shutil.which(name):
+        if capture([name, '--version']).returncode:
+            raise RuntimeError(name + ' instalado, mas incompatível; reconstrua após atualizar pacman/libalpm.')
+        return
+    if repository_package(name):
+        checked(privileged(['pacman', '-S', '--needed', '--noconfirm', name]))
+    else:
+        # Source PKGBUILD, built as the current user. makepkg installs build deps via sudo.
+        with tempfile.TemporaryDirectory(prefix='velora-aur-') as temporary:
+            destination = Path(temporary) / name
+            checked(['git', 'clone', '--depth=1', 'https://aur.archlinux.org/' + name + '.git', str(destination)])
+            print('AUR: ' + name + '\n' + (destination / 'PKGBUILD').read_text())
+            if not args.non_interactive:
+                if input('Compilar este PKGBUILD? [s/N] ').strip().lower() not in ('s', 'sim', 'y', 'yes'):
+                    raise RuntimeError('Compilação AUR cancelada: ' + name)
+            checked(['makepkg', '-si', '--needed', '--noconfirm'], cwd=destination)
+    if not shutil.which(name) or capture([name, '--version']).returncode:
+        raise RuntimeError('Instalação de ' + name + ' não produziu um helper funcional.')
+
+
+def provision(packages, args, approve):
+    if not arch_system() or not shutil.which('pacman'):
+        raise RuntimeError('Instalação automática suporta Arch Linux e derivados com pacman. Outras distribuições exigem pacotes equivalentes; yay/paru são exclusivos do Arch.')
+    # Validate privilege prerequisites before any writes/downloads.
+    privileged(['true'])
+    print('Preparação Arch: atualização completa (-Syu), dependências, ' + ', '.join(managers(args)) + ' e Flatpak/Flathub do usuário.')
+    print('AUR compila PKGBUILDs como usuário normal. --install-deps autoriza este plano em modo não interativo.')
+    if not approve('Autoriza a preparação acima?', args.install_deps, args.non_interactive):
+        return False
+    # Refresh and upgrade together; never pacman -Sy followed by a partial upgrade.
+    checked(privileged(['pacman', '-Syu', '--needed', '--noconfirm', 'base-devel', 'git', 'ca-certificates']))
+    official, aur = [], []
+    for package in sorted(set(packages)):
+        if repository_package(package): official.append(package)
+        elif package in AUR_FALLBACK: aur.append(package)
+        else: raise RuntimeError('Pacote ausente dos repositórios habilitados: ' + package + '. Confira mirrors/repositórios; não foi enviado automaticamente ao AUR.')
+    if official:
+        checked(privileged(['pacman', '-S', '--needed', '--noconfirm', *official]))
+    for name in managers(args): bootstrap_helper(name, args)
+    remaining = [p for p in aur if p not in managers(args)]
+    if remaining:
+        checked([managers(args)[0], '-S', '--needed', '--noconfirm', '--', *remaining])
+    ensure_flathub()
+    return True
+
+
+def flathub_ready():
+    if not shutil.which('flatpak'): return False
+    result = capture(['flatpak', 'remotes', '--user', '--columns=name'])
+    return result.returncode == 0 and 'flathub' in result.stdout.splitlines()
+
+
+def ensure_flathub():
+    # --if-not-exists preserves existing remote settings and is idempotent.
+    checked(['flatpak', 'remote-add', '--user', '--if-not-exists', 'flathub', FLATHUB])
+    if not flathub_ready(): raise RuntimeError('Flathub do usuário não ficou disponível.')
+
+
+def session_pending():
+    pending = []
+    if capture(['systemctl', '--user', 'is-active', 'hyprpolkitagent.service']).returncode:
+        pending.append('Agente polkit: use --enable-session-services ou preserve seu agente existente; autostart gerenciado no próximo login')
+    for unit in ('NetworkManager.service', 'upower.service'):
+        if capture(['systemctl', 'is-active', unit]).returncode:
+            pending.append(unit + ' inativo; confira o serviço antes de usar os controles correspondentes')
+    if capture(['systemctl', '--user', 'is-active', 'pipewire.socket', 'pipewire-pulse.socket', 'wireplumber.service']).returncode:
+        pending.append('Áudio PipeWire/WirePlumber: faça novo login e confira systemctl --user status pipewire pipewire-pulse wireplumber')
+    return pending
+
+
+def enable_services():
+    # Do not disrupt an existing network manager, audio server or authentication agent.
+    if capture(['systemctl', 'is-active', 'NetworkManager.service']).returncode:
+        for unit in ('systemd-networkd.service', 'connman.service', 'iwd.service', 'dhcpcd.service'):
+            if capture(['systemctl', 'is-active', unit]).returncode == 0:
+                raise RuntimeError(unit + ' ativo; configure a rede antes de habilitar NetworkManager. Nenhum gestor foi parado.')
+        checked(privileged(['systemctl', 'enable', '--now', 'NetworkManager.service']))
+    if capture(['systemctl', '--user', 'is-active', 'pulseaudio.service']).returncode == 0:
+        raise RuntimeError('PulseAudio ativo; migre para PipeWire antes de ativar seus serviços. Áudio atual preservado.')
+    checked(['systemctl', '--user', 'enable', '--now', 'pipewire.socket', 'pipewire-pulse.socket', 'wireplumber.service'])
+    if capture(['pgrep', '-u', str(os.getuid()), '-f', '(^|/)(polkit-gnome-authentication-agent-1|polkit-kde-authentication-agent-1|mate-polkit|lxqt-policykit-agent)( |$)']).returncode:
+        checked(['systemctl', '--user', 'enable', '--now', 'hyprpolkitagent.service'])
+
+
+def compositor_changed():
+    if not os.environ.get('HYPRLAND_INSTANCE_SIGNATURE'): return False
+    installed = capture(['Hyprland', '--version-json'])
+    running = capture(['hyprctl', '-j', 'version'])
+    if installed.returncode or running.returncode: return False
+    try:
+        disk, live = json.loads(installed.stdout), json.loads(running.stdout)
+        return any(disk.get(key) and live.get(key) and disk[key] != live[key] for key in ('commit', 'version'))
+    except (ValueError, TypeError):
+        return False

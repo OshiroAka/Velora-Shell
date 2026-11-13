@@ -1,0 +1,197 @@
+#!/usr/bin/env python3
+import json
+import os
+import sys
+import time
+from pathlib import Path
+
+
+def state_path() -> Path:
+    base = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local" / "state")
+    return base / "velora-shell" / "events.json"
+
+
+def labels_path() -> Path:
+    base = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local" / "state")
+    return base / "velora-shell" / "labels.json"
+
+
+DEFAULT_LABELS = [
+    {
+        "id": "label-work",
+        "name": "Trabalho",
+        "description": "Reuniões, prazos e atividades relacionadas ao trabalho.",
+        "accent": "blue",
+        "iconName": "box",
+    },
+    {
+        "id": "label-personal",
+        "name": "Pessoal",
+        "description": "Compromissos pessoais, tarefas e atividades do dia a dia.",
+        "accent": "green",
+        "iconName": "box",
+    },
+    {
+        "id": "label-study",
+        "name": "Estudos",
+        "description": "Aulas, provas, trabalhos e atividades acadêmicas.",
+        "accent": "purple",
+        "iconName": "box",
+    },
+    {
+        "id": "label-health",
+        "name": "Saúde",
+        "description": "Consultas, exames, treinos e cuidados.",
+        "accent": "orange",
+        "iconName": "box",
+    },
+    {
+        "id": "label-finance",
+        "name": "Financeiro",
+        "description": "Contas, pagamentos e planejamento financeiro.",
+        "accent": "orange",
+        "iconName": "box",
+    },
+    {
+        "id": "label-projects",
+        "name": "Projetos",
+        "description": "Projetos paralelos, planejamento e entregas.",
+        "accent": "green",
+        "iconName": "box",
+    },
+]
+
+
+def normalize_event(item, index):
+    if not isinstance(item, dict):
+        item = {}
+
+    def text(key, fallback=""):
+        value = item.get(key, fallback)
+        return str(value).strip() if value is not None else fallback
+
+    title = text("title", "Evento sem titulo") or "Evento sem titulo"
+    date = text("date", time.strftime("%Y-%m-%d")) or time.strftime("%Y-%m-%d")
+    start = text("start", "09:00") or "09:00"
+    end = text("end", "10:00") or "10:00"
+    category = text("category", "Pessoal") or "Pessoal"
+    icon = text("iconName", "calendar") or "calendar"
+    accent = text("accent", ["blue", "orange", "green", "purple"][index % 4])
+
+    return {
+        "id": text("id", f"{int(time.time() * 1000)}-{index}"),
+        "title": title,
+        "subtitle": text("subtitle"),
+        "date": date,
+        "start": start,
+        "end": end,
+        "location": text("location"),
+        "category": category,
+        "description": text("description"),
+        "iconName": icon,
+        "accent": accent,
+    }
+
+
+def normalize_label(item, index):
+    if not isinstance(item, dict):
+        item = {}
+
+    def text(key, fallback=""):
+        value = item.get(key, fallback)
+        return str(value).strip() if value is not None else fallback
+
+    name = text("name", "Nova etiqueta") or "Nova etiqueta"
+    accent = text("accent", ["blue", "green", "purple", "orange"][index % 4])
+    icon = text("iconName", "box") or "box"
+
+    return {
+        "id": text("id", f"label-{int(time.time() * 1000)}-{index}"),
+        "name": name,
+        "description": text("description"),
+        "accent": accent,
+        "iconName": icon,
+    }
+
+
+def load_events():
+    path = state_path()
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    items = data if isinstance(data, list) else []
+    return sorted(
+        [normalize_event(item, index) for index, item in enumerate(items)],
+        key=lambda item: (item["date"], item["start"], item["title"].lower()),
+    )
+
+
+def load_labels():
+    path = labels_path()
+    if not path.exists():
+        return [normalize_label(item, index) for index, item in enumerate(DEFAULT_LABELS)]
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return [normalize_label(item, index) for index, item in enumerate(DEFAULT_LABELS)]
+    items = data if isinstance(data, list) else []
+    return [normalize_label(item, index) for index, item in enumerate(items)]
+
+
+def save_events(raw):
+    try:
+        parsed = json.loads(raw)
+    except Exception as exc:
+        raise SystemExit(f"invalid json: {exc}")
+
+    items = parsed if isinstance(parsed, list) else []
+    events = sorted(
+        [normalize_event(item, index) for index, item in enumerate(items)],
+        key=lambda item: (item["date"], item["start"], item["title"].lower()),
+    )
+
+    path = state_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(events, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    tmp.replace(path)
+
+
+def save_labels(raw):
+    try:
+        parsed = json.loads(raw)
+    except Exception as exc:
+        raise SystemExit(f"invalid json: {exc}")
+
+    items = parsed if isinstance(parsed, list) else []
+    labels = [normalize_label(item, index) for index, item in enumerate(items)]
+
+    path = labels_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(labels, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    tmp.replace(path)
+
+
+def main():
+    command = sys.argv[1] if len(sys.argv) > 1 else "list"
+    if command == "list":
+        print(json.dumps(load_events(), ensure_ascii=False))
+        return
+    if command == "save":
+        save_events(sys.argv[2] if len(sys.argv) > 2 else "[]")
+        return
+    if command == "labels-list":
+        print(json.dumps(load_labels(), ensure_ascii=False))
+        return
+    if command == "labels-save":
+        save_labels(sys.argv[2] if len(sys.argv) > 2 else "[]")
+        return
+    raise SystemExit(f"unknown command: {command}")
+
+
+if __name__ == "__main__":
+    main()

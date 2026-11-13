@@ -1,0 +1,80 @@
+#!/usr/bin/env python3
+"""Small wpctl adapter for Velora's system sheet."""
+
+from __future__ import annotations
+
+import re
+import subprocess
+import sys
+
+
+def clean(value: str) -> str:
+    return " ".join(value.replace("|", " ").split())
+
+
+def emit_status() -> int:
+    result = subprocess.run(
+        ["wpctl", "status", "-n"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        print("ERR|status|wpctl status failed")
+        return 1
+
+    section = ""
+    entry_pattern = re.compile(
+        r"^[\s│├└─]*(\*)?\s*(\d+)\.\s+(.+?)(?:\s+\[vol:.*)?$"
+    )
+    for raw_line in result.stdout.splitlines():
+        stripped = raw_line.strip()
+        if stripped.endswith("Sinks:"):
+            section = "SINK"
+            continue
+        if stripped.endswith("Sources:"):
+            section = "SOURCE"
+            continue
+        if stripped.endswith(":") and not stripped.endswith(("Sinks:", "Sources:")):
+            section = ""
+            continue
+        if section not in {"SINK", "SOURCE"}:
+            continue
+        match = entry_pattern.match(raw_line)
+        if not match:
+            continue
+        default = "yes" if match.group(1) else "no"
+        print(f"{section}|{match.group(2)}|{default}|{clean(match.group(3))}")
+    return 0
+
+
+def set_default(node_id: str) -> int:
+    if not node_id.isdigit():
+        print("ERR|set-default|invalid node id")
+        return 1
+    result = subprocess.run(
+        ["wpctl", "set-default", node_id],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        message = clean(result.stderr or result.stdout or "failed to set default")
+        print(f"ERR|set-default|{message}")
+        return result.returncode or 1
+    print(f"OK|set-default|{node_id}")
+    return 0
+
+
+def main() -> int:
+    command = sys.argv[1] if len(sys.argv) > 1 else "status"
+    if command == "status":
+        return emit_status()
+    if command == "set-default":
+        return set_default(sys.argv[2] if len(sys.argv) > 2 else "")
+    print(f"ERR|{clean(command)}|unknown command")
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# Build the tested upstream revision against the host's installed Qt libraries.
+dependency_root="${XDG_CACHE_HOME:-$HOME/.cache}/velora-shell/dependencies"
+source_root="${XDG_CACHE_HOME:-$HOME/.cache}/velora-shell/sources"
+prefix="${XDG_DATA_HOME:-$HOME/.local/share}/velora-shell/runtime/quickshell"
+revision=7d1c9a9c6721606b129829134d6f614f015621e2
+cli_revision=4160d259d961cd393fd8d67590a8c7d210207348
+mkdir -p "$source_root"
+fetch_source() {
+    local name=$1 url=$2 commit=$3
+    if [[ ! -d "$source_root/$name/.git" ]]; then
+        git init -q "$source_root/$name"
+        git -C "$source_root/$name" remote add origin "$url"
+    fi
+    git -C "$source_root/$name" fetch --depth=1 origin "$commit"
+    git -C "$source_root/$name" checkout --detach "$commit"
+}
+fetch_source cli11 https://github.com/CLIUtils/CLI11.git "$cli_revision"
+fetch_source quickshell https://github.com/quickshell-mirror/quickshell.git "$revision"
+cmake -S "$source_root/cli11" -B "$dependency_root/cli11-build" \
+    -DCMAKE_INSTALL_PREFIX="$dependency_root/local" \
+    -DCLI11_BUILD_TESTS=OFF -DCLI11_BUILD_EXAMPLES=OFF
+cmake --install "$dependency_root/cli11-build"
+cmake -S "$source_root/quickshell" -B "$dependency_root/quickshell-build" \
+    -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$prefix" \
+    -DCMAKE_PREFIX_PATH="$dependency_root/local" \
+    -DDISTRIBUTOR="Velora Shell" -DBUILD_TESTING=OFF -DCRASH_HANDLER=OFF
+cmake --build "$dependency_root/quickshell-build" --parallel "${VELORA_BUILD_JOBS:-2}"
+cmake --install "$dependency_root/quickshell-build"
+"$prefix/bin/qs" --version

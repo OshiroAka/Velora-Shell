@@ -1,0 +1,102 @@
+#!/usr/bin/env python3
+"""Import an existing installation's state into standard XDG locations.
+
+Historical directory identifiers here are input-format compatibility, never
+runtime search paths. Run explicitly with the previous shell stopped.
+"""
+import argparse
+import json
+import os
+import shutil
+from pathlib import Path
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("source", type=Path, help="Previous isolated config/data/state root")
+    parser.add_argument("--assets", type=Path, help="Previous runtime root, for personal project assets")
+    parser.add_argument("--replace", action="store_true", help="Prefer the supplied runtime state over existing settings")
+    args = parser.parse_args()
+    source = args.source.expanduser().resolve()
+    home = Path.home()
+    config = Path(os.environ.get("XDG_CONFIG_HOME") or home / ".config") / "velora-shell"
+    data = Path(os.environ.get("XDG_DATA_HOME") or home / ".local/share") / "velora-shell"
+    state = Path(os.environ.get("XDG_STATE_HOME") or home / ".local/state") / "velora-shell"
+    previous_config = source / "config/project-helix"
+    if not (previous_config / "config.json").is_file():
+        parser.error("Source has no composition configuration")
+    if (config / "config.json").exists() and not args.replace:
+        parser.error("Destination already exists; use --replace only after reviewing the state")
+    for target in (config, data, state):
+        target.mkdir(parents=True, exist_ok=True)
+    mappings = {
+        str(source / "data/project-helix"): str(data),
+        str(source / "data/velora-unified"): str(data),
+        str(source / "state/velora-shell"): str(state),
+        str(previous_config): str(config),
+        str(source / "config"): str(config.parent),
+        str(source / "data"): str(data.parent),
+        str(source / "state"): str(state.parent),
+    }
+    if args.assets:
+        old = args.assets.expanduser().resolve()
+        personal = data / "personal-assets"
+        for directory in (old / "helix/assets/user", old / "assets", old / "legacy/assets"):
+            if not directory.is_dir():
+                continue
+            for path in directory.iterdir():
+                if not path.is_file() or path.suffix.lower() not in {".png", ".apng", ".jpg", ".webp"}:
+                    continue
+                personal.mkdir(exist_ok=True)
+                target = personal / path.name
+                shutil.copy2(path, target)
+                mappings[str(path)] = str(target)
+                if directory.name == "user":
+                    mappings["project:assets/user/" + path.name] = target.as_uri()
+
+    def rewrite(value):
+        if isinstance(value, str):
+            for before, after in sorted(mappings.items(), key=lambda item: -len(item[0])):
+                value = value.replace(before, after)
+            return "velora" if value == "helix" else value
+        if isinstance(value, list):
+            return [rewrite(item) for item in value]
+        if isinstance(value, dict):
+            return {key: rewrite(item) for key, item in value.items()}
+        return value
+
+    def copy_file(path, target):
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if target.exists() and not args.replace:
+            return
+        if path.suffix == ".json":
+            payload = json.dumps(rewrite(json.loads(path.read_text())), ensure_ascii=False, indent=2) + "\n"
+            temporary = target.with_name(target.name + ".tmp")
+            temporary.write_text(payload)
+            temporary.replace(target)
+        else:
+            try:
+                content = path.read_text()
+            except (UnicodeError, ValueError):
+                shutil.copy2(path, target)
+            else:
+                target.write_text(rewrite(content))
+
+    for dirname in ("data/project-helix", "data/velora-unified", "state/velora-shell"):
+        base = source / dirname
+        target_root = state if dirname.startswith("state/") else data
+        if not base.is_dir():
+            continue
+        for path in base.rglob("*"):
+            relative = path.relative_to(base)
+            if path.is_file() and not any(x in {"backups", "cache", "logs"} for x in relative.parts):
+                copy_file(path, target_root / relative)
+    for filename in ("config.json", "profiles.json", "weather-location"):
+        path = previous_config / filename
+        if path.is_file():
+            copy_file(path, config / filename)
+    print("State imported; personal assets remain outside the source tree.")
+
+
+if __name__ == "__main__":
+    main()

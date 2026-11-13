@@ -1,0 +1,192 @@
+#!/usr/bin/env python3
+"""Small cached wttr.in adapter for the Velora Shell weather card."""
+
+import json
+import os
+import sys
+import time
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+
+CACHE_TTL = 15 * 60
+
+
+def cache_path() -> Path:
+    base = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
+    return base / "velora-shell" / "weather.json"
+
+
+def legacy_cache_path() -> Path:
+    base = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
+    return base / "velora-shell" / "weather.json"
+
+
+def location() -> str:
+    configured = os.environ.get("VELORA_WEATHER_LOCATION", "").strip()
+    if configured:
+        return configured
+    config_home = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
+    for candidate in (
+        config_home / "velora-shell" / "weather-location",
+        config_home / "velora-shell" / "weather-location",
+    ):
+        try:
+            configured = candidate.read_text(encoding="utf-8").strip()
+            if configured:
+                return configured
+        except OSError:
+            pass
+    return ""
+
+
+def text(value, fallback="") -> str:
+    normalized = "" if value is None else str(value).strip()
+    return normalized or fallback
+
+
+def first(items, key="value") -> str:
+    if not isinstance(items, list) or not items:
+        return ""
+    item = items[0]
+    return text(item.get(key) if isinstance(item, dict) else item)
+
+
+def description(item: dict) -> str:
+    return first(item.get("lang_pt")) or first(item.get("weatherDesc")) \
+        or "Clima indisponível"
+
+
+def icon_name(label: str, code="") -> str:
+    lowered = label.lower()
+    if any(word in lowered for word in ("chuva", "rain", "garoa")):
+        return "rain"
+    if any(word in lowered for word in ("neve", "snow")):
+        return "snow"
+    if any(word in lowered for word in ("trovo", "thunder")):
+        return "storm"
+    if any(word in lowered for word in ("nublado", "cloud")):
+        return "cloud"
+    if any(word in lowered for word in ("limpo", "clear", "sol", "sunny")):
+        return "sun"
+    if str(code) == "113":
+        return "sun"
+    return "partly"
+
+
+def normalize(raw: dict) -> dict:
+    current = (raw.get("current_condition") or [{}])[0]
+    days = raw.get("weather") or [{}]
+    today = days[0]
+    area = (raw.get("nearest_area") or [{}])[0]
+    city = first(area.get("areaName"))
+    region = first(area.get("region"))
+    label = description(current)
+    forecast = []
+    for day in days[:4]:
+        hourly = day.get("hourly") or []
+        representative = hourly[min(len(hourly) - 1, 4)] if hourly else {}
+        day_label = description(representative) if representative else label
+        forecast.append({
+            "date": text(day.get("date")),
+            "max": text(day.get("maxtempC"), "--"),
+            "min": text(day.get("mintempC"), "--"),
+            "icon": icon_name(day_label, text(representative.get("weatherCode"))),
+        })
+    return {
+        "schema": 2,
+        "location": ", ".join(part for part in (city, region) if part),
+        "temp": text(current.get("temp_C"), "--"),
+        "max": text(today.get("maxtempC"), "--"),
+        "min": text(today.get("mintempC"), "--"),
+        "feels": text(current.get("FeelsLikeC"), "--"),
+        "desc": label,
+        "icon": icon_name(label, text(current.get("weatherCode"))),
+        "forecast": forecast,
+        "from_cache": False,
+        "updated": int(time.time()),
+    }
+
+
+def read_json(path: Path):
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return None
+
+
+def compatible_cache(item):
+    if not isinstance(item, dict):
+        return None
+    forecast = item.get("forecast") if isinstance(item.get("forecast"), list) else []
+    return {
+        "schema": 2,
+        "location": text(item.get("location")),
+        "temp": text(item.get("temp"), "--"),
+        "max": text(item.get("max"), "--"),
+        "min": text(item.get("min"), "--"),
+        "feels": text(item.get("feels"), "--"),
+        "desc": text(item.get("desc"), "Clima indisponível"),
+        "icon": text(item.get("icon"), "partly"),
+        "forecast": forecast[:4],
+        "from_cache": bool(item.get("from_cache", True)),
+        "updated": int(item.get("updated") or 0),
+    }
+
+
+def save(item: dict) -> None:
+    destination = cache_path()
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_suffix(".tmp")
+    temporary.write_text(json.dumps(item, ensure_ascii=False) + "\n", encoding="utf-8")
+    temporary.replace(destination)
+
+
+def fetch() -> dict:
+    requested = location()
+    location_part = "/" + urllib.parse.quote(requested) if requested else ""
+    request = urllib.request.Request(
+        f"https://wttr.in{location_part}?format=j1&lang=pt",
+        headers={"User-Agent": "Velora-Shell/0.2"},
+    )
+    with urllib.request.urlopen(request, timeout=5) as response:
+        return normalize(json.loads(response.read().decode("utf-8")))
+
+
+def main() -> None:
+    force = "--force" in sys.argv[1:]
+    cached = compatible_cache(read_json(cache_path()))
+    if cached is None:
+        cached = compatible_cache(read_json(legacy_cache_path()))
+    now = int(time.time())
+
+    # Paint cached values immediately. The QML service follows this quick read
+    # with a forced refresh, so stale data never leaves the first frame empty.
+    if cached and not force:
+        print(json.dumps(cached, ensure_ascii=False, separators=(",", ":")))
+        return
+
+    try:
+        current = fetch()
+        save(current)
+        print(json.dumps(current, ensure_ascii=False, separators=(",", ":")))
+    except Exception:
+        fallback = cached or {
+            "schema": 2,
+            "location": "",
+            "temp": "--",
+            "max": "--",
+            "min": "--",
+            "feels": "--",
+            "desc": "Sem conexão",
+            "icon": "partly",
+            "forecast": [],
+            "updated": 0,
+        }
+        fallback["from_cache"] = True
+        print(json.dumps(fallback, ensure_ascii=False, separators=(",", ":")))
+
+
+if __name__ == "__main__":
+    main()

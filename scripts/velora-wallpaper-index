@@ -1,0 +1,216 @@
+#!/usr/bin/env python3
+"""Fast wallpaper inventory and recursive filesystem notifications.
+
+Inventory never decodes media or waits for thumbnail generation. The existing
+scanner enriches these same identities with cached previews/colors afterwards.
+"""
+import argparse
+import ctypes
+import hashlib
+import json
+import os
+from pathlib import Path
+import select
+import struct
+import time
+
+EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".mp4", ".webm", ".mkv", ".mov"}
+IMAGES = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+RECENT_SECONDS = 30 * 60
+
+
+def cache_key(path):
+    try:
+        info = path.stat()
+    except OSError:
+        return ""
+    return hashlib.sha256(f"{path}|{info.st_size}|{int(info.st_mtime)}".encode()).hexdigest()
+
+
+def inventory(home, runtime=None):
+    library = home / "Pictures/Wallpapers"
+    cache = home / ".cache/velora-shell"
+    ram = Path(runtime or os.environ.get("XDG_RUNTIME_DIR") or "/dev/shm") / "velora-shell/wallpaper-previews"
+    entries = []
+    for directory, folders, files in os.walk(library):
+        folders.sort()
+        for name in sorted(files):
+            path = Path(directory) / name
+            extension = path.suffix.lower()
+            if extension not in EXTENSIONS or not path.is_file():
+                continue
+            live = extension not in IMAGES or (extension == ".gif" and library / "live" in path.parents)
+            kind = "live" if live else "static"
+            identity = cache_key(path)
+            preview = cache / "live-previews" / (identity + ".jpg") if live else path
+            if not preview.is_file():
+                preview = None
+            if preview:
+                small = ram / (cache_key(preview) + ".jpg")
+                if small.is_file():
+                    preview = small
+            color, group = "#808080", "neutral"
+            try:
+                color, group = (cache / "wallpaper-metadata-v2" / (identity + ".color")).read_text().split("|")
+            except (OSError, ValueError):
+                pass
+            entries.append(dict(key=f"{kind}:{path}", kind=kind, mediaType="gif" if extension == ".gif" else "vid" if live else "img",
+                                path=str(path), preview=str(preview or ""), title=path.stem,
+                                dominantColor=color, colorGroup=group))
+    engines = set()
+    for root in (home / ".steam/steam/steamapps/workshop/content/431960",
+                 home / ".local/share/Steam/steamapps/workshop/content/431960"):
+        try:
+            projects = sorted(root.iterdir())
+        except OSError:
+            continue
+        for project in projects:
+            if not project.is_dir() or project.name in engines:
+                continue
+            engines.add(project.name)
+            data = {}
+            try:
+                data = json.loads((project / "project.json").read_text())
+                if not isinstance(data,dict): data={}
+            except (OSError, ValueError):
+                pass
+            preview = None
+            for extension in ("jpg", "png", "jpeg", "webp"):
+                candidate = cache / "engine-previews" / f"{project.name}.{extension}"
+                if candidate.is_file():
+                    preview = candidate
+                    break
+            if not preview:
+                for key in ("preview", "thumbnail", "cover", "image"):
+                    if isinstance(data.get(key), str):
+                        candidate = project / data[key]
+                        if candidate.is_file() and candidate.suffix.lower() in IMAGES:
+                            preview = candidate
+                            break
+            if preview:
+                small = ram / (cache_key(preview) + ".jpg")
+                if small.is_file():
+                    preview = small
+            entries.append(dict(key=f"engine:{project.name}", kind="engine", mediaType="engine", path=project.name,
+                                preview=str(preview or ""), title=str(data.get("title") or data.get("name") or f"Workshop {project.name}"),
+                                dominantColor="#808080", colorGroup="neutral"))
+    # First discovery is persisted separately from file mtime: copied files can
+    # retain old timestamps. An initial library gets no blanket "new" glow.
+    state_path = cache / "wallpaper-discovery-v1.json"
+    try:
+        previous = json.loads(state_path.read_text())
+    except (OSError, ValueError):
+        previous = None
+    if previous is not None and not isinstance(previous,dict): previous=None
+    now = time.time()
+    seen = {}
+    for entry in entries:
+        key = entry["key"]
+        if previous is not None and key in previous:
+            try: added = float(previous[key])
+            except (TypeError,ValueError): added=0
+            if not 0<=added<=now: added=0
+        elif previous is not None:
+            added = now
+        else:
+            try:
+                modified = Path(entry["path"]).stat().st_mtime
+                added = modified if now - RECENT_SECONDS <= modified <= now else 0
+            except OSError:
+                added = 0
+        seen[key] = added
+        entry["addedAt"] = added
+    cache.mkdir(parents=True, exist_ok=True)
+    temporary = state_path.with_suffix(f".{os.getpid()}.tmp")
+    temporary.write_text(json.dumps(seen, ensure_ascii=False))
+    temporary.replace(state_path)
+    return entries
+
+
+def watch(root):
+    # inotify is part of Linux; this needs no additional package or idle poller.
+    libc = ctypes.CDLL(None, use_errno=True)
+    libc.inotify_init1.argtypes = [ctypes.c_int]
+    libc.inotify_init1.restype = ctypes.c_int
+    libc.inotify_add_watch.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_uint32]
+    libc.inotify_add_watch.restype = ctypes.c_int
+    fd = libc.inotify_init1(os.O_NONBLOCK | os.O_CLOEXEC)
+    if fd < 0:
+        raise OSError(ctypes.get_errno(), "Cannot initialize wallpaper watcher")
+    # CLOSE_WRITE, MOVED_FROM/TO, CREATE, DELETE, DELETE_SELF, MOVE_SELF.
+    mask = 0x8 | 0x40 | 0x80 | 0x100 | 0x200 | 0x400 | 0x800
+    paths = {}
+    watched = set()
+
+    def add_one(path):
+        if path in watched or not path.is_dir():
+            return
+        wd = libc.inotify_add_watch(fd, os.fsencode(path), mask)
+        if wd >= 0:
+            paths[wd] = path
+            watched.add(path)
+
+    def add_tree(path):
+        if not path.is_dir():
+            return
+        for directory, _, _ in os.walk(path):
+            add_one(Path(directory))
+
+    ancestor = root
+    while not ancestor.is_dir() and ancestor != ancestor.parent:
+        ancestor = ancestor.parent
+    if ancestor == root:
+        add_one(root.parent)
+        add_tree(root)
+    else:
+        add_one(ancestor)
+    print("READY", flush=True)
+    try:
+        while True:
+            select.select([fd], [], [])
+            data = os.read(fd, 262144)
+            offset = 0
+            changed = False
+            while offset < len(data):
+                wd, event, _, size = struct.unpack_from("iIII", data, offset)
+                raw = data[offset + 16:offset + 16 + size].split(b"\0", 1)[0]
+                offset += 16 + size
+                directory = paths.get(wd)
+                if event & 0x4000:  # IN_Q_OVERFLOW: reconcile a fresh inventory.
+                    add_tree(root)
+                    changed = True
+                    continue
+                if directory is None:
+                    continue
+                path = directory / os.fsdecode(raw)
+                inside = path == root or root in path.parents
+                ancestor_event = path in root.parents
+                if not inside and not ancestor_event:
+                    continue
+                if event & 0x40000000:  # IN_ISDIR
+                    if event & (0x100 | 0x80):
+                        add_tree(path)
+                    changed = True
+                elif path.suffix.lower() in EXTENSIONS and event & (0x8 | 0x40 | 0x80 | 0x200):
+                    changed = True
+                if event & 0x8000:  # IN_IGNORED
+                    watched.discard(directory)
+                    paths.pop(wd, None)
+            if changed:
+                print("CHANGED", flush=True)
+    finally:
+        os.close(fd)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--watch", action="store_true")
+    args = parser.parse_args()
+    home = Path.home()
+    if args.watch:
+        watch(home / "Pictures/Wallpapers")
+    else:
+        print("BEGIN", flush=True)
+        for entry in inventory(home):
+            print(json.dumps(entry, ensure_ascii=False), flush=True)
+        print("END", flush=True)

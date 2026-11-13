@@ -1,0 +1,15 @@
+#!/usr/bin/env python3
+"""Check/install optional Fan+ support for the validated Lenovo hardware."""
+import argparse
+from pathlib import Path
+import sys
+
+root = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(root))
+from hardware.fan.installation import setup
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--check", action="store_true", help="Verificar sem instalar ou executar ações privilegiadas")
+parser.add_argument("--install-deps", action="store_true", help="Instalar dependências dos repositórios Arch/CachyOS com pacman --needed; ec_probe externo é informado separadamente")
+args = parser.parse_args()
+sys.exit(0 if setup(root, check_only=args.check, install_dependencies=args.install_deps) else 1)
