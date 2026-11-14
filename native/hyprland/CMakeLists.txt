@@ -8,9 +8,11 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(HYPRLAND REQUIRED IMPORTED_TARGET hyprland)
+find_package(Qt6 6.8 REQUIRED COMPONENTS Core)
 
 add_library(velora-blur SHARED plugin.cpp)
-target_link_libraries(velora-blur PRIVATE PkgConfig::HYPRLAND)
+target_link_libraries(velora-blur PRIVATE PkgConfig::HYPRLAND Qt6::Core)
+target_compile_definitions(velora-blur PRIVATE QT_NO_KEYWORDS)
 target_compile_options(velora-blur PRIVATE
     -Wall
     -Wextra

@@ -39,11 +39,18 @@ class InfiniteDesktopCameraTests(unittest.TestCase):
             source = (ROOT / 'native/hyprland/InfiniteDesktopCameraRuntime.hpp').read_text()
             production = source[source.index('class WindowCamera final'):source.index('\ninline void attach(')]
             (base / 'camera-transformer.inc').write_text(production)
+            (base / 'camera-view.inc').write_text(source[source.index('struct View {'):source.index('\ninline std::unordered_map')])
+            start = source.index('inline double panTime(')
+            (base / 'camera-pan.inc').write_text(source[start:source.index('\nstruct PanGesture', start)])
+            start = source.index('struct PanPreferences {')
+            (base / 'camera-pan-settings.inc').write_text(source[start:source.index('\ninline std::filesystem::path marker', start)])
+            axis = (ROOT / 'native/hyprland/InfiniteDesktopInput.hpp').read_text()
+            (base / 'camera-axis.inc').write_text(axis[axis.index('inline bool (*infiniteDesktopNativeScroll)'):])
             plugin = (ROOT / 'native/hyprland/plugin.cpp').read_text()
             start = plugin.index('bool isKittySurface(')
             (base / 'camera-kitty.inc').write_text(plugin[start:plugin.index('\n}\n', start) + 3])
-            flags = subprocess.check_output(['pkg-config', '--cflags', '--libs', 'hyprutils'], text=True).split()
-            result = subprocess.run(['c++', '-std=c++23', '-I', str(base), '-I', str(ROOT / 'native/hyprland'),
+            flags = subprocess.check_output(['pkg-config', '--cflags', '--libs', 'hyprutils', 'Qt6Core'], text=True).split()
+            result = subprocess.run(['c++', '-std=c++23', '-DQT_NO_KEYWORDS', '-I', str(base), '-I', str(ROOT / 'native/hyprland'),
                 str(ROOT / 'tests/fixtures/infinite-camera.cpp'), '-o', str(base / 'camera'), *flags], capture_output=True, text=True, timeout=30)
             self.assertEqual(result.returncode, 0, result.stderr)
             result = subprocess.run([str(base / 'camera')], capture_output=True, text=True, timeout=10)

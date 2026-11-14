@@ -3,6 +3,12 @@
 #include <iostream>
 #include <memory>
 #include <vector>
+#include <chrono>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <array>
+#include <format>
+#include <wayland-client-protocol.h>
 using namespace Velora::InfiniteDesk;
 
 template<class T> using SP = std::shared_ptr<T>;
@@ -16,7 +22,13 @@ template<class T> struct Ref {
     explicit operator bool() const { return bool(pointer); }
     bool operator==(const Ref&) const = default;
 };
-struct Monitor { Vector2D m_position; double m_scale = 1.; };
+struct LayerResource { Ref<int> m_surface; };
+struct Layer { std::string m_namespace; Ref<LayerResource> m_layerSurface; };
+struct Monitor {
+    Vector2D m_position; double m_scale = 1.; std::string m_name = "QA-1";
+    std::array<std::vector<Ref<Layer>>,4> m_layerSurfaceLayers;
+};
+struct Workspace {};
 namespace Desktop::View { enum { VIEW_TYPE_WINDOW }; }
 struct LogicalView { virtual ~LogicalView() = default; virtual int type() const { return Desktop::View::VIEW_TYPE_WINDOW; } };
 struct Window : LogicalView {
@@ -28,6 +40,8 @@ struct Window : LogicalView {
 using PHLWINDOW = SP<Window>;
 using PHLWINDOWREF = Ref<Window>;
 using PHLMONITORREF = Ref<Monitor>;
+using PHLMONITOR = SP<Monitor>;
+using PHLWORKSPACEREF = Ref<Workspace>;
 namespace Render {
 struct CRenderContext {};
 struct SWindowTransformBuffer { SP<int> framebuffer; CBox box; bool success = true; };
@@ -44,11 +58,41 @@ struct IWindowTransformer {
     virtual SWindowTransformBuffer transform(CRenderContext&, const SWindowTransformBuffer&, const SWindowTransformContext&) = 0;
 };
 }
-struct View { Camera camera; PHLMONITORREF monitor; };
+#include "camera-view.inc"
 static View view;
 static bool selected = true;
 View* viewFor(const PHLWINDOW&) { return selected ? &view : nullptr; }
 bool transformed(const View* value) { return value && !value->camera.identity(value->monitor->m_position); }
+View* viewFor(PHLMONITOR) { return selected ? &view : nullptr; }
+View* ensureView(PHLMONITOR monitor) { return viewFor(monitor); }
+static bool drag = false;
+static int damageCalls = 0;
+void damage(View&) { ++damageCalls; }
+#include "camera-pan.inc"
+#include "camera-pan-settings.inc"
+struct InputManager { uint32_t mods = 64; uint32_t getModsFromAllKBs() { return mods; } };
+struct Seat { struct { Ref<int> pointerFocus; } m_state; };
+static auto g_pInputManager = std::make_shared<InputManager>();
+static auto g_pSeatManager = std::make_shared<Seat>();
+namespace State {
+struct MonitorState { std::vector<PHLMONITOR> outputs; const auto& monitors() { return outputs; } };
+inline auto state = std::make_shared<MonitorState>();
+auto monitorState() { return state; }
+}
+struct IPointer { struct SAxisEvent { uint32_t source, axis; double delta; }; };
+namespace Event { struct SCallbackInfo { bool cancelled = false; }; }
+namespace IPC::Socket2 {
+struct Server {
+    struct Message { std::string name,payload; };
+    int sent = 0;
+    void postEvent(Message) { ++sent; }
+};
+inline auto server = std::make_shared<Server>();
+auto sock() { return server; }
+}
+#include "camera-axis.inc"
+static int nativeAxisCalls = 0;
+bool routeScroll(PHLMONITOR monitor, double dx, double dy) { ++nativeAxisCalls; return queuePan(monitor,{dx,dy}); }
 // The Python harness extracts this class directly from the production header.
 #include "camera-transformer.inc"
 
@@ -144,5 +188,90 @@ int main() {
     Desktop::View::CWLSurface::registered->owner = window;
     assert(isKittySurface(composite));
     composite->m_data.surface = std::make_shared<int>(2); assert(!isKittySurface(composite));
+    // 240 input samples per second must preserve subpixels while producing
+    // exactly one camera application per available output frame, at 60/120/144Hz.
+    for (int rate : {60,120,144}) {
+        Camera camera{{960,540},{1920,1080},.25};
+        PanBatch batch;
+        for (int i = 0; i < 240; ++i) {
+            assert(batch.add({.125,-.0625}));
+            if ((i+1)*rate/240 > i*rate/240) assert(batch.apply(camera));
+        }
+        assert(batch.inputs == 240 && batch.frames == uint64_t(rate));
+        assert(near(camera.center,{840,600}));
+        assert(!batch.apply(camera));
+        assert(!batch.add({double(NAN),1.}) && !batch.add({0,0}));
+        assert(batch.inputs == 240);
+    }
+    // Release follows screen velocity with time-based decay at any refresh rate.
+    Vector2D coastReference;
+    for (int rate : {60,120,144}) {
+        PanInertia coast;
+        coast.begin(0.);
+        for (int i=1; i<=240; ++i) coast.sample({2.,-1.}, i/240.);
+        assert(coast.release(1.));
+        const auto speed = coast.velocity.size();
+        Vector2D travel;
+        int frames = 0;
+        for (int i=1; i<rate*2 && coast.active; ++i) {
+            travel += coast.step(1.+double(i)/rate); ++frames;
+            assert(coast.velocity.size() < speed);
+        }
+        assert(!coast.active && frames > rate/3 && frames < rate);
+        assert(travel.x > 70. && travel.x < 80. && travel.y < -35.);
+        if (rate == 60) coastReference = travel;
+        else assert((travel-coastReference).size() < .2);
+        coast.begin(2.);
+        assert(!coast.active && coast.velocity == Vector2D{});
+        for (int i=1; i<=30; ++i) coast.sample({-4.,2.}, 2.+i/240.);
+        assert(coast.release(2.125) && coast.velocity.x < 0.);
+        assert(coast.step(2.4) == Vector2D{} && !coast.active);
+        coast.begin(3.);
+        for (int i=1; i<=30; ++i) coast.sample({4.,0.}, 3.+i/240.);
+        assert(!coast.release(3.3)); // Pausing before releasing must not fling.
+    }
+    selected = true;
+    view = {}; view.monitor = monitor;
+    view.camera = {{960,540},{1920,1080},.5};
+    view.animating = true; view.target.zoom = 2;
+    for (int i=0; i<8; ++i) assert(queuePan(monitor,{.25,-.125}));
+    assert(damageCalls == 1 && view.pan.inputs == 8 && view.pan.frames == 0);
+    assert(near(view.camera.center,{960,540}) && !view.animating);
+    panFrame(monitor);
+    assert(view.pan.frames == 1 && near(view.camera.center,{956,542}));
+    assert(near(view.target.center,view.camera.center) && view.target.zoom == .5);
+    for(int i=0;i<100;++i) panFrame(monitor);
+    assert(view.pan.frames == 1 && damageCalls == 1);
+    drag = true; assert(!queuePan(monitor,{10,10})); drag = false;
+    selected = false; assert(!queuePan(monitor,{10,10}));
+    assert(PanPreferences::parse("",false).sensitivity == 1.15);
+    assert(PanPreferences::parse(R"({"infiniteDesk":{"dragSensitivity":true}})",false).sensitivity == 1.15);
+    assert(PanPreferences::parse(R"({"infiniteDesk":{"dragSensitivity":0}})",false).sensitivity == .1);
+    assert(PanPreferences::parse(R"({"infiniteDesk":{"dragSensitivity":5}})",false).sensitivity == 4.);
+    const auto prefs = PanPreferences::parse(R"({"infiniteDesk":{"dragSensitivity":0.5}})",true);
+    assert(prefs.sensitivity == .5 && prefs.direction == -1.);
+    // Real routing code: native touchpad input must bypass the socket bridge,
+    // while wheels, applications and other modifiers retain their own input.
+    selected = true; view = {}; view.monitor = monitor;
+    view.camera = {{960,540},{1920,1080},1};
+    State::state->outputs = {monitor};
+    auto focus = std::make_shared<int>(9); g_pSeatManager->m_state.pointerFocus = focus;
+    auto layer = std::make_shared<Layer>(); layer->m_namespace = "velora-infinite-desktop-gesture";
+    auto layerResource = std::make_shared<LayerResource>(); layerResource->m_surface = focus;
+    layer->m_layerSurface = layerResource; monitor->m_layerSurfaceLayers[1] = {layer};
+    infiniteDesktopNativeScroll = routeScroll;
+    IPointer::SAxisEvent axis{WL_POINTER_AXIS_SOURCE_FINGER,WL_POINTER_AXIS_HORIZONTAL_SCROLL,4.5};
+    Event::SCallbackInfo info;
+    infiniteDesktopAxis(axis,info);
+    assert(info.cancelled && nativeAxisCalls == 1 && IPC::Socket2::server->sent == 0);
+    assert(near(view.pan.pending,{-4.5,0.}));
+    info = {}; axis.source = WL_POINTER_AXIS_SOURCE_WHEEL; infiniteDesktopAxis(axis,info);
+    assert(!info.cancelled && nativeAxisCalls == 1);
+    axis.source = WL_POINTER_AXIS_SOURCE_FINGER; g_pInputManager->mods = 68;
+    infiniteDesktopAxis(axis,info); assert(!info.cancelled && nativeAxisCalls == 1);
+    g_pInputManager->mods = 64; g_pSeatManager->m_state.pointerFocus = std::make_shared<int>(10);
+    infiniteDesktopAxis(axis,info); assert(!info.cancelled && nativeAxisCalls == 1);
+    g_pSeatManager->m_state.pointerFocus = focus; infiniteDesktopNativeScroll = nullptr;
+    infiniteDesktopAxis(axis,info); assert(info.cancelled && IPC::Socket2::server->sent == 1);
     std::cout << "INFINITE_CAMERA_OK: camera, input inverse, native transformer, live framebuffer, damage, fractional outputs\n";
 }

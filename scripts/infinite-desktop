@@ -23,7 +23,7 @@ from typing import Any
 
 
 STEP = 180
-DRAG_FPS = 45
+DRAG_FPS = 60
 DRAG_SPEED = 1.15
 DEFAULT_SCATTER_SIZES = [(800, 600), (1040, 500), (1280, 400)]
 SCATTER_X = 720
@@ -634,8 +634,6 @@ def drag_canvas(empty_only: bool = False, release_button: int = BTN_LEFT) -> int
     fd, device = open_pointer()
     pending_x = 0.0
     pending_y = 0.0
-    remainder_x = 0.0
-    remainder_y = 0.0
     packet = b""
     interval = 1 / DRAG_FPS
     last_flush = time.monotonic()
@@ -643,19 +641,15 @@ def drag_canvas(empty_only: bool = False, release_button: int = BTN_LEFT) -> int
     print(f"Infinite desktop: dragging with {device}")
 
     def flush() -> None:
-        nonlocal pending_x, pending_y, remainder_x, remainder_y, last_flush
-        dx = (pending_x * speed * direction) + remainder_x
-        dy = (pending_y * speed * direction) + remainder_y
+        nonlocal pending_x, pending_y, last_flush
+        dx = pending_x * speed * direction
+        dy = pending_y * speed * direction
         pending_x = 0.0
         pending_y = 0.0
-        move_x = math.trunc(dx)
-        move_y = math.trunc(dy)
-        remainder_x = dx - move_x
-        remainder_y = dy - move_y
         last_flush = time.monotonic()
-        if not move_x and not move_y:
+        if not dx and not dy:
             return
-        camera_action(f"pan {move_x} {move_y}")
+        camera_action(f"pan {dx:.6f} {dy:.6f}")
 
     try:
         while True:
@@ -701,30 +695,24 @@ def stream_drag_canvas(monitor_name: str = "") -> int:
     speed, _, _ = read_settings()
     pending_x = 0.0
     pending_y = 0.0
-    remainder_x = 0.0
-    remainder_y = 0.0
     packet = b""
     interval = 1 / DRAG_FPS
     last_flush = time.monotonic()
     direction = -1 if inverted() else 1
 
     def flush() -> None:
-        nonlocal pending_x, pending_y, remainder_x, remainder_y, last_flush
-        dx = (pending_x * speed * direction) + remainder_x
-        dy = (pending_y * speed * direction) + remainder_y
+        nonlocal pending_x, pending_y, last_flush
+        dx = pending_x * speed * direction
+        dy = pending_y * speed * direction
         pending_x = 0.0
         pending_y = 0.0
-        move_x = math.trunc(dx)
-        move_y = math.trunc(dy)
-        remainder_x = dx - move_x
-        remainder_y = dy - move_y
         last_flush = time.monotonic()
-        if not move_x and not move_y:
+        if not dx and not dy:
             return
         if monitor_name:
-            camera_action(f"pan {move_x} {move_y}", monitor_name)
+            camera_action(f"pan {dx:.6f} {dy:.6f}", monitor_name)
         else:
-            camera_action(f"pan {move_x} {move_y}")
+            camera_action(f"pan {dx:.6f} {dy:.6f}")
 
     print("READY", flush=True)
     finished = False

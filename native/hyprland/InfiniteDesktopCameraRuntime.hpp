@@ -17,20 +17,32 @@
 #include <hyprland/src/render/transformer/TransformerList.hpp>
 #include <hyprland/src/workspace/HLWorkspace.hpp>
 #include <unordered_map>
+#include <fstream>
+#pragma push_macro("HANDLE")
+#undef HANDLE
+#include <QJsonDocument>
+#include <QJsonObject>
+#pragma pop_macro("HANDLE")
+#include <unistd.h>
 
 namespace Velora::InfiniteDesk {
 struct View {
     Camera camera, from, target;
+    PanBatch pan;
+    PanInertia inertia;
     PHLMONITORREF monitor;
     PHLWORKSPACEREF workspace;
     std::chrono::steady_clock::time_point started;
     bool animating = false;
+    std::chrono::steady_clock::time_point lastPanFrame;
+    double panIntervalTotal = 0., panIntervalMax = 0.;
+    uint64_t panIntervals = 0;
 };
 inline std::unordered_map<const Workspace::CHLWorkspace*, View> views;
-inline bool enabled = false, unloading = false, drawingWallpaper = false;
+inline bool enabled = false, unloading = false;
 inline HANDLE handle = nullptr;
 inline SP<CEventLoopTimer> animationTimer;
-inline CHyprSignalListener openListener;
+inline CHyprSignalListener openListener, panButtonListener, panMotionListener, panFrameListener;
 inline std::vector<CFunctionHook*> hooks;
 inline std::unordered_map<const Desktop::View::CWindow*, PHLWINDOWREF> attached;
 inline SP<VeloraCompat::StatusCommand> statusCommand;
@@ -60,6 +72,18 @@ inline View* viewFor(const PHLWINDOW& window) {
     auto monitor = window->m_workspace->m_monitor.lock();
     auto view = viewFor(monitor);
     return view && view->workspace == window->m_workspace ? view : nullptr;
+}
+inline View* ensureView(PHLMONITOR monitor) {
+    if (!available(monitor)) return nullptr;
+    const auto workspace = monitor->m_activeWorkspace;
+    auto [found, inserted] = views.try_emplace(workspace.get());
+    auto& view = found->second;
+    if (inserted || view.workspace != workspace) {
+        view = {}; view.monitor = monitor; view.workspace = workspace;
+        view.camera = Camera{monitor->m_position + monitor->m_size / 2., monitor->m_size};
+        view.from = view.target = view.camera;
+    }
+    return viewFor(monitor);
 }
 inline bool transformed(const View* view) {
     return view && view->monitor && !view->camera.identity(view->monitor->m_position);
@@ -257,6 +281,135 @@ inline bool endDrag(Layout::Supplementary::CDragStateController* controller) {
     return reinterpret_cast<DragEndFn>(dragEndHook->m_original)(controller);
 }
 
+struct PanPreferences {
+    double sensitivity = 1.15, direction = 1.;
+    static PanPreferences parse(const std::string& text, bool inverted) {
+        PanPreferences prefs;
+        prefs.direction = inverted ? -1. : 1.;
+        const auto value = QJsonDocument::fromJson(QByteArray::fromStdString(text)).object()
+            .value("infiniteDesk").toObject().value("dragSensitivity");
+        if (value.isDouble() && std::isfinite(value.toDouble())) prefs.sensitivity = std::clamp(value.toDouble(), .1, 4.);
+        return prefs;
+    }
+};
+inline std::filesystem::path marker(const char* suffix, bool fallback = false) {
+    const char* runtime = fallback ? nullptr : std::getenv("XDG_RUNTIME_DIR");
+    return std::filesystem::path(runtime ? runtime : "/tmp") / ("infinite-desktop-" + std::to_string(getuid()) + "." + suffix);
+}
+inline bool hasMarker(const char* suffix) {
+    std::error_code error;
+    return std::filesystem::exists(marker(suffix), error) || std::filesystem::exists(marker(suffix, true), error);
+}
+inline PanPreferences panPreferences() {
+    const auto xdg = std::getenv("XDG_CONFIG_HOME"), home = std::getenv("HOME");
+    const auto base = xdg ? std::filesystem::path(xdg) : std::filesystem::path(home ? home : "") / ".config";
+    std::ifstream file(base / "velora-shell/config.json");
+    const std::string text((std::istreambuf_iterator<char>(file)), {});
+    return PanPreferences::parse(text, hasMarker("inverted"));
+}
+inline double panTime() {
+    return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+inline bool queuePan(PHLMONITOR monitor, Vector2D delta, bool kinetic = false) {
+    if (drag) return false;
+    auto view = ensureView(monitor);
+    if (!view) return false;
+    const bool pending = view->pan.pending != Vector2D{};
+    if (!view->pan.add(delta)) return true;
+    if (kinetic) view->inertia.sample(delta, panTime());
+    else view->inertia = {};
+    // A direct gesture takes over at the currently presented camera position.
+    // There is no trailing interpolation that could add lag behind the pointer.
+    view->animating = false;
+    if (!pending) damage(*view);
+    return true;
+}
+inline void panFrame(PHLMONITOR monitor) {
+    auto view = viewFor(monitor);
+    if (!view) return;
+    view->pan.pending += view->inertia.step(panTime());
+    if (!view->pan.apply(view->camera)) return;
+    view->from = view->target = view->camera;
+    const auto now = std::chrono::steady_clock::now();
+    const auto interval = std::chrono::duration<double>(now - view->lastPanFrame).count();
+    if (interval > .001 && interval < .1) {
+        view->panIntervalTotal += interval;
+        view->panIntervalMax = std::max(view->panIntervalMax, interval);
+        ++view->panIntervals;
+    }
+    view->lastPanFrame = now;
+    if (view->inertia.active) damage(*view);
+}
+struct PanGesture {
+    PHLMONITORREF monitor;
+    PHLWORKSPACEREF workspace;
+    PanPreferences prefs;
+    Vector2D last;
+    uint32_t button = 0;
+};
+inline std::optional<PanGesture> panGesture;
+inline bool relativePanMotion = false;
+inline bool panGestureActive() {
+    return panGesture && available(panGesture->monitor.lock())
+        && panGesture->monitor->m_activeWorkspace == panGesture->workspace;
+}
+inline void panButton(const IPointer::SButtonEvent& event, Event::SCallbackInfo& info) {
+    if (panGesture && event.button == panGesture->button && event.state == WL_POINTER_BUTTON_STATE_RELEASED) {
+        if (panGestureActive()) {
+            auto view = viewFor(panGesture->monitor.lock());
+            if (view && view->inertia.release(panTime())) damage(*view);
+        }
+        panGesture.reset(); info.cancelled = true; return;
+    }
+    if (info.cancelled || drag || event.state != WL_POINTER_BUTTON_STATE_PRESSED || !enabled || g_pInputManager->isConstrained()) return;
+    const auto point = Pointer::mgr()->untransformedPosition();
+    const auto monitor = State::monitorState()->query().vec(point).run();
+    if (auto view = viewFor(monitor)) view->inertia = {};
+    const uint32_t mods = uint32_t(g_pInputManager->getModsFromAllKBs()) & (64U | 1U | 4U | 8U);
+    const bool fallbackDrag = event.button == 272 && mods == (64U | 8U);
+    if (!fallbackDrag && (event.button != 273 || !infiniteDesktopGestureFocused(monitor))) return;
+    if (!ensureView(monitor)) return;
+    ensureView(monitor)->inertia.begin(panTime());
+    panGesture = PanGesture{monitor, monitor->m_activeWorkspace, panPreferences(), point, event.button};
+    info.cancelled = true;
+}
+inline void panMotion(const Vector2D& point, Event::SCallbackInfo& info) {
+    if (!panGesture) return;
+    if (panGestureActive() && !relativePanMotion)
+        queuePan(panGesture->monitor.lock(), (point - panGesture->last) * panGesture->prefs.sensitivity * panGesture->prefs.direction, true);
+    panGesture->last = point;
+    info.cancelled = true;
+}
+using RelativeMotionFn = void (*)(CInputManager*, IPointer::SMotionEvent);
+inline CFunctionHook* relativeMotionHook = nullptr;
+inline void relativeMotion(CInputManager* input, IPointer::SMotionEvent event) {
+    const bool previous = relativePanMotion;
+    relativePanMotion = panGestureActive();
+    if (relativePanMotion)
+        queuePan(panGesture->monitor.lock(), event.delta * panGesture->prefs.sensitivity * panGesture->prefs.direction, true);
+    Hyprutils::Utils::CScopeGuard restore{[previous] { relativePanMotion = previous; }};
+    reinterpret_cast<RelativeMotionFn>(relativeMotionHook->m_original)(input, event);
+}
+inline PHLMONITORREF scrollMonitor;
+inline PHLWORKSPACEREF scrollWorkspace;
+inline PanPreferences scrollPreferences;
+inline std::chrono::steady_clock::time_point lastScroll;
+inline bool scroll(PHLMONITOR monitor, double dx, double dy) {
+    if (!available(monitor)) return false;
+    const auto now = std::chrono::steady_clock::now();
+    if (monitor != scrollMonitor || monitor->m_activeWorkspace != scrollWorkspace || now - lastScroll > std::chrono::milliseconds(220)) {
+        scrollPreferences = panPreferences(); scrollMonitor = monitor; scrollWorkspace = monitor->m_activeWorkspace;
+        if (auto view = ensureView(monitor)) view->inertia.begin(panTime());
+    }
+    lastScroll = now;
+    if (dx == 0. && dy == 0.) {
+        auto view = viewFor(monitor);
+        if (view && view->inertia.release(panTime())) damage(*view);
+        return true;
+    }
+    return queuePan(monitor, Vector2D{dx, dy} * scrollPreferences.sensitivity * scrollPreferences.direction, true);
+}
+
 inline void animate() {
     bool again = false;
     const auto now = std::chrono::steady_clock::now();
@@ -273,6 +426,7 @@ inline void animate() {
     if (again && animationTimer) animationTimer->updateTimeout(std::chrono::milliseconds(8));
 }
 inline void update(View& view, const Camera& target, bool smooth) {
+    view.inertia = {};
     view.from = view.camera;
     view.target = target;
     view.started = std::chrono::steady_clock::now();
@@ -299,7 +453,6 @@ inline SDispatchResult dispatch(std::string arguments) {
         views.clear(); return {};
     }
     if (!monitor || !monitor->m_activeWorkspace) return {.success = false, .error = "No active camera output"};
-    auto workspace = monitor->m_activeWorkspace;
     if (action != "enable" && action != "zoom" && action != "pan" && action != "center" && action != "reset")
         return {.success = false, .error = "Unknown camera action"};
     double x = 0, y = 0;
@@ -314,20 +467,14 @@ inline SDispatchResult dispatch(std::string arguments) {
     if (input >> extra) return {.success = false, .error = "Unexpected camera argument"};
     enabled = true;
     if (!available(monitor)) return {.success = false, .error = "Camera suspended on this workspace"};
-    auto [found, inserted] = views.try_emplace(workspace.get());
-    auto& view = found->second;
-    if (inserted || view.workspace != workspace) {
-        view = {}; view.monitor = monitor; view.workspace = workspace;
-        view.camera = Camera{monitor->m_position + monitor->m_size / 2., monitor->m_size};
-        view.from = view.target = view.camera;
-    }
-    viewFor(monitor);
+    auto& view = *ensureView(monitor);
+    if (action == "pan") { queuePan(monitor, {x, y}); return {}; }
     for (auto& window : Desktop::windowState()->windows()) attach(window);
     auto target = view.target;
     if (action == "zoom") target.zoomAt(target.zoom * (direction == "out" ? .85 : 1. / .85), target.viewport / 2.);
-    else if (action == "pan") target.pan({x, y});
     else if (action == "center") target.center = {x, y};
     else if (action == "reset") target = Camera{monitor->m_position + monitor->m_size / 2., monitor->m_size};
+    view.pan.pending = {};
     update(view, target, action == "zoom" || action == "center" || action == "reset");
     return {};
 }
@@ -350,44 +497,23 @@ inline void wallpaper(Render::IElementRenderer* renderer, Render::CRenderContext
         original(renderer, ctx, element, damageRegion);
         return;
     }
-    const auto layer = element ? element->m_data.pLS : PHLLS{};
-    const bool background = layer && layer->m_layer == 0 && (layer->m_namespace == "mpvpaper"
-        || layer->m_namespace == "awww-daemon" || layer->m_namespace == "swww-daemon");
-    auto view = background ? viewFor(layer->m_monitor.lock()) : nullptr;
-    if (!transformed(view) || ctx.m_mode != Render::RENDER_MODE_NORMAL || ctx.m_renderingSnapshot || drawingWallpaper) {
-        original(renderer, ctx, element, damageRegion); return;
-    }
-    const auto source = element->getTexBox();
-    if (source.empty()) return;
-    auto state = ctx.saveDrawState();
-    ctx.m_data.renderModif = modifiers(*view);
-    ctx.m_data.renderingTransformedSource = true;
-    drawingWallpaper = true;
-    Hyprutils::Utils::CScopeGuard restore{[] { drawingWallpaper = false; }};
-    // Repeat the existing wallpaper buffer in world space. This works with live
-    // wallpapers too and avoids stretching it or allocating a giant desktop FB.
-    auto world = view->camera.unproject(CBox{{}, view->camera.viewport}).translate(-layer->m_monitor->m_position);
-    const int left = std::floor((world.x - source.x) / source.w), right = std::ceil((world.x + world.w - source.x) / source.w);
-    const int top = std::floor((world.y - source.y) / source.h), bottom = std::ceil((world.y + world.h - source.y) / source.h);
-    for (int y = top; y < bottom; ++y) for (int x = left; x < right; ++x) {
-        auto data = element->m_data;
-        data.pos += Vector2D{x * source.w, y * source.h};
-        const auto tile = makeShared<CSurfacePassElement>(data);
-        original(renderer, ctx, tile, damageRegion);
-    }
+    // Wallpaper and shell surfaces remain in physical screen space. Only
+    // application surfaces and their popups follow the camera.
+    original(renderer, ctx, element, damageRegion);
 }
 
 inline std::string status(VeloraCompat::OutputFormat, std::string) {
-    std::string result = std::format(R"({{"enabled":{},"views":[)", enabled ? "true" : "false");
+    std::string result = std::format(R"({{"enabled":{},"panTransport":"native-input-vblank","wallpaper":"fixed","views":[)", enabled ? "true" : "false");
     bool first = true;
     for (const auto& [_, view] : views) {
         if (!view.monitor || !view.workspace) continue;
         if (!first) result += ',';
         first = false;
-        result += std::format(R"({{"monitor":"{}","zoom":{},"center":[{},{}],"viewport":[{},{}],"animating":{},"active":{}}})",
+        result += std::format(R"({{"monitor":"{}","zoom":{},"center":[{},{}],"viewport":[{},{}],"animating":{},"active":{},"panInputs":{},"panFrames":{},"panFps":{},"panMaxIntervalMs":{},"coasting":{}}})",
             view.monitor->m_name, view.camera.zoom, view.camera.center.x, view.camera.center.y,
             view.camera.viewport.x, view.camera.viewport.y, view.animating ? "true" : "false",
-            view.monitor->m_activeWorkspace == view.workspace ? "true" : "false");
+            view.monitor->m_activeWorkspace == view.workspace ? "true" : "false", view.pan.inputs, view.pan.frames,
+            view.panIntervalTotal > 0 ? view.panIntervals / view.panIntervalTotal : 0., view.panIntervalMax * 1000., view.inertia.active ? "true" : "false");
     }
     return result + "]}";
 }
@@ -418,6 +544,12 @@ inline void init(HANDLE plugin) {
     dragBeginHook = installHook("dragBegin", "CDragStateController::dragBegin(", reinterpret_cast<const void*>(&beginDrag));
     dragMoveHook = installHook("mouseMove", "CDragStateController::mouseMove(", reinterpret_cast<const void*>(&moveDrag));
     dragEndHook = installHook("dragEnd", "CDragStateController::dragEnd(", reinterpret_cast<const void*>(&endDrag));
+    relativeMotionHook = installHook("onMouseMoved", "CInputManager::onMouseMoved(", reinterpret_cast<const void*>(&relativeMotion));
+    panButtonListener = Event::bus()->m_events.input.mouse.button.listen(panButton);
+    panMotionListener = Event::bus()->m_events.input.mouse.move.listen(panMotion);
+    panFrameListener = Event::bus()->m_events.render.pre.listen(panFrame);
+    infiniteDesktopNativeScroll = scroll;
+    enabled = hasMarker("enabled");
     animationTimer = makeShared<CEventLoopTimer>(std::nullopt, [](SP<CEventLoopTimer>, void*) { animate(); }, nullptr);
     g_pEventLoopManager->addTimer(animationTimer);
     auto command = VeloraCompat::statusCommand(status);
@@ -433,7 +565,9 @@ inline void exit() {
     if (drag && dragEndHook) endDrag(drag->controller);
     enabled = false; unloading = true; drag.reset();
     dragWorkspace.reset(); readingDragCoords = false;
-    openListener.reset();
+    openListener.reset(); panButtonListener.reset(); panMotionListener.reset(); panFrameListener.reset();
+    infiniteDesktopNativeScroll = nullptr;
+    panGesture.reset(); scrollMonitor.reset(); scrollWorkspace.reset();
     if (animationTimer) g_pEventLoopManager->removeTimer(animationTimer);
     animationTimer.reset();
     if (statusCommand) HyprlandAPI::unregisterHyprCtlCommand(handle, statusCommand);

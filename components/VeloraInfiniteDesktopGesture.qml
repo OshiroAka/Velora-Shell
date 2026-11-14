@@ -129,9 +129,7 @@ Item {
         onExited: root.resetGesture()
     }
 
-    Timer {
-        interval: 22
-        repeat: true
+    FrameAnimation {
         running: root.dragging && root.bridgeReady
         onTriggered: root.flushMotion()
     }

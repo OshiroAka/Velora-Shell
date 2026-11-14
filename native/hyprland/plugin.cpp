@@ -3854,7 +3854,7 @@ SDispatchResult wallpaperTransitionDispatcher(std::string arguments) {
     return {};
 }
 
-void renderWallpaperTransition(VeloraCompat::RenderContext& ctx, const PHLLS& layer, const CRegion& damage, const CBox* cameraBox = nullptr) {
+void renderWallpaperTransition(VeloraCompat::RenderContext& ctx, const PHLLS& layer, const CRegion& damage) {
     if (!isWallpaperLayer(layer) || !layer->m_monitor || !g_wallpaperShader
         || g_wallpaperTransition.timing.token.empty() || g_wallpaperTransition.timing.expired())
         return;
@@ -3862,7 +3862,7 @@ void renderWallpaperTransition(VeloraCompat::RenderContext& ctx, const PHLLS& la
     if (found == g_wallpaperTransition.frames.end() || !found->second || !found->second->getTexture())
         return;
     const auto frame = found->second;
-    const CBox box = cameraBox ? *cameraBox : CBox{0,0,layer->m_monitor->m_transformedSize.x,layer->m_monitor->m_transformedSize.y};
+    const CBox box{0,0,layer->m_monitor->m_transformedSize.x,layer->m_monitor->m_transformedSize.y};
     CRegion region{box};
     if (!damage.empty()) region.intersect(damage);
     if (region.empty()) return;
@@ -4146,14 +4146,6 @@ void hkGLDrawTex(Render::GL::CGLElementRenderer* renderer, VELORA_HOOK_CONTEXT_A
     const auto layer = element->m_data.currentLS.lock();
     if (isWallpaperLayer(layer)) {
         original(renderer, VELORA_HOOK_CONTEXT_PASS element, damage);
-#ifdef VELORA_INFINITE_CAMERA_RUNTIME
-        if (Velora::InfiniteDesk::drawingWallpaper) {
-            auto tile = element->m_data.box;
-            ctx.m_data.renderModif.applyToBox(tile);
-            renderWallpaperTransition(ctx, layer, damage, &tile);
-            return;
-        }
-#endif
         renderWallpaperTransition(ctx, layer, damage);
         return;
     }
@@ -4644,7 +4636,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         .name = "velora-blur",
         .description = "Clear live framebuffer refraction for Velora",
         .author = "Velora Shell",
-        .version = "0.17.29",
+        .version = "0.17.31",
     };
 }
 

@@ -77,7 +77,7 @@ class InfiniteDesktopSettingsTests(unittest.TestCase):
                         or y+h+70*spacing<=yy+1 or yy+hh+70*spacing<=y+1)
 
     def test_stream_uses_saved_sensitivity_on_both_axes(self):
-        for speed,expected in ((.5,'pan 5 -1'),(2,'pan 20 -7')):
+        for speed,expected in ((.5,'pan 5.200000 -1.750000'),(2,'pan 20.800000 -7.000000')):
             self.save({'dragSensitivity':speed})
             script='''import importlib.machinery,importlib.util,json,sys
 loader=importlib.machinery.SourceFileLoader("desk",sys.argv[1]);spec=importlib.util.spec_from_loader(loader.name,loader)
