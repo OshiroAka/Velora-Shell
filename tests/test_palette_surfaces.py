@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+import hashlib
 from pathlib import Path
 from PIL import Image
 
@@ -83,6 +84,79 @@ class PaletteSurfaceTests(unittest.TestCase):
                 palettes.append(data['colors'])
             self.assertNotEqual(*palettes)
             self.assertFalse((home / 'config').exists())
+
+    def test_real_shuffle_exports_selected_palette_and_restore_keeps_it(self):
+        loader = importlib.machinery.SourceFileLoader('shuffle_wal', str(ROOT / 'scripts/velora-wal'))
+        spec = importlib.util.spec_from_loader(loader.name, loader)
+        wal = importlib.util.module_from_spec(spec); loader.exec_module(wal)
+        selected, _ = wal.select_wal()
+        if not selected or not shutil.which('magick') or not shutil.which('jq'):
+            self.skipTest('pywal16/ImageMagick/jq unavailable')
+        with tempfile.TemporaryDirectory(prefix='velora-paint-shuffle-') as directory:
+            home = Path(directory)
+            (home / 'bin').mkdir()
+            (home / 'bin/wal').symlink_to(selected['path'])
+            # Run the real pywal export, but send terminal sequences only to
+            # this fixture, never to the developer's open terminals.
+            terminal = home / 'terminal'
+            terminal.touch()
+            (home / 'sitecustomize.py').write_text('''import glob, os
+original_glob = glob.glob
+def isolated_glob(pattern, *args, **kwargs):
+    if pattern == '/dev/pts/[0-9]*':
+        return [os.environ['VELORA_TEST_TERMINAL']]
+    return original_glob(pattern, *args, **kwargs)
+glob.glob = isolated_glob
+''')
+            env = dict(os.environ, HOME=str(home), XDG_CONFIG_HOME=str(home / 'config'),
+                       XDG_DATA_HOME=str(home / 'data'), XDG_CACHE_HOME=str(home / 'cache'),
+                       XDG_STATE_HOME=str(home / 'state'), PYTHONPATH=str(home),
+                       VELORA_TEST_TERMINAL=str(terminal),
+                       PATH=str(home / 'bin') + os.pathsep + os.environ['PATH'])
+            image = Image.new('RGB', (160, 80))
+            for index, value in enumerate(('#ad9a8b', '#7aa0b8', '#40302a', '#183647')):
+                image.paste(value, (index * 40, 0, (index + 1) * 40, 80))
+            path = home / 'wallpaper.png'; image.save(path)
+            palette_path = home / 'cache/velora-shell/pywal/colors.json'
+            previous = None
+            for operation in ('restore', 'shuffle', 'shuffle', 'restore'):
+                result = subprocess.run([str(ROOT / 'scripts/generate-pywal-palette'),
+                                         str(path), 'dark', '', operation],
+                                        env=env, capture_output=True, text=True, timeout=40)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                document = json.loads(palette_path.read_text())
+                background = document['special']['background']
+                if operation == 'shuffle':
+                    self.assertNotEqual(background, previous)
+                    exported = json.loads((home / 'cache/wal/colors.json').read_text())
+                    self.assertEqual(exported, document)
+                    self.assertTrue((home / 'cache/wal/colors.sh').is_file())
+                    self.assertIn(f'\x1b]11;{background}\x1b\\', terminal.read_text())
+                elif previous:
+                    self.assertEqual(background, previous)
+                previous = background
+
+    def test_failed_shuffle_export_preserves_previous_surface_choice(self):
+        with tempfile.TemporaryDirectory(prefix='velora-paint-failure-') as directory:
+            home = Path(directory)
+            script = home / 'velora-palette-surfaces'
+            shutil.copy2(ROOT / 'scripts/velora-palette-surfaces', script)
+            resolver = home / 'velora-wal'
+            resolver.write_text('#!/bin/sh\nexit 19\n'); resolver.chmod(0o755)
+            image = home / 'wallpaper.png'
+            Image.new('RGB', (40, 40), '#183647').save(image)
+            palette = home / 'palette.json'; palette.write_text(json.dumps(self.palette()))
+            cache = home / 'cache/velora-shell/pywal'; cache.mkdir(parents=True)
+            key = hashlib.sha256((str(image) + '\0dark').encode()).hexdigest()
+            state = cache / 'surface-choices.json'
+            original = json.dumps({key: '#183647'})
+            state.write_text(original)
+            env = dict(os.environ, HOME=str(home), XDG_CACHE_HOME=str(home / 'cache'))
+            result = subprocess.run([str(script), str(image), str(palette), str(image),
+                                     'dark', str(cache), 'shuffle'],
+                                    env=env, capture_output=True, text=True, timeout=5)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(state.read_text(), original)
 
 
 if __name__ == '__main__':

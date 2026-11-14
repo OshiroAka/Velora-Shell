@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import random
+import subprocess
 import sys
 from PIL import Image
 
@@ -122,18 +123,24 @@ def main():
         state = {}
     document = build(document, image, tone, state.get(key), operation == 'shuffle')
     document.update(wallpaper=source, tone=tone)
-    state[key] = document['special']['background']
-    atomic(state_path, state)
-    atomic(Path(palette_path), document)
     if operation == 'shuffle':
-        from pywal import export, sequences
-        wal_cache = Path(os.environ.get('XDG_CACHE_HOME', str(Path.home() / '.cache'))) / 'wal'
-        wal_cache.mkdir(parents=True, exist_ok=True)
         document.setdefault('checksum', key)
         document.setdefault('alpha', '100')
-        export.every(document, str(wal_cache))
+    atomic(Path(palette_path), document)
+    if operation == 'shuffle':
+        wal_cache = Path(os.environ.get('XDG_CACHE_HOME', str(Path.home() / '.cache'))) / 'wal'
+        wal_cache.mkdir(parents=True, exist_ok=True)
+        # Pillow runs in system Python, while pywal16 may live in Velora's
+        # private venv. Let the existing resolver launch its own interpreter.
+        subprocess.run([
+            str(Path(__file__).resolve().with_name('velora-wal')),
+            '-n', '-t', '-e', '-f', str(palette_path),
+        ], env=dict(os.environ, PYWAL_CACHE_DIR=str(wal_cache)),
+            stdout=subprocess.DEVNULL, check=True)
+        # Keep Velora's additional metadata after pywal exports its templates.
         atomic(wal_cache / 'colors.json', document)
-        sequences.send(document, cache_dir=str(wal_cache))
+    state[key] = document['special']['background']
+    atomic(state_path, state)
     return 0
 
 
