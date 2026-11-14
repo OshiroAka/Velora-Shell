@@ -175,6 +175,29 @@ int main() {
     auto resized = *large; resized.viewport = {2560,1440};
     restored = bookmark.toggle(resized,{},{});
     assert(restored->viewport == resized.viewport && restored->center == overview.center && restored->zoom == overview.zoom);
+    for (int rate : {60,120,144}) for (Vector2D direction : {Vector2D{1200,0},Vector2D{-1200,0},Vector2D{0,900},Vector2D{0,-900}}) {
+        Camera from{{-300,700},{1920,1200},.377149515625}, target = from;
+        target.center += direction;
+        double peak = 0.;
+        for (int frame=0; frame<=std::ceil(rate*NAVIGATION_DURATION); ++frame) {
+            const auto t = double(frame)/rate/NAVIGATION_DURATION;
+            auto presented = animateCamera(from,target,t,CameraMotion::NAVIGATION);
+            const auto along = (presented.center-from.center).size()/direction.size();
+            peak = std::max(peak,along);
+            assert(presented.zoom == from.zoom);
+            assert(near(presented.center,from.center+direction*navigationProgress(t)));
+            // Click focus stays bounded; wheel zoom remains anchored at every frame.
+            auto focus = animateCamera(from,target,t,CameraMotion::FOCUS);
+            assert((focus.center-from.center).size() <= direction.size()+1e-6);
+            auto zoomed = from; zoomed.zoomAt(.85,anchor);
+            assert(near(animateCamera(from,zoomed,t,CameraMotion::STANDARD,anchor).project(from.unproject(anchor)),anchor));
+        }
+        assert(peak > 1.015 && peak < 1.02);
+        assert(near(animateCamera(from,target,0.,CameraMotion::NAVIGATION).center,from.center));
+        assert(near(animateCamera(from,target,1.,CameraMotion::NAVIGATION).center,target.center));
+        const auto interrupted = animateCamera(from,target,.4,CameraMotion::NAVIGATION);
+        assert(near(animateCamera(interrupted,from,0.,CameraMotion::NAVIGATION).center,interrupted.center));
+    }
 
     auto window = std::make_shared<Window>();
     auto monitor = std::make_shared<Monitor>();

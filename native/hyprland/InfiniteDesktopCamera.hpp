@@ -46,6 +46,27 @@ inline Camera interpolateCamera(const Camera& from, const Camera& target, double
     return result;
 }
 
+enum class CameraMotion { STANDARD, FOCUS, NAVIGATION };
+inline constexpr double NAVIGATION_DURATION = .6;
+inline double navigationProgress(double progress) {
+    if (progress <= 0.) return 0.;
+    if (progress >= 1.) return 1.;
+    // The former window movement used Hyprland's "easy" spring (mass 1,
+    // stiffness 238.1191, damping 24.21279333). Keep its subtle 1.9% overshoot.
+    const double decay = 24.21279333 / 2.;
+    const double frequency = std::sqrt(238.1191 - decay * decay);
+    const double time = progress * NAVIGATION_DURATION;
+    return 1. - std::exp(-decay * time) * (std::cos(frequency * time) + decay / frequency * std::sin(frequency * time));
+}
+inline Camera animateCamera(const Camera& from, const Camera& target, double progress, CameraMotion motion, std::optional<Vector2D> anchor = {}) {
+    const auto t = std::clamp(progress, 0., 1.);
+    const auto eased = motion == CameraMotion::FOCUS ? t*t*t*(t*(t*6. - 15.) + 10.) : 1. - std::pow(1. - t, 3.);
+    auto result = interpolateCamera(from, target, eased, anchor);
+    if (motion == CameraMotion::NAVIGATION)
+        result.center = from.center + (target.center - from.center) * navigationProgress(t);
+    return result;
+}
+
 struct FocusBookmark {
     std::optional<Camera> returnTo;
     std::optional<Camera> toggle(const Camera& current, const CBox& window, const CBox& usable) {

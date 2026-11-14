@@ -37,7 +37,7 @@ struct View {
     std::chrono::steady_clock::time_point started;
     bool animating = false;
     double duration = .18;
-    bool focusEasing = false;
+    CameraMotion motion = CameraMotion::STANDARD;
     std::chrono::steady_clock::time_point lastPanFrame;
     double panIntervalTotal = 0., panIntervalMax = 0.;
     uint64_t panIntervals = 0;
@@ -448,21 +448,20 @@ inline void animate() {
     for (auto& [_, view] : views) {
         if (!view.animating) continue;
         const auto t = std::clamp(std::chrono::duration<double>(now - view.started).count() / view.duration, 0., 1.);
-        const auto eased = view.focusEasing ? t*t*t*(t*(t*6. - 15.) + 10.) : 1. - std::pow(1. - t, 3.);
-        view.camera = interpolateCamera(view.from, view.target, eased, view.zoomAnchor);
+        view.camera = animateCamera(view.from, view.target, t, view.motion, view.zoomAnchor);
         view.animating = t < 1.;
         again = again || view.animating;
         damage(view);
     }
     if (again && animationTimer) animationTimer->updateTimeout(std::chrono::milliseconds(8));
 }
-inline void update(View& view, const Camera& target, bool smooth, std::optional<Vector2D> anchor = {}, double duration = .18, bool focusEasing = false) {
+inline void update(View& view, const Camera& target, bool smooth, std::optional<Vector2D> anchor = {}, double duration = .18, CameraMotion motion = CameraMotion::STANDARD) {
     view.inertia = {};
     view.from = view.camera;
     view.target = target;
     view.zoomAnchor = anchor;
     view.duration = duration;
-    view.focusEasing = focusEasing;
+    view.motion = motion;
     view.started = std::chrono::steady_clock::now();
     view.animating = smooth;
     if (smooth) animate();
@@ -491,7 +490,7 @@ inline bool focusClick(PHLMONITOR monitor, const Vector2D& point) {
         attach(window);
         Desktop::focusState()->fullWindowFocus(window, Desktop::FOCUS_REASON_CLICK);
     }
-    update(*view, *target, true, {}, .5, true);
+    update(*view, *target, true, {}, .5, CameraMotion::FOCUS);
     focusResult = returning ? "restored" : "focused";
     return true;
 }
@@ -553,7 +552,9 @@ inline SDispatchResult dispatch(std::string arguments) {
     else if (action == "restore") { target.zoom = zoom; target.center = {x, y}; }
     if (action == "reset" || action == "restore") view.focus.returnTo.reset();
     view.pan.pending = {};
-    update(view, target, action == "zoom" || action == "center" || action == "reset", anchor);
+    update(view, target, action == "zoom" || action == "center" || action == "reset", anchor,
+        action == "center" ? NAVIGATION_DURATION : .18,
+        action == "center" ? CameraMotion::NAVIGATION : CameraMotion::STANDARD);
     return {};
 }
 inline bool activeMonitor(PHLMONITOR monitor) {
