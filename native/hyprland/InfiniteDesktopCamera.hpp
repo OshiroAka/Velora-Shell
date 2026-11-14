@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <optional>
 
 namespace Velora::InfiniteDesk {
 using Hyprutils::Math::CBox;
@@ -16,6 +17,7 @@ struct Camera {
     Vector2D center, viewport;
     double zoom = 1.;
     static constexpr double MIN_ZOOM = .2, MAX_ZOOM = 3.;
+    static constexpr double ZOOM_STEP = .85;
 
     Vector2D project(Vector2D world) const { return (world - center) * zoom + viewport / 2.; }
     Vector2D unproject(Vector2D screen) const { return (screen - viewport / 2.) / zoom + center; }
@@ -33,6 +35,33 @@ struct Camera {
     }
     bool identity(Vector2D monitorOrigin) const {
         return std::abs(zoom - 1.) < 1e-9 && (center - monitorOrigin - viewport / 2.).size() < 1e-7;
+    }
+};
+
+inline Camera interpolateCamera(const Camera& from, const Camera& target, double progress, std::optional<Vector2D> anchor = {}) {
+    Camera result = from;
+    result.zoom += (target.zoom - from.zoom) * progress;
+    result.center = anchor ? from.unproject(*anchor) - (*anchor - result.viewport / 2.) / result.zoom
+                           : from.center + (target.center - from.center) * progress;
+    return result;
+}
+
+struct FocusBookmark {
+    std::optional<Camera> returnTo;
+    std::optional<Camera> toggle(const Camera& current, const CBox& window, const CBox& usable) {
+        if (returnTo) {
+            auto restored = *returnTo;
+            restored.viewport = current.viewport;
+            returnTo.reset();
+            return restored;
+        }
+        if (window.empty() || usable.empty()) return {};
+        auto focused = current;
+        // Native scale keeps text sharp; oversized windows fit the usable area.
+        focused.zoom = std::clamp(std::min({1., usable.w / window.w, usable.h / window.h}), Camera::MIN_ZOOM, Camera::MAX_ZOOM);
+        focused.center = window.middle() - (usable.middle() - current.viewport / 2.) / focused.zoom;
+        returnTo = current;
+        return focused;
     }
 };
 

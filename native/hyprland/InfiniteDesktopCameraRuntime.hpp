@@ -30,10 +30,14 @@ struct View {
     Camera camera, from, target;
     PanBatch pan;
     PanInertia inertia;
+    FocusBookmark focus;
+    std::optional<Vector2D> zoomAnchor;
     PHLMONITORREF monitor;
     PHLWORKSPACEREF workspace;
     std::chrono::steady_clock::time_point started;
     bool animating = false;
+    double duration = .18;
+    bool focusEasing = false;
     std::chrono::steady_clock::time_point lastPanFrame;
     double panIntervalTotal = 0., panIntervalMax = 0.;
     uint64_t panIntervals = 0;
@@ -335,6 +339,7 @@ inline bool queuePan(PHLMONITOR monitor, Vector2D delta, bool kinetic = false) {
     // A direct gesture takes over at the currently presented camera position.
     // There is no trailing interpolation that could add lag behind the pointer.
     view->animating = false;
+    view->zoomAnchor.reset();
     if (!pending) damage(*view);
     return true;
 }
@@ -363,11 +368,21 @@ struct PanGesture {
 };
 inline std::optional<PanGesture> panGesture;
 inline bool relativePanMotion = false;
+inline bool focusButtonHeld = false;
+inline uint64_t focusPresses = 0;
+inline std::string focusResult = "idle";
+inline bool focusClick(PHLMONITOR monitor, const Vector2D& point);
 inline bool panGestureActive() {
     return panGesture && available(panGesture->monitor.lock())
         && panGesture->monitor->m_activeWorkspace == panGesture->workspace;
 }
 inline void panButton(const IPointer::SButtonEvent& event, Event::SCallbackInfo& info) {
+    if (event.button == 274 && event.state == WL_POINTER_BUTTON_STATE_PRESSED) {
+        ++focusPresses; focusResult = info.cancelled ? "cancelled" : "pressed";
+    }
+    if (focusButtonHeld && event.button == 274 && event.state == WL_POINTER_BUTTON_STATE_RELEASED) {
+        focusButtonHeld = false; info.cancelled = true; return;
+    }
     if (panGesture && event.button == panGesture->button && event.state == WL_POINTER_BUTTON_STATE_RELEASED) {
         if (panGestureActive()) {
             auto view = viewFor(panGesture->monitor.lock());
@@ -380,6 +395,9 @@ inline void panButton(const IPointer::SButtonEvent& event, Event::SCallbackInfo&
     const auto monitor = State::monitorState()->query().vec(point).run();
     if (auto view = viewFor(monitor)) view->inertia = {};
     const uint32_t mods = uint32_t(g_pInputManager->getModsFromAllKBs()) & (64U | 1U | 4U | 8U);
+    if (event.button == 274 && mods == 0 && !panGesture && focusClick(monitor, point)) {
+        focusButtonHeld = true; info.cancelled = true; return;
+    }
     const bool fallbackDrag = event.button == 272 && mods == (64U | 8U);
     if (!fallbackDrag && (event.button != 273 || !infiniteDesktopGestureFocused(monitor))) return;
     if (!ensureView(monitor)) return;
@@ -429,30 +447,60 @@ inline void animate() {
     const auto now = std::chrono::steady_clock::now();
     for (auto& [_, view] : views) {
         if (!view.animating) continue;
-        const auto t = std::clamp(std::chrono::duration<double>(now - view.started).count() / .18, 0., 1.);
-        const auto eased = 1. - std::pow(1. - t, 3.);
-        view.camera.center = view.from.center + (view.target.center - view.from.center) * eased;
-        view.camera.zoom = view.from.zoom + (view.target.zoom - view.from.zoom) * eased;
+        const auto t = std::clamp(std::chrono::duration<double>(now - view.started).count() / view.duration, 0., 1.);
+        const auto eased = view.focusEasing ? t*t*t*(t*(t*6. - 15.) + 10.) : 1. - std::pow(1. - t, 3.);
+        view.camera = interpolateCamera(view.from, view.target, eased, view.zoomAnchor);
         view.animating = t < 1.;
         again = again || view.animating;
         damage(view);
     }
     if (again && animationTimer) animationTimer->updateTimeout(std::chrono::milliseconds(8));
 }
-inline void update(View& view, const Camera& target, bool smooth) {
+inline void update(View& view, const Camera& target, bool smooth, std::optional<Vector2D> anchor = {}, double duration = .18, bool focusEasing = false) {
     view.inertia = {};
     view.from = view.camera;
     view.target = target;
+    view.zoomAnchor = anchor;
+    view.duration = duration;
+    view.focusEasing = focusEasing;
     view.started = std::chrono::steady_clock::now();
     view.animating = smooth;
     if (smooth) animate();
     else { view.camera = target; damage(view); }
+}
+inline bool focusClick(PHLMONITOR monitor, const Vector2D& point) {
+    const auto rejected = [](const char* reason) { focusResult = reason; return false; };
+    if (!available(monitor) || !g_pSeatManager) return rejected("unavailable");
+    const auto resource = g_pSeatManager->m_state.pointerFocus.lock();
+    const auto surface = Desktop::View::CWLSurface::fromResource(resource);
+    if (!surface || !surface->view()) return rejected("no-surface");
+    const auto type = surface->view()->type();
+    const bool canvas = infiniteDesktopGestureFocused(monitor);
+    if (type == Desktop::View::VIEW_TYPE_POPUP || (type == Desktop::View::VIEW_TYPE_LAYER_SURFACE && !canvas)) return rejected("overlay");
+    auto window = Desktop::viewState()->hitTest().windowAt(point, Desktop::View::INPUT_EXTENTS | Desktop::View::ALLOW_FLOATING);
+    auto view = ensureView(monitor);
+    if (!view || (!view->focus.returnTo && (!window || viewFor(window) != view))) return rejected("no-window");
+    if (!window && !canvas) return rejected("outside-canvas");
+    auto usable = monitor->m_reservedArea.apply(CBox{{}, monitor->m_size});
+    if (usable.w > 64. && usable.h > 64.) usable.expand(-24.);
+    const bool returning = view->focus.returnTo.has_value();
+    auto target = view->focus.toggle(view->camera, window ? window->getFullWindowBoundingBox() : CBox{}, usable);
+    if (!target) return rejected("invalid-bounds");
+    view->pan.pending = {};
+    if (!returning && window) {
+        attach(window);
+        Desktop::focusState()->fullWindowFocus(window, Desktop::FOCUS_REASON_CLICK);
+    }
+    update(*view, *target, true, {}, .5, true);
+    focusResult = returning ? "restored" : "focused";
+    return true;
 }
 inline SDispatchResult dispatch(std::string arguments) {
     std::istringstream input(arguments);
     std::string action, extra;
     input >> action;
     auto monitor = Desktop::focusState()->monitor();
+    const bool explicitMonitor = action.starts_with('@');
     if (action.starts_with('@')) {
         monitor.reset();
         for (const auto& output : State::monitorState()->monitors())
@@ -483,18 +531,29 @@ inline SDispatchResult dispatch(std::string arguments) {
             return {.success = false, .error = "Invalid camera coordinates"};
     }
     if (input >> extra) return {.success = false, .error = "Unexpected camera argument"};
+    if (action == "zoom" && !explicitMonitor) {
+        if (auto pointerMonitor = State::monitorState()->query().vec(Pointer::mgr()->untransformedPosition()).run()) monitor = pointerMonitor;
+    }
     enabled = true;
     if (!available(monitor)) return {.success = false, .error = "Camera suspended on this workspace"};
     auto& view = *ensureView(monitor);
     if (action == "pan") { queuePan(monitor, {x, y}); return {}; }
     for (auto& window : Desktop::windowState()->windows()) attach(window);
     auto target = view.target;
-    if (action == "zoom") target.zoomAt(target.zoom * (direction == "out" ? .85 : 1. / .85), target.viewport / 2.);
+    std::optional<Vector2D> anchor;
+    if (action == "zoom") {
+        const auto point = Pointer::mgr()->untransformedPosition() - monitor->m_position;
+        anchor = Vector2D{std::clamp(point.x, 0., view.camera.viewport.x), std::clamp(point.y, 0., view.camera.viewport.y)};
+        const auto zoom = target.zoom * (direction == "out" ? Camera::ZOOM_STEP : 1. / Camera::ZOOM_STEP);
+        target = view.camera;
+        target.zoomAt(zoom, *anchor);
+    }
     else if (action == "center") target.center = {x, y};
     else if (action == "reset") target = Camera{monitor->m_position + monitor->m_size / 2., monitor->m_size};
     else if (action == "restore") { target.zoom = zoom; target.center = {x, y}; }
+    if (action == "reset" || action == "restore") view.focus.returnTo.reset();
     view.pan.pending = {};
-    update(view, target, action == "zoom" || action == "center" || action == "reset");
+    update(view, target, action == "zoom" || action == "center" || action == "reset", anchor);
     return {};
 }
 inline bool activeMonitor(PHLMONITOR monitor) {
@@ -527,17 +586,17 @@ inline void wallpaper(Render::IElementRenderer* renderer, Render::CRenderContext
 }
 
 inline std::string status(VeloraCompat::OutputFormat, std::string) {
-    std::string result = std::format(R"({{"enabled":{},"panTransport":"native-input-vblank","wallpaper":"fixed","views":[)", enabled ? "true" : "false");
+    std::string result = std::format(R"({{"enabled":{},"panTransport":"native-input-vblank","wallpaper":"fixed","focusPresses":{},"focusResult":"{}","views":[)", enabled ? "true" : "false", focusPresses, focusResult);
     bool first = true;
     for (const auto& [_, view] : views) {
         if (!view.monitor || !view.workspace) continue;
         if (!first) result += ',';
         first = false;
-        result += std::format(R"({{"monitor":"{}","workspace":{},"zoom":{},"center":[{},{}],"viewport":[{},{}],"animating":{},"active":{},"panInputs":{},"panFrames":{},"panFps":{},"panMaxIntervalMs":{},"coasting":{}}})",
+        result += std::format(R"({{"monitor":"{}","workspace":{},"zoom":{},"center":[{},{}],"viewport":[{},{}],"animating":{},"active":{},"panInputs":{},"panFrames":{},"panFps":{},"panMaxIntervalMs":{},"coasting":{},"focused":{}}})",
             view.monitor->m_name, view.workspace->numberedID().value_or(0), view.camera.zoom, view.camera.center.x, view.camera.center.y,
             view.camera.viewport.x, view.camera.viewport.y, view.animating ? "true" : "false",
             view.monitor->m_activeWorkspace == view.workspace ? "true" : "false", view.pan.inputs, view.pan.frames,
-            view.panIntervalTotal > 0 ? view.panIntervals / view.panIntervalTotal : 0., view.panIntervalMax * 1000., view.inertia.active ? "true" : "false");
+            view.panIntervalTotal > 0 ? view.panIntervals / view.panIntervalTotal : 0., view.panIntervalMax * 1000., view.inertia.active ? "true" : "false", view.focus.returnTo ? "true" : "false");
     }
     return result + "]}";
 }
@@ -592,6 +651,7 @@ inline void exit() {
     openListener.reset(); panButtonListener.reset(); panMotionListener.reset(); panFrameListener.reset();
     infiniteDesktopNativeScroll = nullptr;
     panGesture.reset(); scrollMonitor.reset(); scrollWorkspace.reset();
+    focusButtonHeld = false;
     if (animationTimer) g_pEventLoopManager->removeTimer(animationTimer);
     animationTimer.reset();
     if (statusCommand) HyprlandAPI::unregisterHyprCtlCommand(handle, statusCommand);

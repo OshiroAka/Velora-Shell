@@ -141,6 +141,41 @@ int main() {
     const auto valid = camera.center;
     camera.zoomAt(NAN,anchor); assert(near(valid,camera.center));
 
+    for (Vector2D cursor : {Vector2D{25,50},Vector2D{1740,800},Vector2D{960,540}}) {
+        Camera from{{-2300,1800},{1920,1080},.377149515625};
+        auto target = from; target.zoomAt(.85,cursor);
+        const auto world = from.unproject(cursor);
+        for (int frame=0; frame<=144; ++frame) {
+            auto presented = interpolateCamera(from,target,double(frame)/144.,cursor);
+            assert(near(presented.project(world),cursor));
+            assert(presented.zoom >= from.zoom && presented.zoom <= target.zoom);
+        }
+        // A new wheel event anchors the point currently under the new cursor,
+        // including when the preceding animation has only partly completed.
+        auto halfway = interpolateCamera(from,target,.4,cursor);
+        auto next = halfway; const auto moved = cursor+Vector2D{17,-12};
+        next.zoomAt(1.,moved);
+        for (int frame=0; frame<=60; ++frame)
+            assert(near(interpolateCamera(halfway,next,frame/60.,moved).project(halfway.unproject(moved)),moved));
+    }
+    Camera overview{{2369.101101,766.929391},{1920,1200},.377149515625};
+    const CBox usable{87,64,1809,1112}, focusWindow{3000,-800,1000,600};
+    FocusBookmark bookmark;
+    assert(!bookmark.toggle(overview,{},usable) && !bookmark.returnTo);
+    auto focused = bookmark.toggle(overview,focusWindow,usable);
+    assert(focused && focused->zoom == 1. && bookmark.returnTo);
+    assert(near(focused->project(focusWindow.middle()),usable.middle()));
+    // Restoring works even after closing the window or manually panning.
+    auto changed = *focused; changed.pan({83,-34}); changed.zoomAt(.85,{100,200});
+    auto restored = bookmark.toggle(changed,{},usable);
+    assert(restored && restored->zoom == overview.zoom && near(restored->center,overview.center) && !bookmark.returnTo);
+    auto large = bookmark.toggle(overview,{-4000,500,4000,2000},usable);
+    assert(large && large->zoom < 1. && large->project(CBox{-4000,500,4000,2000}).w <= usable.w+.001);
+    assert(large->project(CBox{-4000,500,4000,2000}).h <= usable.h+.001);
+    auto resized = *large; resized.viewport = {2560,1440};
+    restored = bookmark.toggle(resized,{},{});
+    assert(restored->viewport == resized.viewport && restored->center == overview.center && restored->zoom == overview.zoom);
+
     auto window = std::make_shared<Window>();
     auto monitor = std::make_shared<Monitor>();
     WindowCamera transformer(window);
