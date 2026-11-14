@@ -1,0 +1,51 @@
+#!/usr/bin/env python3
+"""Decode a bounded still frame without sending video containers to pywal."""
+import pathlib
+import subprocess
+import sys
+
+from PIL import Image, UnidentifiedImageError
+
+
+def prepare(source, output, preview=""):
+    candidates = [source]
+    if preview and preview != source:
+        candidates.append(preview)
+    failures = []
+    for candidate in candidates:
+        path = pathlib.Path(candidate)
+        if not path.is_file():
+            continue
+        try:
+            with Image.open(path) as image:
+                image.seek(0)
+                # Composite transparent character artwork before quantizing.
+                image.thumbnail((768, 768), Image.Resampling.LANCZOS)
+                rgba = image.convert("RGBA")
+                frame = Image.new("RGBA", rgba.size, "#17191f")
+                frame.alpha_composite(rgba)
+                frame.convert("RGB").save(output, "PNG")
+                return
+        except (UnidentifiedImageError, OSError):
+            pass
+        # Try past a possible black video intro, then the first frame for
+        # short clips. ffmpeg only decodes one scaled frame per attempt.
+        for seek in (1, 0):
+            try:
+                result = subprocess.run([
+                    "ffmpeg", "-v", "error", "-nostdin", "-threads", "2",
+                    "-ss", str(seek), "-i", str(path), "-frames:v", "1",
+                    "-vf", "scale=768:768:force_original_aspect_ratio=decrease",
+                    "-threads", "2", "-y", str(output),
+                ], capture_output=True, text=True, timeout=30)
+                if result.returncode == 0 and pathlib.Path(output).is_file():
+                    return
+                failures.append(result.stderr[-300:])
+            except (OSError, subprocess.TimeoutExpired) as error:
+                failures.append(str(error))
+    raise RuntimeError("Cannot extract wallpaper palette: " + str(source)
+                       + "; " + "; ".join(failures))
+
+
+if __name__ == "__main__":
+    prepare(*sys.argv[1:])

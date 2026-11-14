@@ -1,0 +1,118 @@
+#!/usr/bin/env python3
+"""Install the author's Pixelon download in the user's Fontconfig directory."""
+import argparse
+import hashlib
+import io
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import urllib.request
+import zipfile
+
+sys.dont_write_bytecode = True
+SOURCE_URL = "https://www.dafont.com/pixelon.font"
+DOWNLOAD_URL = "https://dl.dafont.com/dl/?f=pixelon"
+MAX_DOWNLOAD = 8 * 1024 * 1024
+
+
+def font_path():
+    return Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share") / "fonts/velora/Pixelon.ttf"
+
+
+def font_family(path):
+    try:
+        result = subprocess.run(["fc-scan", "-f", "%{family}\n", str(path)],
+                                capture_output=True, text=True, timeout=5)
+        return result.returncode == 0 and any(name.strip().casefold() == "pixelon"
+            for name in result.stdout.replace("\n", ",").split(","))
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def status():
+    target = font_path()
+    if target.is_file() and font_family(target):
+        return {"ready": True, "path": str(target), "source": "user"}
+    try:
+        result = subprocess.run(["fc-match", "-f", "%{file}\n", "Pixelon"],
+                                capture_output=True, text=True, timeout=5)
+        match = Path(result.stdout.strip())
+        if result.returncode == 0 and match.is_file() and font_family(match):
+            return {"ready": True, "path": str(match), "source": "existing"}
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return {"ready": False, "path": str(target), "source": SOURCE_URL}
+
+
+def download():
+    request = urllib.request.Request(DOWNLOAD_URL, headers={"User-Agent": "Velora-Shell/1.0", "Referer": SOURCE_URL})
+    with urllib.request.urlopen(request, timeout=25) as response:
+        payload = response.read(MAX_DOWNLOAD + 1)
+    if len(payload) > MAX_DOWNLOAD:
+        raise RuntimeError("Download Pixelon excedeu o tamanho esperado.")
+    return payload
+
+
+def install():
+    current = status()
+    if current["ready"]:
+        print("PIXELON: PASS (existente: " + current["path"] + ")")
+        return current
+    target = font_path()
+    if target.exists():
+        raise RuntimeError("Arquivo existente não reconhecido como Pixelon; preservado: " + str(target))
+    # The author offers this download for personal/non-profit use. Download it
+    # per installation; the third-party font binary is not bundled in the repo.
+    payload = download()
+    with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+        candidates = [item for item in archive.infolist() if not item.is_dir()
+                      and Path(item.filename).name.casefold() == "pixelon.ttf"]
+        if len(candidates) != 1 or candidates[0].file_size > MAX_DOWNLOAD:
+            raise RuntimeError("Download não contém uma única Pixelon.ttf válida.")
+        font = archive.read(candidates[0])
+        licenses = [item for item in archive.infolist() if item.filename.lower().endswith(".txt")
+                    and any(word in item.filename.lower() for word in ("license", "readme", "eula"))
+                    and item.file_size < 128 * 1024]
+        notice = "\n\n".join(archive.read(item).decode("utf-8", "replace") for item in licenses)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(suffix=".ttf", dir=target.parent) as temporary:
+        temporary.write(font); temporary.flush()
+        if not font_family(Path(temporary.name)):
+            raise RuntimeError("fc-scan não reconheceu a família Pixelon; instalação interrompida.")
+        os.chmod(temporary.name, 0o644)
+        # Commit only a font already parsed and identified by Fontconfig.
+        os.link(temporary.name, target)
+    record = {"family": "Pixelon", "author": "StudioAKTYPE", "source": SOURCE_URL,
+              "download": DOWNLOAD_URL, "sha256": hashlib.sha256(font).hexdigest(),
+              "license": "Author download for personal, non-profit and charity use; commercial licensing at source."}
+    (target.parent / "Pixelon-source.json").write_text(json.dumps(record, indent=2) + "\n")
+    if notice:
+        (target.parent / "Pixelon-author-notice.txt").write_text(notice)
+    result = subprocess.run(["fc-cache", "-f", str(target.parent)], capture_output=True, text=True, timeout=20)
+    if result.returncode:
+        raise RuntimeError("Não foi possível atualizar Fontconfig: " + result.stderr.strip())
+    current = status()
+    if not current["ready"]:
+        raise RuntimeError("Pixelon não disponível após a instalação.")
+    print("PIXELON: PASS (" + current["path"] + ")")
+    return current
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--check", action="store_true", help="Inspect the required font without downloading")
+    args = parser.parse_args()
+    if args.check:
+        value = status(); print(json.dumps(value)); return 0 if value["ready"] else 1
+    install()
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except (OSError, RuntimeError, ValueError, zipfile.BadZipFile, subprocess.SubprocessError) as error:
+        raise SystemExit("PIXELON: FAILED: " + str(error))

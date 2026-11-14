@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+mode="${1:-full}"
+
+for tool in grim wl-copy; do
+  if ! command -v "$tool" >/dev/null 2>&1; then
+    printf 'Velora screenshot: %s ausente; execute ./install.sh para instalar as dependências.\n' "$tool" >&2
+    notify-send "Velora screenshot" "$tool ausente; captura/clipboard pendentes." >/dev/null 2>&1 || true
+    exit 1
+  fi
+done
+
+out_dir="$HOME/Pictures/Screenshots"
+mkdir -p "$out_dir"
+out_file="$out_dir/velora-${mode}-$(date +'%Y-%m-%d_%H-%M-%S_%N').png"
+
+case "$mode" in
+  full|screen)
+    grim "$out_file"
+    ;;
+  select|area|region)
+    if ! command -v slurp >/dev/null 2>&1; then
+      notify-send "Velora screenshot" "slurp nao esta instalado. Instale: sudo pacman -S slurp" >/dev/null 2>&1 || true
+      exit 1
+    fi
+    geometry="$(slurp)" || exit 0
+    [ -n "$geometry" ] || exit 0
+    grim -g "$geometry" "$out_file"
+    ;;
+  *)
+    notify-send "Velora screenshot" "Modo invalido: $mode" >/dev/null 2>&1 || true
+    printf 'usage: %s [full|select]\n' "$0" >&2
+    exit 2
+    ;;
+esac
+
+if ! wl-copy --type image/png < "$out_file"; then
+  printf 'Velora screenshot: imagem salva, mas a cópia falhou: %s\n' "$out_file" >&2
+  notify-send "Velora screenshot" "Salvo; falha ao copiar: $out_file" >/dev/null 2>&1 || true
+  exit 1
+fi
+
+notify-send "Velora screenshot" "Salvo e copiado: $out_file" >/dev/null 2>&1 || true

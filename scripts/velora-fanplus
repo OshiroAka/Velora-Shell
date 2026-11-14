@@ -1,0 +1,54 @@
+#!/usr/bin/env python3
+"""Unprivileged Fan+ boundary used by QML. Never runs a shell."""
+
+import json
+from pathlib import Path
+import subprocess
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from hardware.fan.lenovo_ideapad_15irh10 import LenovoIdeaPad15IRH10Provider
+
+
+def result(state, supported=False, error="", enabled=False):
+    return {"state": state, "supported": supported, "enabled": enabled,
+            "busy": False, "error": error, "targetRpm": 6300}
+
+
+def main(argv):
+    if len(argv) != 1 or argv[0] not in ("on", "off", "status"):
+        print(json.dumps(result("error", error="Operação Fan+ inválida")))
+        return 2
+    provider = LenovoIdeaPad15IRH10Provider()
+    available, reason = provider.availability()
+    if not available:
+        print(json.dumps(result("unsupported", error=reason)))
+        return 1
+    command = argv[0]
+    try:
+        if command == "status":
+            # /run is cleared on a cold boot. Reloading QML keeps the state.
+            enabled = provider.STATE.read_text().strip() == "active"
+            print(json.dumps(result("active" if enabled else "off", True, enabled=enabled)))
+            return 0
+    except FileNotFoundError:
+        print(json.dumps(result("off", True)))
+        return 0
+    except OSError as exc:
+        print(json.dumps(result("error", True, str(exc))))
+        return 1
+    try:
+        proc = subprocess.run(["pkexec", str(provider.HELPER), command],
+                              text=True, capture_output=True, timeout=20, check=False)
+        payload = json.loads(proc.stdout)
+        if not isinstance(payload, dict):
+            raise ValueError("Resposta inválida do helper")
+        print(json.dumps(payload))
+        return 0 if proc.returncode == 0 else 1
+    except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
+        print(json.dumps(result("error", True, str(exc))))
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

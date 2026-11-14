@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+state_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/velora-wallpaper-library-state"
+command="${1:-list}"
+
+case "$command" in
+  list)
+    exec "$state_script" list-hidden
+    ;;
+  set)
+    exec "$state_script" set-hidden "${2:-[]}" | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin).get("hidden", []), ensure_ascii=False))'
+    ;;
+  *)
+    exit 2
+    ;;
+esac

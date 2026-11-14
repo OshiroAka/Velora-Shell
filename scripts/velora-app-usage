@@ -1,0 +1,109 @@
+#!/usr/bin/env python3
+
+import fcntl
+import json
+import os
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+
+STATE_HOME = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state"))
+STATE_DIR = STATE_HOME / "velora-shell"
+STATE_FILE = STATE_DIR / "app-usage.json"
+LOCK_FILE = STATE_DIR / "app-usage.lock"
+
+
+def load_state():
+    try:
+        raw = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+
+    if not isinstance(raw, dict):
+        return {}
+
+    clean = {}
+    for app_id, record in raw.items():
+        if not isinstance(app_id, str) or not app_id or not isinstance(record, dict):
+            continue
+        try:
+            count = max(0, int(record.get("count", 0)))
+            last_used = max(0, int(record.get("lastUsed", 0)))
+        except (TypeError, ValueError):
+            continue
+        clean[app_id] = {"count": count, "lastUsed": last_used}
+    return clean
+
+
+def save_state(state):
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        dir=STATE_DIR,
+        prefix="app-usage-",
+        suffix=".tmp",
+        delete=False,
+    ) as handle:
+        json.dump(state, handle, ensure_ascii=False, sort_keys=True)
+        handle.write("\n")
+        temp_name = handle.name
+    os.replace(temp_name, STATE_FILE)
+
+
+def locked_state(update=None):
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    with LOCK_FILE.open("a+", encoding="utf-8") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        state = load_state()
+        if update is not None:
+            update(state)
+            save_state(state)
+        return state
+
+
+def record(app_id):
+    app_id = str(app_id or "").strip()
+    if not app_id:
+        return 2
+
+    def update(state):
+        current = state.get(app_id, {})
+        state[app_id] = {
+            "count": max(0, int(current.get("count", 0))) + 1,
+            "lastUsed": int(time.time()),
+        }
+
+    locked_state(update)
+    return 0
+
+
+def list_usage(limit):
+    state = locked_state()
+    rows = [
+        {"id": app_id, "count": record["count"], "lastUsed": record["lastUsed"]}
+        for app_id, record in state.items()
+    ]
+    rows.sort(key=lambda row: (-row["count"], -row["lastUsed"], row["id"].lower()))
+    for row in rows[:limit]:
+        print(json.dumps(row, ensure_ascii=False, separators=(",", ":")))
+    return 0
+
+
+def main():
+    command = sys.argv[1] if len(sys.argv) > 1 else "list"
+    if command == "record":
+        return record(sys.argv[2] if len(sys.argv) > 2 else "")
+    if command == "list":
+        try:
+            limit = max(1, min(1000, int(sys.argv[2]))) if len(sys.argv) > 2 else 1000
+        except ValueError:
+            return 2
+        return list_usage(limit)
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

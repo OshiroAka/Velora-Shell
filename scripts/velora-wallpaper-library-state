@@ -1,0 +1,176 @@
+#!/usr/bin/env python3
+"""Persistent library state shared by every Velora wallpaper surface."""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+from pathlib import Path
+from typing import Any
+
+
+HOME = Path(os.environ.get("HOME", "~")).expanduser()
+STATE_ROOT = Path(os.environ.get("XDG_STATE_HOME", HOME / ".local" / "state")) / "velora-shell"
+STATE_FILE = STATE_ROOT / "wallpaper-library.json"
+LEGACY_HIDDEN_FILE = HOME / ".cache" / "velora-shell" / "hidden-wallpapers.json"
+CURRENT_WALLPAPER_FILE = HOME / ".cache" / "velora-shell" / "current_wallpaper"
+
+
+def normalize_keys(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+
+    result: list[str] = []
+    seen: set[str] = set()
+    for item in value:
+        key = str(item).strip()
+        if key and key not in seen:
+            seen.add(key)
+            result.append(key)
+    return result
+
+
+def read_json(path: Path, fallback: Any) -> Any:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return fallback
+
+
+def default_state() -> dict[str, Any]:
+    return {
+        "version": 1,
+        "favorites": [],
+        "hidden": [],
+        "migratedLegacyHidden": False,
+    }
+
+
+def load_state() -> tuple[dict[str, Any], bool]:
+    raw = read_json(STATE_FILE, {})
+    state = default_state()
+    changed = False
+
+    if isinstance(raw, dict):
+        state["favorites"] = normalize_keys(raw.get("favorites"))
+        state["hidden"] = normalize_keys(raw.get("hidden"))
+        state["migratedLegacyHidden"] = bool(raw.get("migratedLegacyHidden", False))
+        try:
+            state["version"] = max(1, int(raw.get("version", 1)))
+        except (TypeError, ValueError):
+            state["version"] = 1
+            changed = True
+    else:
+        changed = True
+
+    if not state["migratedLegacyHidden"]:
+        shell = normalize_keys(read_json(LEGACY_HIDDEN_FILE, []))
+        state["hidden"] = normalize_keys(state["hidden"] + shell)
+        state["migratedLegacyHidden"] = True
+        changed = True
+
+    return state, changed
+
+
+def save_state(state: dict[str, Any]) -> None:
+    STATE_ROOT.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "version": 1,
+        "favorites": normalize_keys(state.get("favorites")),
+        "hidden": normalize_keys(state.get("hidden")),
+        "migratedLegacyHidden": True,
+    }
+    temporary = STATE_FILE.with_suffix(f".tmp-{os.getpid()}")
+    temporary.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(STATE_FILE)
+
+
+def parse_list(raw: str) -> list[str]:
+    try:
+        return normalize_keys(json.loads(raw))
+    except Exception:
+        return []
+
+
+def toggle(items: list[str], key: str) -> list[str]:
+    normalized = normalize_keys(items)
+    if not key:
+        return normalized
+    if key in normalized:
+        return [item for item in normalized if item != key]
+    return normalized + [key]
+
+
+def emit(value: Any) -> None:
+    print(json.dumps(value, ensure_ascii=False, separators=(",", ":")))
+
+
+def main() -> int:
+    command = sys.argv[1] if len(sys.argv) > 1 else "get"
+
+    if command == "active":
+        try:
+            kind, path, preview = CURRENT_WALLPAPER_FILE.read_text(encoding="utf-8").strip().split("|", 2)
+        except Exception:
+            emit({"key": "", "kind": "", "path": "", "preview": ""})
+            return 0
+        emit({
+            "key": f"{kind}:{path}",
+            "kind": kind,
+            "path": path,
+            "preview": preview,
+        })
+        return 0
+
+    state, changed = load_state()
+    mutating = False
+
+    if command == "get":
+        pass
+    elif command == "list-hidden":
+        if changed:
+            save_state(state)
+        emit(state["hidden"])
+        return 0
+    elif command == "list-favorites":
+        if changed:
+            save_state(state)
+        emit(state["favorites"])
+        return 0
+    elif command == "set-hidden":
+        state["hidden"] = parse_list(sys.argv[2] if len(sys.argv) > 2 else "[]")
+        mutating = True
+    elif command == "set-favorites":
+        state["favorites"] = parse_list(sys.argv[2] if len(sys.argv) > 2 else "[]")
+        mutating = True
+    elif command == "set":
+        try:
+            payload = json.loads(sys.argv[2] if len(sys.argv) > 2 else "{}")
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        state["favorites"] = normalize_keys(payload.get("favorites"))
+        state["hidden"] = normalize_keys(payload.get("hidden"))
+        mutating = True
+    elif command == "toggle-hidden":
+        state["hidden"] = toggle(state["hidden"], sys.argv[2].strip() if len(sys.argv) > 2 else "")
+        mutating = True
+    elif command == "toggle-favorite":
+        state["favorites"] = toggle(state["favorites"], sys.argv[2].strip() if len(sys.argv) > 2 else "")
+        mutating = True
+    else:
+        return 2
+
+    if changed or mutating:
+        save_state(state)
+    emit({"favorites": state["favorites"], "hidden": state["hidden"]})
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

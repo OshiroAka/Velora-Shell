@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# A direct Hyprland login may not activate graphical-session.target (unlike UWSM).
+# Preserve an authentication agent already supplied by the user's desktop.
+set -euo pipefail
+if pgrep -u "$(id -u)" -f '(^|/)(hyprpolkitagent|polkit-gnome-authentication-agent-1|polkit-kde-authentication-agent-1|mate-polkit|lxqt-policykit-agent)([[:space:]]|$)' >/dev/null; then
+    exit 0
+fi
+exec systemctl --user start hyprpolkitagent.service

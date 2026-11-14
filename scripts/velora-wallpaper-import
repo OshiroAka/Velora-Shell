@@ -1,0 +1,96 @@
+#!/usr/bin/env python3
+"""Copy dropped local media into the wallpaper library, without replacing files."""
+import filecmp
+import json
+import os
+from pathlib import Path
+import shutil
+import stat
+import sys
+import tempfile
+from urllib.parse import unquote, urlsplit
+
+IMAGES = {".png", ".jpg", ".jpeg", ".webp"}
+LIVE = {".gif", ".mp4", ".webm", ".mkv", ".mov"}
+
+
+def import_file(url, library):
+    parsed = urlsplit(url)
+    if (parsed.scheme.lower() != "file" or parsed.netloc.lower() not in ("", "localhost")
+            or parsed.query or parsed.fragment):
+        raise ValueError("Arraste um arquivo local já baixado.")
+    source = Path(unquote(parsed.path, errors="strict"))
+    if not source.is_absolute() or source.suffix.lower() not in IMAGES | LIVE:
+        raise ValueError("Formato de wallpaper não suportado.")
+    info = source.stat()
+    if not stat.S_ISREG(info.st_mode) or info.st_size == 0:
+        raise ValueError("O download ainda não está disponível.")
+    library = Path(os.path.abspath(library))
+    resolved = source.resolve()
+    # A file already in the watched library keeps its existing identity, even
+    # when it was placed in a different subdirectory by the user.
+    original = Path(os.path.abspath(source))
+    if original.is_relative_to(library) or resolved.is_relative_to(library.resolve()):
+        destination = original if original.is_relative_to(library) else library / resolved.relative_to(library.resolve())
+        extension = destination.suffix.lower()
+        kind = "live" if extension in LIVE and (
+            extension != ".gif" or library / "live" in destination.parents) else "static"
+    else:
+        kind = "live" if source.suffix.lower() in LIVE else "static"
+        folder = library / kind
+        folder.mkdir(parents=True, exist_ok=True)
+        temporary = None
+        try:
+            with source.open("rb") as reader, tempfile.NamedTemporaryFile(
+                    dir=folder, prefix=".velora-import-", suffix=".part", delete=False) as writer:
+                temporary = Path(writer.name)
+                shutil.copyfileobj(reader, writer, length=1024 * 1024)
+                after = os.fstat(reader.fileno())
+                if (after.st_size, after.st_mtime_ns) != (info.st_size, info.st_mtime_ns):
+                    raise ValueError("O arquivo mudou durante a cópia. Aguarde o download terminar.")
+                if writer.tell() != info.st_size:
+                    raise ValueError("Não foi possível copiar o arquivo completo.")
+            index = 0
+            while True:
+                name = source.name if index == 0 else f"{source.stem} ({index}){source.suffix}"
+                destination = folder / name
+                try:
+                    # Publishing a complete file with link() is atomic and
+                    # never overwrites another import or an existing wallpaper.
+                    os.link(temporary, destination)
+                    break
+                except FileExistsError:
+                    if destination.is_file() and filecmp.cmp(temporary, destination, shallow=False):
+                        break
+                    index += 1
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+    return {"key": f"{kind}:{destination}", "kind": kind,
+            "path": str(destination), "title": destination.stem}
+
+
+def main():
+    entries, errors = [], []
+    try:
+        urls = json.loads(sys.argv[1])
+        if not isinstance(urls, list) or not all(isinstance(url, str) for url in urls):
+            raise ValueError("Lista de arquivos inválida.")
+    except (IndexError, ValueError) as error:
+        print(json.dumps({"entries": [], "errors": [str(error)]}, ensure_ascii=False))
+        return 1
+    library = Path.home() / "Pictures/Wallpapers"
+    for url in dict.fromkeys(urls):
+        try:
+            entry = import_file(url, library)
+            if entry not in entries:
+                entries.append(entry)
+        except (OSError, ValueError) as error:
+            name = unquote(url.rsplit("/", 1)[-1]) or "o arquivo"
+            errors.append(f"Não foi possível adicionar {name}: {error}")
+    print(json.dumps({"entries": entries, "errors": errors}, ensure_ascii=False))
+    return 0 if entries else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+project_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
+    printf '%s\n' 'WhatsApp: Node >=22.13 e npm obrigatórios. Execute ./install.sh --install-deps --install-whatsapp.' >&2
+    exit 1
+fi
+node -e 'const [a,b] = process.versions.node.split(".").map(Number); if(a < 22 || (a === 22 && b < 13)) { console.error("WhatsApp exige Node >=22.13"); process.exit(1); }'
+cd "$project_dir/integrations/whatsapp"
+npm ci --ignore-scripts --omit=dev --no-audit --no-fund
+"$project_dir/scripts/velora-whatsapp" --check

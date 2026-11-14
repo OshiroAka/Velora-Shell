@@ -1,0 +1,344 @@
+#!/usr/bin/env python3
+"""Portable, data-only .helixpack import/export for Velora Shell."""
+
+from __future__ import annotations
+
+import argparse
+import copy
+import datetime as dt
+import hashlib
+import json
+import mimetypes
+import os
+import shutil
+import stat
+import tempfile
+import uuid
+import zipfile
+from pathlib import Path, PurePosixPath
+from urllib.parse import unquote, urlparse
+
+
+PACKAGE_VERSION = 3
+INDEX_VERSION = 1
+MAX_PACKAGE_BYTES = 2 * 1024 * 1024 * 1024
+MAX_FILE_BYTES = 1024 * 1024 * 1024
+MAX_ENTRIES = 2048
+ASSET_SCHEME = "helix-asset://"
+
+
+def now_iso() -> str:
+    return dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
+
+
+def atomic_json(path: Path, document: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    with temporary.open("w", encoding="utf-8") as handle:
+        json.dump(document, handle, ensure_ascii=False, indent=2)
+        handle.write("\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temporary, path)
+
+
+def load_index(path: Path) -> dict:
+    if not path.is_file():
+        return {"schemaVersion": INDEX_VERSION, "activeProfileId": "", "profiles": []}
+    with path.open("r", encoding="utf-8") as handle:
+        document = json.load(handle)
+    if document.get("schemaVersion") != INDEX_VERSION or not isinstance(document.get("profiles"), list):
+        raise ValueError("índice de perfis incompatível")
+    return document
+
+
+def local_path(value: str) -> Path:
+    parsed = urlparse(str(value or ""))
+    if parsed.scheme == "file":
+        candidate = Path(unquote(parsed.path))
+    elif not parsed.scheme and str(value).startswith("/"):
+        candidate = Path(str(value))
+    else:
+        raise ValueError(f"asset não local: {value}")
+    candidate = candidate.resolve()
+    if not candidate.is_file():
+        raise FileNotFoundError(f"asset ausente: {candidate}")
+    return candidate
+
+
+def sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def profile_by_id(index: dict, profile_id: str) -> dict:
+    profile = next((item for item in index["profiles"]
+                    if str(item.get("id", "")) == str(profile_id)), None)
+    if not profile:
+        raise ValueError("perfil não encontrado")
+    return profile
+
+
+def portable_composition(composition: dict) -> tuple[dict, list[dict]]:
+    result = copy.deepcopy(composition)
+    assets: list[dict] = []
+    by_digest: dict[str, str] = {}
+
+    def register(value: str) -> str:
+        source = local_path(value)
+        size = source.stat().st_size
+        if size > MAX_FILE_BYTES:
+            raise ValueError(f"asset maior que 1 GiB: {source.name}")
+        digest = sha256(source)
+        existing = by_digest.get(digest)
+        if existing:
+            return ASSET_SCHEME + existing
+        asset_id = f"asset-{len(assets):04d}"
+        suffix = source.suffix.lower() or ".bin"
+        archive_path = f"assets/{digest}{suffix}"
+        assets.append({
+            "id": asset_id,
+            "path": archive_path,
+            "sha256": digest,
+            "size": size,
+            "mime": mimetypes.guess_type(source.name)[0] or "application/octet-stream",
+            "source": source,
+        })
+        by_digest[digest] = asset_id
+        return ASSET_SCHEME + asset_id
+
+    def visit(value, key=""):
+        if isinstance(value, dict):
+            for child_key in list(value):
+                value[child_key] = visit(value[child_key], child_key)
+            return value
+        if isinstance(value, list):
+            return [visit(item, key) for item in value]
+        if isinstance(value, str) and key in {"path", "source", "avatar", "fontAsset"} and value:
+            return register(value)
+        return value
+
+    return visit(result), assets
+
+
+def export_package(index_path: Path, profile_id: str, output_path: Path) -> Path:
+    index = load_index(index_path)
+    profile = profile_by_id(index, profile_id)
+    composition, assets = portable_composition(profile.get("composition", {}))
+    preview_asset_id = ""
+    preview_value = str(profile.get("preview", ""))
+    if preview_value:
+        preview_path = local_path(preview_value)
+        preview_digest = sha256(preview_path)
+        matching = next((item for item in assets if item["sha256"] == preview_digest), None)
+        if matching:
+            preview_asset_id = matching["id"]
+        else:
+            asset_id = f"asset-{len(assets):04d}"
+            suffix = preview_path.suffix.lower() or ".png"
+            assets.append({
+                "id": asset_id,
+                "path": f"assets/{preview_digest}{suffix}",
+                "sha256": preview_digest,
+                "size": preview_path.stat().st_size,
+                "mime": mimetypes.guess_type(preview_path.name)[0] or "image/png",
+                "source": preview_path,
+            })
+            preview_asset_id = asset_id
+    manifest = {
+        "packageVersion": PACKAGE_VERSION,
+        "name": str(profile.get("name", "Perfil"))[:64],
+        "createdAt": now_iso(),
+        "accent": str(profile.get("accent", "#808080")),
+        "previewAssetId": preview_asset_id,
+        "composition": composition,
+        "assets": [{key: value for key, value in item.items() if key != "source"}
+                   for item in assets],
+    }
+    output_path = output_path.expanduser()
+    if output_path.suffix.lower() != ".helixpack":
+        output_path = output_path.with_suffix(".helixpack")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary_name = tempfile.mkstemp(prefix=f".{output_path.name}.",
+                                           suffix=".tmp", dir=output_path.parent)
+    os.close(fd)
+    temporary = Path(temporary_name)
+    try:
+        with zipfile.ZipFile(temporary, "w", compression=zipfile.ZIP_DEFLATED,
+                             compresslevel=6, allowZip64=True) as archive:
+            archive.writestr("manifest.json",
+                             json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
+            for asset in assets:
+                archive.write(asset["source"], asset["path"])
+        if temporary.stat().st_size > MAX_PACKAGE_BYTES:
+            raise ValueError("pacote excede 2 GiB")
+        os.replace(temporary, output_path)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return output_path.resolve()
+
+
+def safe_members(archive: zipfile.ZipFile) -> dict[str, zipfile.ZipInfo]:
+    infos = archive.infolist()
+    if len(infos) > MAX_ENTRIES:
+        raise ValueError("pacote contém entradas demais")
+    total = 0
+    result = {}
+    for info in infos:
+        path = PurePosixPath(info.filename)
+        mode = info.external_attr >> 16
+        if path.is_absolute() or ".." in path.parts or stat.S_ISLNK(mode):
+            raise ValueError(f"caminho inseguro no pacote: {info.filename}")
+        if info.file_size > MAX_FILE_BYTES:
+            raise ValueError(f"arquivo maior que 1 GiB: {info.filename}")
+        if info.filename in result:
+            raise ValueError(f"entrada duplicada no pacote: {info.filename}")
+        total += info.file_size
+        if total > MAX_PACKAGE_BYTES:
+            raise ValueError("conteúdo expandido excede 2 GiB")
+        result[info.filename] = info
+    return result
+
+
+def replace_asset_urls(value, mapping: dict[str, str]):
+    if isinstance(value, dict):
+        return {key: replace_asset_urls(child, mapping) for key, child in value.items()}
+    if isinstance(value, list):
+        return [replace_asset_urls(child, mapping) for child in value]
+    if isinstance(value, str) and value.startswith(ASSET_SCHEME):
+        asset_id = value[len(ASSET_SCHEME):]
+        if asset_id not in mapping:
+            raise ValueError(f"asset não declarado: {asset_id}")
+        return mapping[asset_id]
+    return value
+
+
+def imported_name(index: dict, requested: str) -> str:
+    base = " ".join(str(requested or "Perfil importado").split())[:64] or "Perfil importado"
+    names = {str(item.get("name", "")) for item in index["profiles"]}
+    if base not in names:
+        return base
+    suffix = " (importado)"
+    candidate = (base[:64 - len(suffix)] + suffix)
+    counter = 2
+    while candidate in names:
+        tail = f" (importado {counter})"
+        candidate = base[:64 - len(tail)] + tail
+        counter += 1
+    return candidate
+
+
+def import_package(index_path: Path, data_root: Path, package_path: Path) -> str:
+    package_path = package_path.expanduser().resolve()
+    if not package_path.is_file() or package_path.stat().st_size > MAX_PACKAGE_BYTES:
+        raise ValueError("pacote ausente ou maior que 2 GiB")
+    index = load_index(index_path)
+    profile_id = str(uuid.uuid4())
+    data_root.mkdir(parents=True, exist_ok=True)
+    staging = data_root / f".staging-import-{profile_id}-{uuid.uuid4().hex}"
+    staging.mkdir(parents=True, exist_ok=False)
+    final_dir = data_root / profile_id
+    try:
+        with zipfile.ZipFile(package_path, "r") as archive:
+            infos = safe_members(archive)
+            if "manifest.json" not in infos:
+                raise ValueError("manifest.json ausente")
+            manifest = json.loads(archive.read("manifest.json"))
+            if manifest.get("packageVersion") not in {1, 2, PACKAGE_VERSION}:
+                raise ValueError("versão de pacote incompatível")
+            declarations = manifest.get("assets")
+            if not isinstance(declarations, list):
+                raise ValueError("lista de assets inválida")
+            mapping: dict[str, str] = {}
+            extracted: dict[str, Path] = {}
+            for position, asset in enumerate(declarations):
+                if not isinstance(asset, dict):
+                    raise ValueError("declaração de asset inválida")
+                asset_id = str(asset.get("id", ""))
+                member_name = str(asset.get("path", ""))
+                if not asset_id or member_name not in infos or member_name == "manifest.json":
+                    raise ValueError(f"asset ausente: {asset_id}")
+                if asset_id in mapping:
+                    raise ValueError(f"asset duplicado: {asset_id}")
+                suffix = Path(member_name).suffix.lower() or ".bin"
+                destination = staging / f"asset-{position:04d}{suffix}"
+                digest = hashlib.sha256()
+                with archive.open(infos[member_name]) as source, destination.open("wb") as target:
+                    for block in iter(lambda: source.read(1024 * 1024), b""):
+                        digest.update(block)
+                        target.write(block)
+                if digest.hexdigest() != str(asset.get("sha256", "")):
+                    raise ValueError(f"checksum inválido: {asset_id}")
+                if destination.stat().st_size != int(asset.get("size", -1)):
+                    raise ValueError(f"tamanho inválido: {asset_id}")
+                extracted[asset_id] = destination
+                mapping[asset_id] = (final_dir / destination.name).as_uri()
+
+            composition = replace_asset_urls(copy.deepcopy(manifest.get("composition", {})),
+                                             mapping)
+            if not isinstance(composition, dict) or not isinstance(composition.get("gallery"), list):
+                raise ValueError("composição do pacote inválida")
+            composition_version = int(composition.get("schemaVersion", 3) or 3)
+            if composition_version < 1 or composition_version > 8:
+                raise ValueError("versão da composição do pacote incompatível")
+            preview_id = str(manifest.get("previewAssetId", ""))
+            preview_path = extracted.get(preview_id)
+            preview_uri = (final_dir / preview_path.name).as_uri() if preview_path else ""
+            created = now_iso()
+            metadata = {
+                "schemaVersion": composition_version,
+                "id": profile_id,
+                "name": imported_name(index, str(manifest.get("name", ""))),
+                "accent": str(manifest.get("accent", "#808080")),
+                "createdAt": created,
+                "updatedAt": created,
+                "composition": composition,
+                "directory": profile_id,
+                "preview": preview_uri,
+            }
+            manifest_profile = dict(metadata)
+            manifest_profile.pop("directory")
+            manifest_profile.pop("preview")
+            atomic_json(staging / "profile.json", manifest_profile)
+
+        os.replace(staging, final_dir)
+        index["profiles"].append(metadata)
+        try:
+            atomic_json(index_path, index)
+        except Exception:
+            shutil.rmtree(final_dir, ignore_errors=True)
+            raise
+        return profile_id
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("operation", choices=["export", "import"])
+    parser.add_argument("--index", required=True)
+    parser.add_argument("--data-root", required=True)
+    parser.add_argument("--id", default="")
+    parser.add_argument("--package", required=True)
+    args = parser.parse_args()
+    index_path = Path(args.index).expanduser().resolve()
+    data_root = Path(args.data_root).expanduser().resolve()
+    if args.operation == "export":
+        output = export_package(index_path, args.id, Path(args.package))
+        result = {"ok": True, "path": str(output)}
+    else:
+        profile_id = import_package(index_path, data_root, Path(args.package))
+        result = {"ok": True, "profileId": profile_id}
+    print(json.dumps(result, ensure_ascii=False))
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except Exception as error:
+        print(json.dumps({"ok": False, "error": str(error)}, ensure_ascii=False))
+        raise SystemExit(1)

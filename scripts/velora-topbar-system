@@ -1,0 +1,111 @@
+#!/usr/bin/env python3
+"""Small, bounded system operations used only by the top bar controls."""
+import argparse
+import json
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+
+def run(args, timeout=8):
+    result = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+    if result.returncode:
+        raise RuntimeError(result.stderr.strip() or result.stdout.strip() or "Operation failed")
+    return result.stdout.strip()
+
+
+def fields(line):
+    return [re.sub(r"\\(.)", r"\1", part) for part in re.split(r"(?<!\\):", line)]
+
+
+def network():
+    devices = [fields(line) for line in run([
+        "nmcli", "-t", "-f", "DEVICE,TYPE,STATE,CONNECTION", "device", "status"
+    ]).splitlines()]
+    connected = [row for row in devices if len(row) >= 4 and row[2] == "connected"
+                 and row[1] in ("wifi", "ethernet")]
+    device = connected[0] if connected else next(
+        (row for row in devices if len(row) >= 4 and row[1] in ("wifi", "ethernet")), None)
+    result = {"available": True, "interface": device[0] if device else "",
+              "kind": device[1] if device else "", "state": device[2] if device else "unavailable",
+              "connection": device[3] if device else "", "addresses": [], "vpn": []}
+    if device:
+        result["addresses"] = run(["nmcli", "-g", "IP4.ADDRESS", "device", "show", device[0]]).splitlines()
+    active = run(["nmcli", "-t", "-f", "NAME,TYPE", "connection", "show", "--active"])
+    result["vpn"] = [row[0] for row in map(fields, active.splitlines())
+                     if len(row) > 1 and row[1] in ("vpn", "wireguard", "tun")]
+    return result
+
+
+def profiles(value=None):
+    if value is not None:
+        if value not in ("power-saver", "balanced", "performance"):
+            raise ValueError("Invalid power profile")
+        run(["powerprofilesctl", "set", value])
+    listing = run(["powerprofilesctl", "list"])
+    return {"available": True, "current": run(["powerprofilesctl", "get"]),
+            "profiles": re.findall(r"^\s*\*?\s*(power-saver|balanced|performance):", listing, re.M)}
+
+
+def usb_devices(base=Path("/sys/bus/usb/devices")):
+    devices = []
+    def read(path, name):
+        try:
+            return (path / name).read_text().strip()
+        except OSError:
+            return ""
+    for path in sorted(base.glob("*")):
+        if not (path / "idVendor").exists() or read(path, "bDeviceClass") == "09":
+            continue
+        devices.append({"id": path.name, "name": read(path, "product") or "USB " + read(path, "idVendor") + ":" + read(path, "idProduct"),
+                        "vendor": read(path, "manufacturer"), "version": read(path, "version"),
+                        "speed": read(path, "speed"), "power": read(path, "bMaxPower"),
+                        "serial": read(path, "serial")})
+    thunderbolt = Path("/sys/bus/thunderbolt/devices")
+    for path in sorted(thunderbolt.glob("*")):
+        name = read(path, "device_name")
+        if name:
+            devices.append({"id": path.name, "name": name, "vendor": read(path, "vendor_name"),
+                            "version": "Thunderbolt", "speed": "", "power": "", "serial": ""})
+    return {"available": base.exists(), "devices": devices}
+
+
+def capabilities():
+    return {"networkEditor": bool(shutil.which("nm-connection-editor") or
+                                  (shutil.which("kitty") and shutil.which("nmtui"))),
+            "inhibit": bool(shutil.which("systemd-inhibit"))}
+
+
+def action(name):
+    if name != "network-editor":
+        raise ValueError("Unknown action")
+    command = (["nm-connection-editor"] if shutil.which("nm-connection-editor")
+               else ["kitty", "--class", "velora-shell-network", "-e", "nmtui"])
+    subprocess.Popen(command, start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return {"ok": True}
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("operation", choices=["network", "profiles", "capabilities", "action", "usb", "awake"])
+    parser.add_argument("value", nargs="?")
+    args = parser.parse_args()
+    if args.operation == "awake":
+        # The shell owns the pipe. EOF releases the inhibitor even if its
+        # systemd-inhibit parent was terminated during a reload or shutdown.
+        sys.stdin.buffer.read()
+        return
+    try:
+        result = (profiles(args.value) if args.operation == "profiles" else
+                  action(args.value) if args.operation == "action" else
+                  network() if args.operation == "network" else
+                  usb_devices() if args.operation == "usb" else capabilities())
+    except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired, IndexError) as error:
+        result = {"available": False, "error": str(error)[:240]}
+    print(json.dumps(result, ensure_ascii=False))
+
+
+if __name__ == "__main__":
+    main()
