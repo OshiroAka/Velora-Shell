@@ -21,6 +21,9 @@ struct Camera {
     Vector2D unproject(Vector2D screen) const { return (screen - viewport / 2.) / zoom + center; }
     CBox project(const CBox& box) const { return {project(box.pos()), box.size() * zoom}; }
     CBox unproject(const CBox& box) const { return {unproject(box.pos()), box.size() / zoom}; }
+    // Workspace slides are screen translations, applied after camera zoom.
+    CBox project(const CBox& box, Vector2D screenOffset) const { return project(box.copy().translate(-screenOffset)).translate(screenOffset); }
+    CBox unproject(const CBox& box, Vector2D screenOffset) const { return unproject(box.copy().translate(-screenOffset)).translate(screenOffset); }
     void pan(Vector2D screenDelta) { center -= screenDelta / zoom; }
     void zoomAt(double value, Vector2D anchor) {
         if (!std::isfinite(value)) return;

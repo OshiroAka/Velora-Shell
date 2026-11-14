@@ -40,6 +40,9 @@ class InfiniteDesktopCameraTests(unittest.TestCase):
             production = source[source.index('class WindowCamera final'):source.index('\ninline void attach(')]
             (base / 'camera-transformer.inc').write_text(production)
             (base / 'camera-view.inc').write_text(source[source.index('struct View {'):source.index('\ninline std::unordered_map')])
+            (base / 'camera-workspaces.inc').write_text(source[source.index('inline bool available('):source.index('\ninline void damage(')])
+            start = source.index('inline bool activeMonitor(')
+            (base / 'camera-active-monitor.inc').write_text(source[start:source.index('\nusing DrawSurfaceFn', start)])
             start = source.index('inline double panTime(')
             (base / 'camera-pan.inc').write_text(source[start:source.index('\nstruct PanGesture', start)])
             start = source.index('struct PanPreferences {')
@@ -56,6 +59,12 @@ class InfiniteDesktopCameraTests(unittest.TestCase):
             result = subprocess.run([str(base / 'camera')], capture_output=True, text=True, timeout=10)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn('INFINITE_CAMERA_OK', result.stdout)
+            result = subprocess.run(['c++', '-std=c++23', '-I', str(base), '-I', str(ROOT / 'native/hyprland'),
+                str(ROOT / 'tests/fixtures/infinite-camera-workspaces.cpp'), '-o', str(base / 'workspaces'), *flags], capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            result = subprocess.run([str(base / 'workspaces')], capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn('INFINITE_CAMERA_WORKSPACES_OK', result.stdout)
 
     def test_zoom_pan_and_focus_do_not_send_geometry_or_cursor_commands(self):
         module = helper()

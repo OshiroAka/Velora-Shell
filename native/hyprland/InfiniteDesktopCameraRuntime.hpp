@@ -54,10 +54,13 @@ inline bool available(PHLMONITOR monitor) {
         && !g_pSessionLockManager->isSessionLocked()
         && !Fullscreen::controller()->hasFullscreen(monitor->m_activeWorkspace);
 }
-inline View* viewFor(PHLMONITOR monitor) {
-    if (!available(monitor)) return nullptr;
-    const auto found = views.find(monitor->m_activeWorkspace.get());
-    if (found == views.end() || found->second.workspace != monitor->m_activeWorkspace) return nullptr;
+inline View* viewFor(PHLWORKSPACE workspace) {
+    if (!enabled || unloading || !workspace || g_pSessionLockManager->isSessionLocked()
+        || Fullscreen::controller()->hasFullscreen(workspace)) return nullptr;
+    const auto monitor = workspace->m_monitor.lock();
+    if (!monitor) return nullptr;
+    const auto found = views.find(workspace.get());
+    if (found == views.end() || found->second.workspace != workspace) return nullptr;
     auto& view = found->second;
     if (view.monitor != monitor || view.camera.viewport != monitor->m_size) {
         // A moved workspace or changed output retains its world centre and zoom.
@@ -66,12 +69,15 @@ inline View* viewFor(PHLMONITOR monitor) {
     }
     return &view;
 }
+inline View* viewFor(PHLMONITOR monitor) {
+    return available(monitor) ? viewFor(monitor->m_activeWorkspace) : nullptr;
+}
 inline View* viewFor(const PHLWINDOW& window) {
     if (!window || !window->mapped() || !window->isFloating() || window->isHidden()
         || (window->m_state & Desktop::View::WINDOW_STATE_PINNED) || !window->m_workspace) return nullptr;
-    auto monitor = window->m_workspace->m_monitor.lock();
-    auto view = viewFor(monitor);
-    return view && view->workspace == window->m_workspace ? view : nullptr;
+    // Outgoing windows still render during the compositor's workspace slide.
+    // Keep their own camera until the entire transition has finished.
+    return viewFor(window->m_workspace);
 }
 inline View* ensureView(PHLMONITOR monitor) {
     if (!available(monitor)) return nullptr;
@@ -88,6 +94,13 @@ inline View* ensureView(PHLMONITOR monitor) {
 inline bool transformed(const View* view) {
     return view && view->monitor && !view->camera.identity(view->monitor->m_position);
 }
+inline bool workspaceRenderable(const View& view) {
+    return view.workspace && (view.workspace->visible() || view.workspace->m_forceRendering
+        || view.workspace->m_renderOffset->isBeingAnimated() || view.workspace->m_alpha->isBeingAnimated());
+}
+inline Vector2D workspaceOffset(const View& view) {
+    return view.workspace ? view.workspace->m_renderOffset->value() : Vector2D{};
+}
 inline void damage(View& view) {
     if (auto monitor = view.monitor.lock()) {
         monitor->m_blurFBDirty = true;
@@ -99,7 +112,8 @@ inline Render::SRenderModifData modifiers(const View& view) {
     Render::SRenderModifData result;
     result.modifs.emplace_back(Render::SRenderModifData::RMOD_TYPE_SCALE, float(view.camera.zoom));
     result.modifs.emplace_back(Render::SRenderModifData::RMOD_TYPE_TRANSLATE,
-        (view.camera.viewport / 2. + (monitor->m_position - view.camera.center) * view.camera.zoom) * monitor->m_scale);
+        (view.camera.viewport / 2. + (monitor->m_position - view.camera.center) * view.camera.zoom
+            + workspaceOffset(view) * (1. - view.camera.zoom)) * monitor->m_scale);
     return result;
 }
 
@@ -113,15 +127,15 @@ class WindowCamera final : public Render::IWindowTransformer {
     bool blocksDirectScanout() const override { return transformed(viewFor(window.lock())); }
     CBox transformedExtents(const CBox& input) const override {
         auto view = viewFor(window.lock());
-        return transformed(view) ? view->camera.project(input.copy().translate(view->monitor->m_position)) : input;
+        return transformed(view) ? view->camera.project(input.copy().translate(view->monitor->m_position), workspaceOffset(*view)) : input;
     }
     CBox sourceBoxForOutput(const CBox& output, const CBox& input) const override {
         auto view = viewFor(window.lock());
-        return transformed(view) ? view->camera.unproject(output).translate(-view->monitor->m_position).intersection(input) : output.intersection(input);
+        return transformed(view) ? view->camera.unproject(output, workspaceOffset(*view)).translate(-view->monitor->m_position).intersection(input) : output.intersection(input);
     }
     CBox transformBoxForDamage(const CBox& input) const override {
         auto view = viewFor(window.lock());
-        return transformed(view) ? view->camera.project(input).translate(view->monitor->m_position).expand(2) : input;
+        return transformed(view) ? view->camera.project(input, workspaceOffset(*view)).translate(view->monitor->m_position).expand(2) : input;
     }
     Render::SWindowTransformBuffer transform(Render::CRenderContext&, const Render::SWindowTransformBuffer& input,
                                               const Render::SWindowTransformContext& context) override {
@@ -131,7 +145,7 @@ class WindowCamera final : public Render::IWindowTransformer {
         const double scale = context.monitor->m_scale;
         // Reuse the live client framebuffer. The destination box changes, not
         // its pixels, dimensions, configure serial, or the application's layout.
-        result.box = view->camera.project(input.box.copy().scale(1. / scale).translate(context.monitor->m_position)).scale(scale);
+        result.box = view->camera.project(input.box.copy().scale(1. / scale).translate(context.monitor->m_position), workspaceOffset(*view)).scale(scale);
         return result;
     }
 };
@@ -148,7 +162,7 @@ using VisibleFn = bool (*)(Render::IHyprRenderer*, PHLWINDOW, PHLMONITOR);
 inline CFunctionHook* visibleHook = nullptr;
 inline bool visible(Render::IHyprRenderer* renderer, PHLWINDOW window, PHLMONITOR monitor) {
     auto view = viewFor(window);
-    if (transformed(view)) { attach(window); return view->monitor == monitor; }
+    if (transformed(view)) { attach(window); return view->monitor == monitor && workspaceRenderable(*view); }
     return reinterpret_cast<VisibleFn>(visibleHook->m_original)(renderer, window, monitor);
 }
 
@@ -453,14 +467,18 @@ inline SDispatchResult dispatch(std::string arguments) {
         views.clear(); return {};
     }
     if (!monitor || !monitor->m_activeWorkspace) return {.success = false, .error = "No active camera output"};
-    if (action != "enable" && action != "zoom" && action != "pan" && action != "center" && action != "reset")
+    if (action != "enable" && action != "zoom" && action != "pan" && action != "center" && action != "reset" && action != "restore")
         return {.success = false, .error = "Unknown camera action"};
-    double x = 0, y = 0;
+    double x = 0, y = 0, zoom = 1.;
+    // Restore an exact camera after a native-module update without replaying
+    // zoom animations or changing any client geometry.
+    if (action == "restore" && (!(input >> zoom) || !std::isfinite(zoom) || zoom < Camera::MIN_ZOOM || zoom > Camera::MAX_ZOOM))
+        return {.success = false, .error = "Invalid camera zoom"};
     std::string direction;
     if (action == "zoom") {
         input >> direction;
         if (direction != "in" && direction != "out") return {.success = false, .error = "Expected zoom in or out"};
-    } else if (action == "pan" || action == "center") {
+    } else if (action == "pan" || action == "center" || action == "restore") {
         if (!(input >> x >> y) || !std::isfinite(x) || !std::isfinite(y) || std::abs(x) > 1e7 || std::abs(y) > 1e7)
             return {.success = false, .error = "Invalid camera coordinates"};
     }
@@ -474,11 +492,17 @@ inline SDispatchResult dispatch(std::string arguments) {
     if (action == "zoom") target.zoomAt(target.zoom * (direction == "out" ? .85 : 1. / .85), target.viewport / 2.);
     else if (action == "center") target.center = {x, y};
     else if (action == "reset") target = Camera{monitor->m_position + monitor->m_size / 2., monitor->m_size};
+    else if (action == "restore") { target.zoom = zoom; target.center = {x, y}; }
     view.pan.pending = {};
     update(view, target, action == "zoom" || action == "center" || action == "reset");
     return {};
 }
-inline bool activeMonitor(PHLMONITOR monitor) { return transformed(viewFor(monitor)); }
+inline bool activeMonitor(PHLMONITOR monitor) {
+    if (!enabled || unloading || g_pSessionLockManager->isSessionLocked()) return false;
+    for (const auto& [_, view] : views)
+        if (view.monitor == monitor && workspaceRenderable(view) && transformed(&view)) return true;
+    return false;
+}
 
 using DrawSurfaceFn = void (*)(Render::IElementRenderer*, Render::CRenderContext&, WP<CSurfacePassElement>, const CRegion&);
 inline CFunctionHook* wallpaperHook = nullptr;
@@ -509,8 +533,8 @@ inline std::string status(VeloraCompat::OutputFormat, std::string) {
         if (!view.monitor || !view.workspace) continue;
         if (!first) result += ',';
         first = false;
-        result += std::format(R"({{"monitor":"{}","zoom":{},"center":[{},{}],"viewport":[{},{}],"animating":{},"active":{},"panInputs":{},"panFrames":{},"panFps":{},"panMaxIntervalMs":{},"coasting":{}}})",
-            view.monitor->m_name, view.camera.zoom, view.camera.center.x, view.camera.center.y,
+        result += std::format(R"({{"monitor":"{}","workspace":{},"zoom":{},"center":[{},{}],"viewport":[{},{}],"animating":{},"active":{},"panInputs":{},"panFrames":{},"panFps":{},"panMaxIntervalMs":{},"coasting":{}}})",
+            view.monitor->m_name, view.workspace->numberedID().value_or(0), view.camera.zoom, view.camera.center.x, view.camera.center.y,
             view.camera.viewport.x, view.camera.viewport.y, view.animating ? "true" : "false",
             view.monitor->m_activeWorkspace == view.workspace ? "true" : "false", view.pan.inputs, view.pan.frames,
             view.panIntervalTotal > 0 ? view.panIntervals / view.panIntervalTotal : 0., view.panIntervalMax * 1000., view.inertia.active ? "true" : "false");

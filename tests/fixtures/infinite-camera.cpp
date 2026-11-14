@@ -61,6 +61,8 @@ struct IWindowTransformer {
 #include "camera-view.inc"
 static View view;
 static bool selected = true;
+static Vector2D slideOffset;
+Vector2D workspaceOffset(const View&) { return slideOffset; }
 View* viewFor(const PHLWINDOW&) { return selected ? &view : nullptr; }
 bool transformed(const View* value) { return value && !value->camera.identity(value->monitor->m_position); }
 View* viewFor(PHLMONITOR) { return selected ? &view : nullptr; }
@@ -147,26 +149,30 @@ int main() {
     view.monitor = monitor;
     for (Vector2D origin : {Vector2D{0,0},{-1920,0},{1920,-540}}) {
         monitor->m_position = origin;
-        for (double scale : {1.,1.25,1.5,2.}) for (double zoom : {.2,.5,.85,1.,2.,3.}) {
+        for (double scale : {1.,1.25,1.5,2.}) for (double zoom : {.2,.5,.85,1.,2.,3.})
+        for (Vector2D offset : {Vector2D{},Vector2D{960,0},Vector2D{-1920,0},Vector2D{0,-1080}}) {
+            slideOffset = offset;
             monitor->m_scale = scale;
             view.camera = {origin+Vector2D{960+200,540-100},{1920,1080},zoom};
-            const CBox source{-400*scale,-300*scale,1200*scale,800*scale};
+            const CBox base{-400*scale,-300*scale,1200*scale,800*scale};
+            const CBox source = base.copy().translate(offset*scale);
             const Render::SWindowTransformBuffer input{pixels,source};
             auto output = transformer.transform(ctx,input,{monitor});
-            auto expected = view.camera.project(source.copy().scale(1/scale).translate(origin)).scale(scale);
+            auto expected = view.camera.project(base.copy().scale(1/scale).translate(origin)).translate(offset).scale(scale);
             assert(near(output.box,expected));
             assert(output.framebuffer == input.framebuffer && *output.framebuffer == 42);
             assert(near(input.box,source));
             assert(!transformer.allocatesOutputBuffer());
             assert(transformer.blocksDirectScanout());
-            CBox logical{-400,-300,1200,800};
-            assert(near(transformer.transformedExtents(logical),view.camera.project(logical.copy().translate(origin))));
+            CBox logical = CBox{-400,-300,1200,800}.translate(offset);
+            assert(near(transformer.transformedExtents(logical),expected.copy().scale(1/scale)));
             auto damage = transformer.transformBoxForDamage(logical.copy().translate(origin));
             assert(near(damage,transformer.transformedExtents(logical).translate(origin).expand(2)));
             auto recovered = transformer.sourceBoxForOutput(transformer.transformedExtents(logical),logical);
             assert(near(recovered,logical));
         }
     }
+    slideOffset = {};
     selected = false;
     Render::SWindowTransformBuffer input{pixels,client};
     assert(!transformer.active());
