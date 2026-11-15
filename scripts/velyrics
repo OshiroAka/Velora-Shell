@@ -49,10 +49,10 @@ BUNDLED_LYRICS_FONT = Path(__file__).resolve().parents[1] / "assets/fonts/Orbitr
 PYWAL_COLORS = Path.home() / ".cache/wal/colors.json"
 CAVA_THEME = Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config"))) / "cava/themes/velora-pywal16"
 VELYRICS_SETTINGS = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "velora-shell/velyrics.json"
-WORD_IMAGE = RUNTIME_DIR / f"velyrics-word-{os.getpid()}.png"
 KITTY_IMAGE_ID = 700000 + (os.getpid() % 900000)
 _displayed_image_id: int | None = None
 _settings_cache: dict[str, Any] = {"mtime": -1, "mode": "line", "wordsPerTerminal": 4, "fontScale": 1.0, "fontFamily": "Pixelon", "syncOffsetMs": 500.0}
+_next_hyprland_recovery = 0.0
 
 
 def run(args: list[str]) -> subprocess.CompletedProcess[str]:
@@ -60,13 +60,39 @@ def run(args: list[str]) -> subprocess.CompletedProcess[str]:
 
 
 def hyprctl_json(command: str) -> Any:
+    global _next_hyprland_recovery
     result = run(["hyprctl", "-j", command])
+    recovered_instance = ""
     if result.returncode:
-        return None
+        # The shared daemon can outlive the compositor that launched it.
+        # Recover only an unambiguous live session, and let camera children
+        # inherit it too. Healthy polls never need instance discovery.
+        now = time.monotonic()
+        if now < _next_hyprland_recovery:
+            return None
+        _next_hyprland_recovery = now + 2.0
+        listing = run(["hyprctl", "-j", "instances"])
+        if listing.returncode:
+            return None
+        try:
+            instances = json.loads(listing.stdout)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(instances, list) or len(instances) != 1 or not isinstance(instances[0], dict):
+            return None
+        recovered_instance = instances[0].get("instance")
+        if not isinstance(recovered_instance, str) or not recovered_instance or recovered_instance == os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"):
+            return None
+        result = run(["hyprctl", "-i", recovered_instance, "-j", command])
+        if result.returncode:
+            return None
     try:
-        return json.loads(result.stdout)
+        value = json.loads(result.stdout)
     except json.JSONDecodeError:
         return None
+    if recovered_instance:
+        os.environ["HYPRLAND_INSTANCE_SIGNATURE"] = recovered_instance
+    return value
 
 
 def active_terminal() -> dict[str, Any] | None:
@@ -258,12 +284,9 @@ def clear_graphics() -> None:
     _displayed_image_id = None
 
 
-def show_kitty_image(path: Path, columns: int, rows: int) -> bool:
+def show_kitty_image(png: bytes, columns: int, rows: int) -> bool:
     global _displayed_image_id
-    try:
-        encoded = base64.standard_b64encode(path.read_bytes()).decode("ascii")
-    except OSError:
-        return False
+    encoded = base64.standard_b64encode(png).decode("ascii")
     chunks = [encoded[index:index + 4096] for index in range(0, len(encoded), 4096)]
     if not chunks:
         return False
@@ -346,7 +369,6 @@ def render(word: str, font_scale: float = 1.0, font_family: str = "Pixelon") -> 
     height_limited_size = int((usable_height * 0.62) / max(1.0, line_count * 0.72))
     point_size = max(36, int(max(54, min(height_limited_size, width_limited_size)) * max(0.5, min(3.0, font_scale))))
     safe_display = "\n".join(wrapped).replace("%", "%%")
-    RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
     vertical_colors, horizontal_colors = cava_lyrics_gradients()
 
     def generate(selected_font: str) -> subprocess.CompletedProcess[bytes]:
@@ -398,12 +420,14 @@ def render(word: str, font_scale: float = 1.0, font_family: str = "Pixelon") -> 
             ")",
             "-compose", "Dst_In",
             "-composite",
-            str(WORD_IMAGE),
+            # Keep frames in memory: session tmpfs may be full of logs, and
+            # failure to write a temporary PNG must not shrink lyrics to text.
+            "png:-",
         ])
         return subprocess.run(
             command,
             stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             check=False,
         )
@@ -416,7 +440,7 @@ def render(word: str, font_scale: float = 1.0, font_family: str = "Pixelon") -> 
         render_fallback(display)
         return
 
-    if not show_kitty_image(WORD_IMAGE, columns, rows):
+    if not show_kitty_image(generated.stdout, columns, rows):
         render_fallback(display)
 
 
@@ -500,7 +524,6 @@ def client() -> int:
     except KeyboardInterrupt:
         request({"op": "unregister", "address": terminal["address"]})
         clear_graphics()
-        WORD_IMAGE.unlink(missing_ok=True)
         sys.stdout.write("\033[?2026l\033[?25h\033[0m\n")
         return 0
 

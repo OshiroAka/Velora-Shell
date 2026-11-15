@@ -25,6 +25,115 @@ def load_script(name="velyrics"):
     return module
 
 
+class HyprlandSessionTests(unittest.TestCase):
+    def setUp(self):
+        self.source = load_script()
+        self.env = patch.dict(os.environ, HYPRLAND_INSTANCE_SIGNATURE="old-session")
+        self.env.start()
+        self.addCleanup(self.env.stop)
+
+    def result(self, payload, code=0):
+        return subprocess.CompletedProcess([], code, json.dumps(payload), "")
+
+    def test_valid_session_does_not_scan_instances(self):
+        with patch.object(self.source, "run", return_value=self.result({"id": 2})) as run:
+            self.assertEqual(self.source.hyprctl_json("activeworkspace"), {"id": 2})
+        run.assert_called_once_with(["hyprctl", "-j", "activeworkspace"])
+
+    def test_stale_session_recovers_and_camera_inherits_new_instance(self):
+        results = [self.result({}, 4), self.result([{"instance": "live-session"}]), self.result({"id": 2})]
+        with patch.object(self.source, "run", side_effect=results) as run:
+            self.assertEqual(self.source.hyprctl_json("activeworkspace"), {"id": 2})
+        self.assertEqual(run.call_args_list[-1], call(["hyprctl", "-i", "live-session", "-j", "activeworkspace"]))
+        self.assertEqual(os.environ["HYPRLAND_INSTANCE_SIGNATURE"], "live-session")
+
+    def test_unavailable_or_ambiguous_session_does_not_switch_and_throttles_scan(self):
+        for instances in ([], [{"instance": "one"}, {"instance": "two"}], [{}]):
+            with self.subTest(instances=instances):
+                source = load_script()
+                with patch.object(source.time, "monotonic", return_value=100), \
+                     patch.object(source, "run", side_effect=[self.result({}, 4), self.result(instances), self.result({}, 4)]) as run:
+                    self.assertIsNone(source.hyprctl_json("clients"))
+                    self.assertIsNone(source.hyprctl_json("activeworkspace"))
+                    self.assertEqual(run.call_count, 3)
+                self.assertEqual(os.environ["HYPRLAND_INSTANCE_SIGNATURE"], "old-session")
+
+    def test_failed_retry_does_not_commit_a_disappearing_session(self):
+        with patch.object(self.source, "run", side_effect=[self.result({}, 4),
+             self.result([{"instance": "disappearing"}]), self.result({}, 4)]):
+            self.assertIsNone(self.source.hyprctl_json("clients"))
+        self.assertEqual(os.environ["HYPRLAND_INSTANCE_SIGNATURE"], "old-session")
+
+    def test_running_coordinator_recovers_after_compositor_restart(self):
+        # Real subprocesses reproduce inherited stale environments without
+        # connecting to a compositor, Spotify, or moving personal windows.
+        source = self.source
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            session = base / "session.json"
+            session.write_text(json.dumps(["old-session"]))
+            camera = base / "camera.jsonl"
+            hyprctl = base / "hyprctl"
+            hyprctl.write_text('''#!/usr/bin/env python3
+import json, os, sys
+from pathlib import Path
+args=sys.argv[1:]
+live=json.loads(Path(os.environ["TEST_SESSION"]).read_text())
+if "instances" in args:
+    print(json.dumps([{"instance": item} for item in live])); sys.exit(0)
+instance=args[args.index("-i")+1] if "-i" in args else os.environ.get("HYPRLAND_INSTANCE_SIGNATURE")
+if instance not in live:
+    print("Couldn't connect to compositor"); sys.exit(4)
+windows=[dict(address=f"0x{i}",workspace={"id":2},floating=True,pinned=False) for i in range(1,4)]
+print(json.dumps(windows if args[-1]=="clients" else {"id":2}))
+''')
+            helper = base / "infinite-desktop"
+            helper.write_text('''#!/usr/bin/env python3
+import json, os, sys
+from pathlib import Path
+with Path(os.environ["TEST_CAMERA"]).open("a") as output:
+    output.write(json.dumps([os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"),sys.argv[1:]])+"\\n")
+''')
+            for executable in (hyprctl, helper):
+                executable.chmod(0o755)
+            lyric = dict(ok=True, player="spotify", status="Playing", title="Fixture", artist="Test",
+                         duration=100, lineTime=1, line="First line")
+            def submit(_function):
+                future = concurrent.futures.Future()
+                future.set_result(dict(lyric))
+                return future
+            with patch.dict(os.environ, PATH=str(base) + os.pathsep + os.environ["PATH"],
+                            TEST_SESSION=str(session), TEST_CAMERA=str(camera)), \
+                 patch.object(source, "canvas_enabled", return_value=True), \
+                 patch.object(source, "is_disabled", return_value=False), \
+                 patch.object(source, "load_velyrics_settings", return_value={"mode": "line"}):
+                coordinator = source.Coordinator()
+                coordinator.executor.shutdown(wait=False)
+                coordinator.executor = Mock()
+                coordinator.executor.submit.side_effect = submit
+                try:
+                    with patch.object(coordinator, "update"):
+                        for index in range(1, 4):
+                            coordinator.handle(dict(op="register", address=f"0x{index}", workspace=2))
+                    def tick():
+                        coordinator.last_hyprland_poll = 0
+                        coordinator.last_poll = 0
+                        coordinator.update(); coordinator.update()
+                        self.assertEqual(coordinator.response()["status"], "active")
+                        self.assertIsNotNone(coordinator.center_process)
+                        self.assertEqual(coordinator.center_process.wait(timeout=3), 0)
+                    tick()
+                    session.write_text(json.dumps(["live-session"]))
+                    lyric.update(lineTime=2, line="Recovered line")
+                    tick()
+                    self.assertEqual(coordinator.word, "Recovered line")
+                    calls = [json.loads(line) for line in camera.read_text().splitlines()]
+                    self.assertEqual(calls, [["old-session", ["focus-address", "0x1"]],
+                                             ["live-session", ["focus-address", "0x2"]]])
+                finally:
+                    coordinator.stop_centering()
+
+
 class VelyricsTests(unittest.TestCase):
     def setUp(self):
         self.source = load_script()
@@ -175,7 +284,6 @@ class VelyricsTests(unittest.TestCase):
              patch.object(self.source, "render") as render, \
              patch.object(self.source, "render_status") as status, \
              patch.object(self.source, "clear_graphics"), \
-             patch.object(self.source, "WORD_IMAGE", Path(temporary) / "word.png"), \
              patch.object(self.source.time, "sleep", side_effect=[None, None, None, None, KeyboardInterrupt]), \
              patch.object(self.source.sys, "stdout", io.StringIO()):
             self.assertEqual(self.source.client(), 0)
@@ -306,6 +414,29 @@ class LyricsMetadataTests(unittest.TestCase):
 
 
 class RenderedLyricsTests(unittest.TestCase):
+    def test_full_session_runtime_keeps_graphical_lyrics(self):
+        if not shutil.which("magick") or not Path("/dev/full").exists():
+            self.skipTest("ImageMagick and /dev/full required")
+        source = load_script()
+        with tempfile.TemporaryDirectory() as temporary:
+            runtime = Path(temporary)
+            # Real ENOSPC when the previous renderer writes its PNG. No
+            # compositor, account, or full filesystem is needed for this case.
+            image_path = runtime / "word.png"
+            image_path.symlink_to("/dev/full")
+            with patch.dict(os.environ, KITTY_WINDOW_ID="1"), \
+                 patch.object(source, "RUNTIME_DIR", runtime), \
+                 patch.object(source, "WORD_IMAGE", image_path, create=True), \
+                 patch.object(source, "terminal_geometry", return_value=(64, 16, 640, 360)), \
+                 patch.object(source, "show_kitty_image", return_value=True) as show, \
+                 patch.object(source, "render_fallback") as fallback:
+                source.render("Velora", .92, "monospace")
+                fallback.assert_not_called()
+                self.assertEqual(show.call_args.args[1:], (64, 16))
+                with Image.open(io.BytesIO(show.call_args.args[0])) as image:
+                    self.assertEqual(image.size, (640, 360))
+                    self.assertGreater(image.getchannel("A").getbbox()[3] - image.getchannel("A").getbbox()[1], 40)
+
     def test_real_gradient_graphics_with_missing_pixelon_and_selected_font(self):
         if not shutil.which("magick") or not shutil.which("fc-match"):
             self.skipTest("ImageMagick and Fontconfig required for Kitty image rendering")
@@ -314,21 +445,19 @@ class RenderedLyricsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary, \
              patch.dict(os.environ, {"KITTY_WINDOW_ID": "1"}), \
              patch.object(source, "RUNTIME_DIR", Path(temporary)), \
-             patch.object(source, "WORD_IMAGE", Path(temporary) / "line.png"), \
              patch.object(source, "PIXELON_FONT", Path(temporary) / "missing-pixelon.ttf"), \
              patch.object(source, "USER_PIXELON_FONT", Path(temporary) / "missing-user-pixelon.ttf"), \
              patch.object(source, "terminal_geometry", return_value=(64, 16, 640, 360)), \
              patch.object(source, "cava_lyrics_gradients", return_value=(["#f08000", "#ff4060"], ["#00c0ff", "#2040ff"])), \
-             patch.object(source.sys, "stdout", io.StringIO()) as output:
+             patch.object(source.sys, "stdout", io.StringIO()) as output, \
+             patch.object(source, "show_kitty_image", wraps=source.show_kitty_image) as show:
             for family in ["Pixelon", "monospace"]:
                 with self.subTest(family=family):
                     output.seek(0); output.truncate(0)
-                    source.WORD_IMAGE.unlink(missing_ok=True)
                     source.render("Velora lyrics", 1.0, family)
-                    self.assertTrue(source.WORD_IMAGE.is_file(), "must render image instead of plain text")
                     self.assertIn("\033_Ga=t", output.getvalue())
                     self.assertIn("\033_Ga=p", output.getvalue())
-                    with Image.open(source.WORD_IMAGE) as image:
+                    with Image.open(io.BytesIO(show.call_args.args[0])) as image:
                         self.assertEqual(image.size, (640, 360))
                         self.assertEqual(image.getchannel("A").getextrema(), (0, 255))
                         pixels = [pixel[:3] for _, pixel in image.getcolors(640 * 360) if pixel[3] > 240]
@@ -339,11 +468,11 @@ class RenderedLyricsTests(unittest.TestCase):
     def test_word_swap_uploads_before_one_synchronized_commit(self):
         source = load_script()
         with tempfile.TemporaryDirectory() as temporary, patch.object(source.sys, "stdout", io.StringIO()) as output:
-            path = Path(temporary) / "word.png"; path.write_bytes(b"fixture-image-data" * 600)
-            self.assertTrue(source.show_kitty_image(path, 64, 16))
+            payload = b"fixture-image-data" * 600
+            self.assertTrue(source.show_kitty_image(payload, 64, 16))
             first_id = source._displayed_image_id
             output.seek(0); output.truncate(0)
-            self.assertTrue(source.show_kitty_image(path, 64, 16))
+            self.assertTrue(source.show_kitty_image(payload, 64, 16))
             stream = output.getvalue()
             next_id = source._displayed_image_id
             self.assertNotEqual(first_id, next_id)
@@ -370,7 +499,7 @@ class RenderedLyricsTests(unittest.TestCase):
                 with Image.effect_noise((128, 96), 80).convert("RGBA") as image:
                     image.save(png)
                 output.seek(0); output.truncate(0)
-                source.show_kitty_image(png, 64, 16)
+                source.show_kitty_image(png.read_bytes(), 64, 16)
                 payload = output.getvalue().encode()
                 self.assertGreater(payload.count(b"\033_G"), 3)
                 stream = directory / f"word-{index}.stream"; stream.write_bytes(payload)
