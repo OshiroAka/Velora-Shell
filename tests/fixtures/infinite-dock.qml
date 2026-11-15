@@ -22,6 +22,17 @@ ShellRoot {
         function withAlpha(c,a) { return Qt.rgba(c.r,c.g,c.b,a) }
     }
     QtObject { id: shell; property int settingsRequests: 0; function openUnifiedSettings() { settingsRequests++ } function toggleTopSearch() {} }
+    QtObject {
+        id: edge
+        property bool mounted: false
+        property real bodyWidth: 180
+        property real bodyY: 100
+        property real bodyHeight: 140
+        property real contour: 0
+        property var extension: ({y: 100, width: 0, height: 0})
+        signal shapeChanged()
+        onMountedChanged: shapeChanged()
+    }
     Window {
         id: win
         width: 1280; height: 720; visible: true; color: "#73818d"
@@ -29,6 +40,7 @@ ShellRoot {
             id: dock
             anchors.fill: parent
             config: config; theme: theme; shell: shell; screen: Quickshell.screens[0]
+            edgePanel: edge
             progress: 1; reveal: 1
         }
     }
@@ -70,6 +82,18 @@ ShellRoot {
             wait(80)
             test.equal(dock.entries.length, 2)
             const numbers = [1,2,3,4,5].map(id => findChild(dock,"infiniteDeskWorkspace"+id))
+            test.check(!findChild(dock,"infiniteDeskWorkspaceGroupBubble"), "Workspace bubbles must be removed")
+            test.equal(findChild(dock,"infiniteDeskWorkspaces").height, 128, "Workspace corner must stay compact")
+            test.check(-numbers[4].position.y < 15, "Last number must stay close to the bottom")
+            test.check(numbers[0].position.y > -90, "Workspace group must be shorter")
+            const emptyPanelImage = grabImage(dock)
+            edge.mounted = true
+            wait(100)
+            const panelImage = grabImage(dock)
+            test.check(panelImage.red(1210, 170) !== emptyPanelImage.red(1210, 170), "Right menu must retain its background in Infinite Desk")
+            test.equal(panelImage.red(1000, 170), emptyPanelImage.red(1000, 170), "Right menu background must remain bounded")
+            test.check(panelImage.red(1278, 400) !== panelImage.red(1000, 400), "Existing border must remain visible above the bottom curve")
+            edge.mounted = false
             for (let i=0; i<5; i++) {
                 test.check(numbers[i])
                 test.check(numbers[i].x >= 0)

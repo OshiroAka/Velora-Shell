@@ -235,19 +235,10 @@ Item {
             progress: root.desktopMorphProgress; reveal: root.desktopTargetReveal
         }
     }
-    Loader {
+    Item {
         id: rightDesktopTools
-        active: !!root.shell && root.desktopMorphProgress > .0001
-        width: 92 * root.desktopMorphProgress
+        width: 0
         height: root.height
-        x: root.width - width
-        z: 5
-        sourceComponent: InfiniteDesktopTools {
-            shell: root.shell; theme: root.theme; config: root.config
-            controller: root.controller; host: root.host; actions: root.actions; status: root.status
-            progress: root.desktopMorphProgress; reveal: root.desktopTargetReveal
-            rightSide: true
-        }
     }
     component Section: Row {
         id: section

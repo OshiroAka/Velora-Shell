@@ -10,6 +10,7 @@ Item {
     required property var theme
     required property var screen
     required property var shell
+    property var edgePanel: null
     property real progress: 0
     property real reveal: 0
     property bool nativeMaterial: false
@@ -74,6 +75,8 @@ Item {
             const c = getContext("2d")
             c.clearRect(0, 0, width, height)
             Geometry.path(c, width, height, root.entries.length)
+            if (root.edgePanel && root.edgePanel.mounted && root.edgePanel.bodyWidth > .01)
+                root.appendEdgePanel(c)
             c.fillStyle = root.surface
             c.fill()
         }
@@ -85,6 +88,36 @@ Item {
             function onSurfaceChanged() { surfaceCanvas.requestPaint() }
             function onDockWidthChanged() { surfaceCanvas.requestPaint() }
         }
+        Connections {
+            target: root.edgePanel
+            ignoreUnknownSignals: true
+            function onShapeChanged() { if (surfaceCanvas.visible) surfaceCanvas.requestPaint() }
+            function onContourSamplesChanged() { if (surfaceCanvas.visible) surfaceCanvas.requestPaint() }
+        }
+    }
+    function appendEdgePanel(c) {
+        const panel = edgePanel, edge = width - 4*unit
+        const reach = panel.bodyWidth, by = panel.bodyY, bh = panel.bodyHeight
+        const join = Math.min(24, reach*.5), nose = edge - reach
+        c.moveTo(width, by + bh + join)
+        c.lineTo(edge, by + bh + join)
+        c.bezierCurveTo(edge, by + bh - join, nose, by + bh + join, nose, by + bh - join)
+        if (panel.contour > .01) {
+            for (let index = 160; index >= 0; index--) {
+                const t = index / 160
+                c.lineTo(nose + panel.contourOffset(t), by + bh*t)
+            }
+        } else if (panel.extension && panel.extension.width > .01) {
+            const ey = panel.extension.y, ew = panel.extension.width, eh = panel.extension.height
+            c.lineTo(nose, ey + eh + 8)
+            c.bezierCurveTo(nose, ey + eh - 4, nose - ew, ey + eh + 12, nose - ew, ey + eh - 10)
+            c.lineTo(nose - ew, ey + 10)
+            c.bezierCurveTo(nose - ew, ey - 12, nose, ey + 4, nose, ey - 8)
+        }
+        c.lineTo(nose, by + join)
+        c.bezierCurveTo(nose, by - join, edge, by + join, edge, by - join)
+        c.lineTo(width, by - join)
+        c.closePath()
     }
     // The window mask contains only interactive content, leaving the canvas
     // behind clients and empty regions available to the desktop pan gesture.
@@ -93,8 +126,8 @@ Item {
         id: workspacesViewport
         objectName: "infiniteDeskWorkspaces"
         x: 0; y: root.height - height
-        width: 164 * root.unit
-        height: 164 * root.unit
+        width: 128 * root.unit
+        height: 128 * root.unit
         contentWidth: width
         contentHeight: height
         clip: true
@@ -113,7 +146,7 @@ Item {
                 readonly property var position: Geometry.workspacePosition(positionIndex, 5, root.unit)
                 x: position.x - width / 2
                 y: workspacesViewport.contentHeight + position.y - height / 2
-                width: 28 * root.unit; height: width
+                width: 24 * root.unit; height: width
                 opacity: Math.max(0, Math.min(1, (positionIndex + .75) / .75, (4.75 - positionIndex) / .75))
                 visible: workspaceId > 0 && opacity > .001
                 objectName: "infiniteDeskWorkspace" + workspaceId
@@ -123,19 +156,12 @@ Item {
                 Accessible.onPressAction: root.switchWorkspace(workspaceId)
                 Keys.onReturnPressed: root.switchWorkspace(workspaceId)
                 Keys.onSpacePressed: root.switchWorkspace(workspaceId)
-                Rectangle {
-                    anchors.fill: parent
-                    radius: width / 2
-                    color: workspace.workspaceId === root.activeWorkspace ? root.theme.accent
-                        : root.theme.withAlpha(root.theme.textPrimary, pointer.hovered || workspace.activeFocus ? .12 : 0)
-                    Behavior on color { ColorAnimation { duration: root.config.reducedMotion ? 0 : 180 } }
-                }
                 Text {
                     anchors.centerIn: parent
                     text: workspace.workspaceId
-                    color: root.theme.textPrimary
+                    color: workspace.workspaceId === root.activeWorkspace ? root.theme.accent : root.theme.textPrimary
                     rotation: Math.min(50, workspace.position.angle)
-                    font.family: root.theme.bodyFont; font.pixelSize: 12 * root.unit; font.weight: Font.Medium
+                    font.family: root.theme.bodyFont; font.pixelSize: 12 * root.unit; font.weight: workspace.workspaceId === root.activeWorkspace ? Font.DemiBold : Font.Medium
                 }
                 HoverHandler { id: pointer; cursorShape: Qt.PointingHandCursor }
                 TapHandler { onTapped: root.switchWorkspace(workspace.workspaceId) }

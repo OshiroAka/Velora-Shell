@@ -439,8 +439,10 @@ int main(int argc, char** argv) {
                 one("infiniteDockWidth",width);
                 draw();
                 check((alpha(200,290)>250) == (pass==1.F && width>0.F), "Empty dock gains a fixed centre or incorrect ownership");
-                check((alpha(7,268)>250) == (pass==1.F), "Curved workspace shelf is missing");
-                check(alpha(7,268)==alpha(392,268),"Bottom corners are not mirrored");
+                check((alpha(7,286)>250) == (pass==1.F), "Curved workspace shelf is missing");
+                check(alpha(7,286)==alpha(392,286),"Bottom corners are not mirrored");
+                check(alpha(15,281)==0,"Rounded inner corner still contains the old wedge");
+                check((alpha(0,150)>128) == (pass==1.F),"Infinite Desk loses its existing thin border");
                 check(alpha(200,260)==0,"Central dock extends above its intended height");
                 check(alpha(200,120)==0,"Infinite Desk shelf fills the desktop");
                 check(alpha(350,288)==0,"Empty right-hand bottom area gained a shelf");
@@ -525,6 +527,20 @@ int main(int argc, char** argv) {
         }
         one("barBrightness",1);four("barMaterial",2,1,1,0);draw();
         check(alpha(385,58)>0,"Right Settings lost its concave upper shoulder");
+        // The Infinite Desk keeps the thin frame, and the editor must keep
+        // painting Settings after the original U-shaped frame has folded.
+        two("frameFold",1,30);one("frameRadius",0);one("infiniteDockUnit",.3125F);
+        four("frameInterior",0,30,WIDTH,.01F);
+        for (float mode : {0.F,1.F,2.F,3.F}) {
+            four("barMaterial",1,mode,1,0);draw();
+            check(alpha(250,150)==0,"Infinite Desk frame duplicates the Settings body");
+            check(alpha(0,150)>128,"Thin frame disappears while Settings is open");
+            four("barMaterial",2,mode,1,0);draw();
+            check(alpha(250,150)>250,"Infinite Desk makes the Settings body transparent");
+            check(alpha(399,150)>250,"Connected Settings lost the right border");
+            check(alpha(0,150)==0,"Settings duplicates the opposite frame border");
+        }
+        two("frameFold",0,0);one("frameRadius",20);one("infiniteDockUnit",0);
         one("settingsOnRight",0);four("bottomPanel",0,0,0,0);
         // Tall right panels are partitioned between upper/bottom material
         // passes, with exactly one opaque owner on every row.

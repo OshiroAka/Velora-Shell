@@ -633,10 +633,13 @@ float sideWaveSdf(vec2 pixel) {
 }
 
 float infiniteCornerSdf(vec2 p) {
-    float q = clamp(1.0 - p.x / 246.0, 0.0, 1.0);
-    float floorHeight = 4.0 + 160.0*q*q;
-    float slope = 320.0*q/246.0;
-    return (-floorHeight - p.y) / sqrt(1.0+slope*slope);
+    if (p.x >= 192.0) return -4.0 - p.y;
+    if (p.y <= -128.0) return p.x - 4.0;
+    vec2 relative = p - vec2(192.0, -128.0);
+    vec2 radii = vec2(188.0, 124.0);
+    float k0 = length(relative / radii);
+    float k1 = length(relative / (radii*radii));
+    return k1 > .000001 ? k0*(1.0-k0)/k1 : 124.0;
 }
 
 float infiniteDockSdf(vec2 pixel) {
@@ -1072,8 +1075,14 @@ void main() {
         : mainDistance;
     if (bubbleIndex < 0 && barMaterial.x > 0.5 && (frameRadius > 0.0 || frameFold.x > 0.0)) {
         bool desktopPass = barMaterial.x > 1.5;
-        if (desktopPass && frameFold.x >= .9999) discard;
         vec2 pixel = local + (windowTopLeft + windowBottomRight) * fullSize * 0.5;
+        if (frameFold.x >= .9999) {
+            // Settings still owns its body after the old frame folds away.
+            // Both passes evaluate the same field before choosing ownership.
+            float settingsDistance = roundedBoxSdf(pixel - bottomPanel.xy, bottomPanel.zw, bottomMetrics.x);
+            bool settingsOwns = bottomPanel.w > 0.0 && settingsDistance <= bottomMetrics.y + 1.25;
+            if (desktopPass != settingsOwns) discard;
+        }
         if (!desktopPass && frameTopPanel.w > .005 && pixel.y >= frameInterior.y) {
             float body = roundedBoxSdf(pixel - frameTopPanel.xy, frameTopPanel.zw,
                 min(frameTopMetrics.z, frameTopPanel.w));
@@ -4480,7 +4489,7 @@ std::string status(VeloraCompat::OutputFormat format, std::string) {
 
     if (format == VeloraCompat::JSON_FORMAT)
         return std::format(
-            R"({{"active":true,"abi":"{}","materials":{},"capabilities":[{}"alpha-mask","infinite-desktop-dock","desktop-bar-material","transition","dial","caustics","topbar-connected","bar-blur","widget-blur","liquid-style","wallpaper","topbar-shape","unified-bar-shape","topbar-settle","right-menu-shape","settings-shape","settings-connected","settings-side-connected","editor-shape","appearance","lock-layout","shared-widgets-shape","wallpaper-transition","terminal-glass","terminal-glass-control","terminal-bar-match","bar-refraction","terminal-follow-bar","terminal-brightness","bar-brightness","lyrics-beat","lyrics-beat-palette","optical-glass","bar-bubble-liquid"{}],"parallax":{{"enabled":{},"frames":{},"moving":{}}},"opticalDamage":{{"frames":{},"blurExpansions":{},"padding":{},"staleBackdropRefreshes":{}}},"terminalGlass":{{"enabled":{},"strength":{:.3f},"draws":{},"sharpDraws":{},"desktopCopies":{},"shaderFailed":{},"source":"live-framebuffer-and-hyprland-blur","barMatch":{},"barMatchDraws":{},"followsBar":{},"followBarDraws":{},"brightness":{:.3f}}},"wallpaperBlur":{:.3f},"barRefraction":{:.3f},"barBrightness":{:.3f},"lyricsBeatCount":{},"liquidStyle":"{}","backdrop":"sharp-framebuffer","hyprlandBlur":{},"barBlur":{{"enabled":{},"source":"hyprland","topbarDraws":{},"sidebarDraws":{},"waveDraws":{}}},"appearance":{{"blur":{:.3f},"contrast":{:.3f},"reflection":{:.3f},"preview":{}}},"desktop":{{"size":{},"passes":{},"draws":{},"noise":{:.3f},"contrast":{:.3f},"brightness":{:.3f},"vibrancy":{:.3f},"vibrancyDarkness":{:.3f}}},"panel":{{"size":{},"passes":{},"draws":{},"refractionDraws":{},"noise":{:.3f},"contrast":{:.3f},"brightness":{:.3f},"vibrancy":{:.3f},"vibrancyDarkness":{:.3f},"refraction":{:.3f},"edgeWidth":{:.3f},"dispersion":{:.3f},"tint":{:.3f}}},"topbar":{{"size":{},"passes":{},"shapes":{},"draws":{},"refractionDraws":{},"noise":{:.3f},"contrast":{:.3f},"brightness":{:.3f},"vibrancy":{:.3f},"vibrancyDarkness":{:.3f}}},"rightMenu":{{"draws":{},"refractionDraws":{}}},"settings":{{"draws":{},"refractionDraws":{}}},"editor":{{"shapes":{},"draws":{},"refractionDraws":{},"connectedSettings":{}}},"sharedWidgets":{{"blurEnabled":{},"blurDraws":{},"active":{},"shapes":{},"draws":{},"refractionDraws":{},"caustics":{}}},"transition":{{"progress":{:.3f},"animating":{}}},"caustics":{{"enabled":{},"intensity":{:.3f},"lines":{},"animating":{},"frames":{}}}}})",
+            R"({{"active":true,"abi":"{}","materials":{},"capabilities":[{}"alpha-mask","infinite-desktop-dock","infinite-desktop-dock-compact","desktop-bar-material","transition","dial","caustics","topbar-connected","bar-blur","widget-blur","liquid-style","wallpaper","topbar-shape","unified-bar-shape","topbar-settle","right-menu-shape","settings-shape","settings-connected","settings-side-connected","editor-shape","appearance","lock-layout","shared-widgets-shape","wallpaper-transition","terminal-glass","terminal-glass-control","terminal-bar-match","bar-refraction","terminal-follow-bar","terminal-brightness","bar-brightness","lyrics-beat","lyrics-beat-palette","optical-glass","bar-bubble-liquid"{}],"parallax":{{"enabled":{},"frames":{},"moving":{}}},"opticalDamage":{{"frames":{},"blurExpansions":{},"padding":{},"staleBackdropRefreshes":{}}},"terminalGlass":{{"enabled":{},"strength":{:.3f},"draws":{},"sharpDraws":{},"desktopCopies":{},"shaderFailed":{},"source":"live-framebuffer-and-hyprland-blur","barMatch":{},"barMatchDraws":{},"followsBar":{},"followBarDraws":{},"brightness":{:.3f}}},"wallpaperBlur":{:.3f},"barRefraction":{:.3f},"barBrightness":{:.3f},"lyricsBeatCount":{},"liquidStyle":"{}","backdrop":"sharp-framebuffer","hyprlandBlur":{},"barBlur":{{"enabled":{},"source":"hyprland","topbarDraws":{},"sidebarDraws":{},"waveDraws":{}}},"appearance":{{"blur":{:.3f},"contrast":{:.3f},"reflection":{:.3f},"preview":{}}},"desktop":{{"size":{},"passes":{},"draws":{},"noise":{:.3f},"contrast":{:.3f},"brightness":{:.3f},"vibrancy":{:.3f},"vibrancyDarkness":{:.3f}}},"panel":{{"size":{},"passes":{},"draws":{},"refractionDraws":{},"noise":{:.3f},"contrast":{:.3f},"brightness":{:.3f},"vibrancy":{:.3f},"vibrancyDarkness":{:.3f},"refraction":{:.3f},"edgeWidth":{:.3f},"dispersion":{:.3f},"tint":{:.3f}}},"topbar":{{"size":{},"passes":{},"shapes":{},"draws":{},"refractionDraws":{},"noise":{:.3f},"contrast":{:.3f},"brightness":{:.3f},"vibrancy":{:.3f},"vibrancyDarkness":{:.3f}}},"rightMenu":{{"draws":{},"refractionDraws":{}}},"settings":{{"draws":{},"refractionDraws":{}}},"editor":{{"shapes":{},"draws":{},"refractionDraws":{},"connectedSettings":{}}},"sharedWidgets":{{"blurEnabled":{},"blurDraws":{},"active":{},"shapes":{},"draws":{},"refractionDraws":{},"caustics":{}}},"transition":{{"progress":{:.3f},"animating":{}}},"caustics":{{"enabled":{},"intensity":{:.3f},"lines":{},"animating":{},"frames":{}}}}})",
             __hyprland_api_get_client_hash(), materials, g_luaDispatch ? "\"lua-dispatch\"," : "", cameraCapability,
             lightParallaxEnabled(), g_lightParallaxFrames, lightParallaxEnabled() && std::any_of(g_lightParallax.begin(), g_lightParallax.end(), [](const auto& item) { return item.second.moving(); }),
             g_opticalDamageFrames, g_opticalBlurExpansions, g_opticalDamagePadding, g_staleBackdropRefreshes,

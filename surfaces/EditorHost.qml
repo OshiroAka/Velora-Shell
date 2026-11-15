@@ -32,6 +32,8 @@ Variants {
             && !root.config.reduceTransparency && !!root.controller.shell
             && root.controller.shell.sideBarLayoutEnabled === true
             && !!root.controller.shell.composition && root.controller.shell.composition.nativeBarMaterial
+            && !(root.controller.shell.infiniteDesktopFrameFoldProgress > .999
+                && !Platform.NativeBlur.supports("infinite-desktop-dock-compact"))
         readonly property bool settingsNativeLiquid: !settingsConnected && chrome.settingsItem.launcherMode
             && chrome.settingsItem.liquidMaterial && Platform.NativeBlur.supports("editor-shape")
         onSettingsConnectedChanged: queueShape()

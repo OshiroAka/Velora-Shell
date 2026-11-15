@@ -4673,6 +4673,8 @@ Scope {
             function syncUnifiedBarNativeShape() {
                 const active = root.composition
                     && (["liquid", "liquid-glass"].includes(root.composition.barMaterial) || root.composition.nativeBarMaterial)
+                    && !(root.infiniteDesktopFrameFoldProgress > .999
+                        && !Platform.NativeBlur.supports("infinite-desktop-dock-compact"))
                     && width > 0 && height > 0
                 if (!active) {
                     Platform.NativeBlur.dispatch("velora-blur:unified-bar-shape " + modelData.name + " 0")
@@ -5309,9 +5311,10 @@ Scope {
                 theme: root.composition.topbarTheme
                 screen: panel.modelData
                 shell: root
+                edgePanel: edgePopover
                 progress: root.infiniteDesktopFrameFoldProgress
                 reveal: root.infiniteDesktopTargetReveal
-                nativeMaterial: root.composition.nativeBarMaterial && Platform.NativeBlur.supports("infinite-desktop-dock")
+                nativeMaterial: root.composition.nativeBarMaterial && Platform.NativeBlur.supports("infinite-desktop-dock-compact")
                 surface: root.sidebarBarMaterialColor()
                 onDockWidthChanged: Qt.callLater(panel.syncUnifiedBarNativeShape)
                 z: 2
@@ -6738,7 +6741,9 @@ Scope {
             Item {
                 id: edgeTrigger
                 x: parent.width - width; y: edgePopover.anchorY - height / 2
-                width: root.sideBarLayoutEnabled && !root.barOnRight && root.infiniteDesktopSourceReveal > .99 ? root.oppositeFrameWidth + 4 : 0
+                width: root.sideBarLayoutEnabled && !root.barOnRight
+                    && (root.infiniteDesktopSourceReveal > .99 || root.infiniteDesktopTargetReveal > .99)
+                    ? root.oppositeFrameWidth + 4 : 0
                 height: 200
                 HoverHandler { id: edgeHover; blocking: false }
             }
