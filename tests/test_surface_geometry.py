@@ -11,6 +11,41 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class SurfaceGeometryTests(unittest.TestCase):
+    def test_native_topbar_bounds_are_exclusive_to_infinite_desk(self):
+        source = (ROOT / "surfaces/TopBarHost.qml").read_text()
+        function = "function syncConnectedSurface() {" + source.split(
+            "function syncConnectedSurface() {", 1)[1].split(
+            "\n        property alias surfaceDirty", 1)[0]
+        script = r'''
+const assert = require('assert/strict');
+const Qt = {rect: (x,y,width,height)=>({x,y,width,height})};
+const root = {config:{referenceAppearance:true,barMaterial:'liquid'},
+    nativeBarMaterial:true,timerService:{alertPhase:1,alertStrength:0}};
+const width=1920,height=1080,stripHeight=40,screen={name:'fixture'},modelData={height};
+const menuMounted=false,menuAnchor=960,menuNeck=120,menuRadius=18,menuJoin=8;
+const executionIndicator={surfaceRect:Qt.rect(0,0,0,0),neckHalfWidth:0,cornerRadius:18,joinRadius:8};
+const chargingMorph={...executionIndicator,anchorX:960,gradientProgress:1,gradientStrength:0};
+const timerAlert={...executionIndicator,anchorX:960};
+const barLoader={x:500,width:920};
+let infiniteMode=false,nativeCompactBar=true;
+const messages=[],Platform={NativeBlur:{dispatch:message=>messages.push(message)}};
+'''
+        script += function + r'''
+syncConnectedSurface();
+const standard=messages.at(-1).split(' ');
+infiniteMode=true; syncConnectedSurface();
+const desk=messages.at(-1).split(' ');
+assert.equal(desk.length,standard.length+2);
+assert(Math.abs(+desk.at(-2)-500/1920)<1e-8);
+assert(Math.abs(+desk.at(-1)-920/1920)<1e-8);
+infiniteMode=false; syncConnectedSurface();
+assert.equal(messages.at(-1),standard.join(' '));
+root.nativeBarMaterial=false; nativeCompactBar=false; syncConnectedSurface();
+assert.equal(messages.at(-1).split(' ')[2],'1');
+'''
+        result = subprocess.run(["node", "-e", script], text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_shell_panels_respect_fractional_logical_boundaries(self):
         source = (ROOT / "ShellController.qml").read_text()
         names = ["barX", "mainAreaX", "mainAreaRightInset", "mainAreaWidth", "quickPopupX",
@@ -113,7 +148,9 @@ for (const [physicalW, physicalH] of matrix) for (const scale of [1,1.25,1.5,2])
 }
 const reference=bar.sections(1920,548,330,620,0,20);
 assert.equal(reference.left.x,0); assert.equal(reference.left.width,548);
-assert.equal(reference.center.x,548); assert.equal(reference.right.x,878);
+assert.equal(reference.center.x,795); assert.equal(reference.right.x,1280);
+const packed=bar.sections(1920,548,330,620,0,0,true);
+assert.equal(packed.center.x,548); assert.equal(packed.right.x,878);
 const original={x:120,y:120,scale:1,rotation:0,opacity:1};
 assert.deepEqual(surface.pose(original,302,294,surface.designBounds(1920,1200,64,false,40,18)),original);
 console.log(JSON.stringify({cases:count,outputs:matrix.length,scales:4,sides:2}));

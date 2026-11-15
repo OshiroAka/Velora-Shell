@@ -92,6 +92,8 @@ Scope {
     // exact same material tokens as the unified L-shaped bar.
     property string widgetSurfaceMode: "solid"
     property var topbarLayout: []
+    property var infiniteTopbarLayout: []
+    property var infiniteTopbarToolsOrder: TopBarOrder.defaults()
     property string profileName: "Velora"
     property string greeting: "Welcome back!!"
     property string verticalLabel: "VELORA SHELL"
@@ -290,8 +292,8 @@ Scope {
         return result
     }
 
-    function topbarItemsForSection(section, includeDisabled) {
-        return topbarLayout.filter(function(item) {
+    function topbarItemsForSection(section, includeDisabled, infinite) {
+        return (infinite ? infiniteTopbarLayout : topbarLayout).filter(function(item) {
             return item.section === section && (includeDisabled || item.enabled)
         }).sort(function(a, b) { return a.order - b.order })
     }
@@ -488,6 +490,12 @@ Scope {
         const nextTopbarToolsOrder = TopBarOrder.normalize(valueAt(resolved, "topbar.toolsOrder", null))
         if (JSON.stringify(topbarToolsOrder) !== JSON.stringify(nextTopbarToolsOrder))
             topbarToolsOrder = nextTopbarToolsOrder
+        const deskLayout = normalizedTopbarLayout(valueAt(resolved, "infiniteDesk.topbar.layout", nextTopbarLayout))
+        if (JSON.stringify(infiniteTopbarLayout) !== JSON.stringify(deskLayout))
+            infiniteTopbarLayout = deskLayout
+        const deskTools = TopBarOrder.normalize(valueAt(resolved, "infiniteDesk.topbar.toolsOrder", nextTopbarToolsOrder))
+        if (JSON.stringify(infiniteTopbarToolsOrder) !== JSON.stringify(deskTools))
+            infiniteTopbarToolsOrder = deskTools
         desktopWidgetsEnabled = Boolean(valueAt(resolved, "desktop.widgetsEnabled", true))
         desktopVisualizerEnabled = Boolean(valueAt(resolved, "desktop.visualizerEnabled", true))
         wallpaperBlurEnabled = Boolean(valueAt(resolved, "desktop.wallpaperBlurEnabled", false))
@@ -1783,21 +1791,32 @@ Scope {
         return true
     }
 
-    function setTopbarLayout(values) {
-        setValue("topbar.layout", normalizedTopbarLayout(values))
+    function preserveInfiniteTopbarLayout() {
+        if (valueAt(userData, "infiniteDesk.topbar.layout", null) === null)
+            setValue("infiniteDesk.topbar.layout", clone(infiniteTopbarLayout))
+        if (valueAt(userData, "infiniteDesk.topbar.toolsOrder", null) === null)
+            setValue("infiniteDesk.topbar.toolsOrder", clone(infiniteTopbarToolsOrder))
+    }
+
+    function setTopbarLayout(values, infinite) {
+        preserveInfiniteTopbarLayout()
+        setValue(infinite ? "infiniteDesk.topbar.layout" : "topbar.layout", normalizedTopbarLayout(values))
         return true
     }
 
-    function moveTopbarTool(type, target) {
-        if (!topbarToolsOrder.includes(type) || !topbarToolsOrder.includes(target)) return false
-        setValue("topbar.toolsOrder", TopBarOrder.move(topbarToolsOrder, type, target))
+    function moveTopbarTool(type, target, infinite) {
+        const order = infinite ? infiniteTopbarToolsOrder : topbarToolsOrder
+        if (!order.includes(type) || !order.includes(target)) return false
+        preserveInfiniteTopbarLayout()
+        setValue(infinite ? "infiniteDesk.topbar.toolsOrder" : "topbar.toolsOrder", TopBarOrder.move(order, type, target))
         return true
     }
-    function stepTopbarTool(type, direction) {
-        const index = topbarToolsOrder.indexOf(type)
+    function stepTopbarTool(type, direction, infinite) {
+        const order = infinite ? infiniteTopbarToolsOrder : topbarToolsOrder
+        const index = order.indexOf(type)
         const next = index + (direction < 0 ? -1 : 1)
-        if (index < 0 || next < 0 || next >= topbarToolsOrder.length) return false
-        return moveTopbarTool(type, topbarToolsOrder[next])
+        if (index < 0 || next < 0 || next >= order.length) return false
+        return moveTopbarTool(type, order[next], infinite)
     }
 
     function setTopbarItemEnabled(identifier, enabled) {
@@ -1811,8 +1830,8 @@ Scope {
         return false
     }
 
-    function moveTopbarItem(identifier, direction) {
-        const next = clone(topbarLayout)
+    function moveTopbarItem(identifier, direction, infinite) {
+        const next = clone(infinite ? infiniteTopbarLayout : topbarLayout)
         const current = next.findIndex(function(item) {
             return String(item.id) === String(identifier)
         })
@@ -1836,13 +1855,14 @@ Scope {
         const previousOrder = next[current].order
         next[current].order = next[other].order
         next[other].order = previousOrder
-        return setTopbarLayout(next)
+        return setTopbarLayout(next, infinite)
     }
 
-    function placeTopbarItem(identifier, section, beforeId) {
+    function placeTopbarItem(identifier, section, beforeId, infinite) {
         if (!["left", "center"].includes(String(section)))
             return false
-        const next = clone(topbarLayout)
+        const layout = infinite ? infiniteTopbarLayout : topbarLayout
+        const next = clone(layout)
         const current = next.findIndex(function(item) {
             return String(item.id) === String(identifier)
         })
@@ -1858,8 +1878,8 @@ Scope {
             siblings[index].section = section
             siblings[index].order = index
         }
-        if (JSON.stringify(normalizedTopbarLayout(next)) === JSON.stringify(topbarLayout)) return false
-        return setTopbarLayout(next)
+        if (JSON.stringify(normalizedTopbarLayout(next)) === JSON.stringify(layout)) return false
+        return setTopbarLayout(next, infinite)
     }
 
     function setCharacterValue(field, value) {

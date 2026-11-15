@@ -23,18 +23,19 @@ Item {
     property var shell: null
     property real desktopMorphProgress: 0
     property real desktopTargetReveal: 0
+    readonly property bool packed: desktopMorphProgress > .0001
     property int opticsGeneration: 0
     property alias barSurfaceItem: background
     property real leftInset: 0
-    property real rightInset: 0
-    implicitWidth: leftDesktopTools.width + sectionWidth("left") + sectionWidth("center") + toolRow.width
+    property real rightInset: packed ? 0 : 20
+    implicitWidth: packed ? leftDesktopTools.width + sectionWidth("left") + sectionWidth("center") + toolRow.width : 0
     signal geometryChanged()
     function sectionWidth(section) {
-        return config.topbarItemsForSection(section, false).reduce((sum, item) => sum + layoutItemWidth(item.type), 0)
+        return config.topbarItemsForSection(section, false, packed).reduce((sum, item) => sum + layoutItemWidth(item.type), 0)
     }
     function layoutItemWidth(type) { return type === "workspaces" ? legacyItemWidth(type) * (1 - desktopMorphProgress) : legacyItemWidth(type) }
     readonly property var sectionBounds: BarGeometry.sections(width,
-        sectionWidth("left"), sectionWidth("center"), toolRow.width, leftInset + leftDesktopTools.width, rightInset + rightDesktopTools.width)
+        sectionWidth("left"), sectionWidth("center"), toolRow.width, leftInset + leftDesktopTools.width, rightInset + rightDesktopTools.width, packed)
     onSectionBoundsChanged: geometryChanged()
     readonly property var hyprMonitor: Hyprland.monitorFor(host.screen)
     readonly property var workspaceIds: {
@@ -48,9 +49,9 @@ Item {
     readonly property var barTheme: shell ? shell.unifiedTheme : null
     readonly property real unit: barTheme ? Math.max(.67, Math.min(1.17, barTheme.barIconSize / 48)) : 1
     readonly property real iconOpacity: barTheme ? barTheme.barIconOpacity : 1
-    readonly property real itemGap: 0
-    readonly property bool compact: host.screen.width < 1280
-    readonly property real density: host.screen.width < 760 ? 0.8 : 1
+    readonly property real itemGap: packed ? 0 : barTheme ? barTheme.barIconSpacing / 4 : 1
+    readonly property bool compact: (packed ? host.screen.width : width) < 1280
+    readonly property real density: (packed ? host.screen.width : width) < 760 ? 0.8 : 1
     TextMetrics {
         id: dateMetrics
         font.family: root.theme.bodyFont; font.pixelSize: 12
@@ -60,7 +61,8 @@ Item {
     TextMetrics { id: messageMetrics; font.family: root.theme.bodyFont; font.pixelSize: 12; text: root.system.oneThing || "What is the one thing?" }
     readonly property bool editing: editorController.shown && editorController.mode === "editing"
         && editorController.editSpace === "desktop"
-    readonly property var visibleTools: config.topbarToolsOrder.filter(type =>
+    readonly property var layout: packed ? config.infiniteTopbarLayout : config.topbarLayout
+    readonly property var visibleTools: (packed ? config.infiniteTopbarToolsOrder : config.topbarToolsOrder).filter(type =>
         (type !== "thing" || config.topbarOneThingEnabled)
         && (type !== "notes" || config.topbarNotesEnabled))
     function controlBubbleRuns() {
@@ -98,7 +100,7 @@ Item {
     property string layoutDropSection: "left"
     property string layoutBeforeId: ""
     readonly property string layoutDragSourceSection: {
-        const item = config.topbarLayout.find(item => item.id === layoutDragId)
+        const item = layout.find(item => item.id === layoutDragId)
         return item ? item.section : ""
     }
     onEditingChanged: { cancelDrag(); root.controller.close() }
@@ -131,12 +133,12 @@ Item {
     function finishLayoutDrag() {
         const identifier = layoutDragId, section = layoutDropSection, before = layoutBeforeId
         cancelDrag()
-        if (identifier) config.placeTopbarItem(identifier, section, before)
+        if (identifier) config.placeTopbarItem(identifier, section, before, packed)
     }
     function layoutDisplacement(identifier, section) {
         if (!layoutDragId || identifier === layoutDragId) return 0
-        const original = config.topbarItemsForSection(section, false)
-        const dragged = config.topbarLayout.find(item => item.id === layoutDragId)
+        const original = config.topbarItemsForSection(section, false, packed)
+        const dragged = layout.find(item => item.id === layoutDragId)
         if (!dragged) return 0
         const reordered = original.filter(item => item.id !== layoutDragId)
         if (layoutDropSection === section) {
@@ -171,7 +173,7 @@ Item {
     function finishDrag() {
         const type = dragType, target = visibleTools[dragTo]
         cancelDrag()
-        if (target && type !== target) config.moveTopbarTool(type, target)
+        if (target && type !== target) config.moveTopbarTool(type, target, packed)
     }
     function displacement(index, type) {
         if (!dragType) return 0
@@ -199,6 +201,13 @@ Item {
             search: "Busca", controls: "Configurações", weather: "Previsão do tempo", clock: "Data e calendário"})[type] || type
     }
     function legacyItemWidth(type) {
+        if (!packed) {
+            const widths = { workspaces: 208, context: compact ? 130 : 250,
+                clock: compact ? 210 : 330, media: compact ? 100 : 140,
+                wifi: 54, volume: 54, battery: 86, settings: 48, avatar: 48,
+                search: 48, weather: 124, brand: 90 }
+            return (widths[type] || 48) * unit
+        }
         const widths = { workspaces: 176, context: compact ? 130 : 200,
             clock: dateMetrics.width + 4, media: 100,
             wifi: 30, volume: 30, battery: 38, settings: 30, avatar: 32,
@@ -255,7 +264,7 @@ Item {
         height: root.height
         Repeater {
             id: sectionRepeater
-            model: root.config.topbarItemsForSection(section.sectionName, false)
+            model: root.config.topbarItemsForSection(section.sectionName, false, root.packed)
             Item {
                 id: entry
                 required property var modelData
@@ -287,11 +296,11 @@ Item {
                 Keys.onReturnPressed: if (panelType && !root.editing) root.activateLegacy(type, entry)
                 Keys.onSpacePressed: if (panelType && !root.editing) root.activateLegacy(type, entry)
                 Keys.onLeftPressed: event => {
-                    if (root.editing) root.config.moveTopbarItem(modelData.id, -1)
+                    if (root.editing) root.config.moveTopbarItem(modelData.id, -1, root.packed)
                     else event.accepted = false
                 }
                 Keys.onRightPressed: event => {
-                    if (root.editing) root.config.moveTopbarItem(modelData.id, 1)
+                    if (root.editing) root.config.moveTopbarItem(modelData.id, 1, root.packed)
                     else event.accepted = false
                 }
                 Keys.onEscapePressed: if (root.layoutDragId) root.cancelDrag()
@@ -306,6 +315,7 @@ Item {
                     liquid: root.config.barItemBubblesEnabled && root.config.barItemBubblesLiquid
                     objectName: "barItemBubble"
                     anchors.fill: parent; anchors.topMargin: 6; anchors.bottomMargin: 6
+                    anchors.leftMargin: root.packed ? 0 : 6; anchors.rightMargin: root.packed ? 0 : 6
                     shown: root.config.barItemBubblesEnabled
                 }
                 Rectangle {
@@ -325,7 +335,7 @@ Item {
                     id: entryVisual
                     opacity: root.iconOpacity
                     anchors.centerIn: parent
-                    spacing: 4 * root.unit
+                    spacing: (root.packed ? 4 : 8) * root.unit
                     visible: !["workspaces", "context"].includes(entry.type)
                     Components.VeloraMaterialIcon {
                         scale: legacyIconMotion.zoom
@@ -372,10 +382,17 @@ Item {
                     }
                 }
 
-                Column {
-                    x: 8 * root.unit
+                Rectangle {
+                    anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
-                    width: parent.width - 16 * root.unit
+                    width: 1; height: 27 * root.unit
+                    color: root.theme.borderSubtle
+                    visible: !root.packed && ["workspaces", "media", "battery"].includes(entry.type)
+                }
+                Column {
+                    x: (root.packed ? 8 : 14) * root.unit
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: parent.width - (root.packed ? 16 : 24) * root.unit
                     visible: entry.type === "context"
                     opacity: root.iconOpacity
                     spacing: -1 * root.unit
@@ -443,7 +460,7 @@ Item {
                 Loader {
                     anchors.centerIn: parent
                     active: entry.type === "workspaces"
-                    width: Math.min(176, entry.width); height: 32
+                    width: Math.min(176, entry.width - (root.packed ? 0 : 32)); height: 32
                     sourceComponent: WorkspaceSwitcher {
                         opacity: root.iconOpacity
                         theme: root.theme
@@ -525,9 +542,9 @@ Item {
                     root.toolItemsRevision
                     return toolRepeater.count > modelData.last ? toolRepeater.itemAt(modelData.last) : null
                 }
-                x: firstItem ? toolRow.x + firstItem.x : 0
+                x: firstItem ? toolRow.x + firstItem.x + (root.packed ? 0 : 4) : 0
                 y: 6; height: Math.max(0, root.height - 12)
-                width: firstItem && lastItem ? lastItem.x + lastItem.width - firstItem.x : 0
+                width: firstItem && lastItem ? lastItem.x + lastItem.width - firstItem.x - (root.packed ? 0 : 8) : 0
                 shown: !!firstItem && !!lastItem && width > 0
             }
         }
@@ -561,12 +578,24 @@ Item {
                 bubbleMonitor: root.host.screen.name
                 bubblesSolid: root.config.barItemBubblesSolid
                 bubblesLiquid: root.config.barItemBubblesLiquid
+                compactPadding: root.packed
                 reducedMotion: root.config.reducedMotion
-                width: (type === "clock" ? Math.ceil(dateMetrics.width) + 24
+                width: !root.packed ? (type === "clock" ? 178 : type === "thing" ? (root.width < 1000 ? 90 : 160)
+                    : type === "timer" ? 74 : type === "battery" ? 44 : 36) * root.density
+                    : (type === "clock" ? Math.ceil(dateMetrics.width) + 24
                     : type === "thing" ? Math.min(240, Math.max(64, Math.ceil(messageMetrics.width) + 24))
                     : type === "timer" ? Math.ceil(timerMetrics.width) + 24 : type === "battery" ? 38 : 34)
                 height: root.height
                 label: root.label(type)
+                Rectangle {
+                    visible: !root.packed && (["thing", "timer"].includes(item.type)
+                        || (item.type === "clock" && item.index > 0
+                            && !["thing", "timer"].includes(root.visibleTools[item.index - 1])))
+                    x: item.type === "clock" ? 0 : parent.width - 1
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 1; height: 16; radius: 0.5
+                    color: root.theme.withAlpha(root.theme.textPrimary, 0.32)
+                }
                 selected: panelTool && root.controller.owner === root.host && root.controller.activeType === type
                 dragToCreate: type === "notes" && !root.editing
                 onHoveredChanged: {
@@ -589,11 +618,11 @@ Item {
                 }
                 onSecondaryActivated: activated()
                 Keys.onLeftPressed: event => {
-                    if (root.editing) root.config.stepTopbarTool(type, -1)
+                    if (root.editing) root.config.stepTopbarTool(type, -1, root.packed)
                     else event.accepted = false
                 }
                 Keys.onRightPressed: event => {
-                    if (root.editing) root.config.stepTopbarTool(type, 1)
+                    if (root.editing) root.config.stepTopbarTool(type, 1, root.packed)
                     else event.accepted = false
                 }
                 Keys.onEscapePressed: if (root.dragType) root.cancelDrag()
@@ -662,7 +691,7 @@ Item {
                     anchors.centerIn: parent
                     shown: item.type === "timer"
                     opacity: root.theme.manualPalette ? 1 : root.iconOpacity
-                    width: parent.width - 4
+                    width: parent.width - (root.packed ? 4 : root.config.barItemBubblesEnabled ? 14 : 10)
                     height: root.config.barItemBubblesEnabled ? 28 : 25
                     radius: 7
                     color: nativeLiquid ? "transparent" : root.timerService.countdown.running || root.timerService.finished
@@ -695,7 +724,7 @@ Item {
                     objectName: "barExistingBubble-message"
                     anchors.centerIn: parent
                     shown: item.type === "thing"
-                    width: parent.width - 4
+                    width: parent.width - (root.packed ? 4 : root.config.barItemBubblesEnabled ? 12 : 16)
                     height: root.config.barItemBubblesEnabled ? 28 : 25
                     radius: 7
                     color: nativeLiquid ? "transparent" : root.config.barItemBubblesEnabled ? bubbleColor : root.theme.withAlpha(root.theme.textPrimary, 0.07)
@@ -704,7 +733,7 @@ Item {
                 }
                 Text {
                     anchors.centerIn: parent
-                    width: parent.width - 20
+                    width: parent.width - (root.packed ? 20 : 28)
                     visible: item.type === "thing"
                     opacity: root.iconOpacity
                     text: item.type === "thing" ? root.system.oneThing || "What is the one thing?"

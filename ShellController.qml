@@ -4684,7 +4684,7 @@ Scope {
                 // Extend the vertical lens above this LayerShell surface.
                 // Its own rounded top edge stays off-screen; the visible
                 // L-shaped corner is drawn separately by the unified frame.
-                const opticalTopOverlap = Platform.NativeBlur.supports("compact-topbar")
+                const opticalTopOverlap = root.infiniteDesktopMorphProgress <= .0001 || Platform.NativeBlur.supports("compact-topbar")
                     ? Math.max(64, root.sidebarCornerRadius * 3) : 0
                 const top = -opticalTopOverlap / height
                 const rail = root.sidebarVisualWidth / width

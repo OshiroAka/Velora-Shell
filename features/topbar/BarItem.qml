@@ -11,6 +11,7 @@ FocusScope {
     property bool bubblesEnabled: false
     property bool bubblesSolid: false
     property bool bubblesLiquid: false
+    property bool compactPadding: false
     property bool interactive: true
     property bool reducedMotion: false
     property bool scrollable: false
@@ -38,7 +39,7 @@ FocusScope {
         solid: root.bubblesSolid
         liquid: root.bubblesLiquid
         anchors.fill: parent; anchors.topMargin: 6; anchors.bottomMargin: 6
-        anchors.leftMargin: 4; anchors.rightMargin: 4
+        anchors.leftMargin: root.compactPadding ? 4 : 6; anchors.rightMargin: root.compactPadding ? 4 : 6
         shown: root.bubblesEnabled
     }
     Rectangle {

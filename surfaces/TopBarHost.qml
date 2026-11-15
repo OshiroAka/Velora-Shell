@@ -56,7 +56,9 @@ Variants {
         readonly property bool editingBar: root.editorController.shown
             && root.editorController.mode === "editing" && root.editorController.editSpace === "desktop"
         readonly property int stripHeight: 40
-        readonly property bool nativeCompactBar: root.nativeBarMaterial && Platform.NativeBlur.supports("compact-topbar")
+        readonly property bool infiniteMode: root.desktopMorphProgress > .0001
+        readonly property bool nativeCompactBar: root.nativeBarMaterial
+            && (!infiniteMode || Platform.NativeBlur.supports("compact-topbar"))
         readonly property bool wallpaperMounted: wallpaperPicker.mounted
         readonly property bool menuMounted: popover.mounted || wallpaperMounted
         readonly property rect menuRect: wallpaperMounted ? wallpaperPicker.panelRect : popover.panelRect
@@ -107,7 +109,8 @@ Variants {
         // the supplied video. There are no hidden optical islands underneath.
         BackgroundEffect.blurRegion: Region {
             item: root.config.referenceAppearance && root.config.barBlurEnabled
-                && (root.config.barMaterial === "glass" || !nativeCompactBar) ? connectedSurface : null
+                && (root.config.barMaterial === "glass"
+                    || !(infiniteMode ? nativeCompactBar : Platform.NativeBlur.supports("topbar-connected"))) ? connectedSurface : null
         }
 
         // The reference panel owns its complete 40 px strip.
@@ -175,10 +178,11 @@ Variants {
                 t.x / width, t.y / height, t.width / width, t.height / height,
                 timerAlert.anchorX / width, timerAlert.neckHalfWidth / width,
                 timerAlert.cornerRadius / width, timerAlert.joinRadius / width,
-                timerAlert.anchorX / width, root.timerService.alertPhase, root.timerService.alertStrength,
-                barLoader.x / width, barLoader.width / width]
+                timerAlert.anchorX / width, root.timerService.alertPhase, root.timerService.alertStrength]
+            if (infiniteMode) values.push(barLoader.x / width, barLoader.width / width)
             Platform.NativeBlur.dispatch("velora-blur:topbar-connected " + screen.name + " "
-                + (nativeCompactBar ? 1 : 0) + " "
+                + ((infiniteMode ? nativeCompactBar
+                    : ["liquid", "liquid-glass"].includes(root.config.barMaterial) || root.nativeBarMaterial) ? 1 : 0) + " "
                 + values.map(value => Number(value).toFixed(8)).join(" "))
         }
         property alias surfaceDirty: surfacePublisher.dirty
@@ -245,7 +249,8 @@ Variants {
             fillColor: topbarWindow.nativeCompactBar ? "transparent" : root.theme.barSurface
             lineColor: topbarWindow.wallpaperMounted && !Platform.NativeBlur.supports("topbar-connected")
                 ? root.theme.borderSubtle
-                : topbarWindow.nativeCompactBar ? "transparent" : root.theme.borderSubtle
+                : topbarWindow.nativeCompactBar || (!topbarWindow.infiniteMode
+                    && ["liquid", "liquid-glass"].includes(root.config.barMaterial)) ? "transparent" : root.theme.borderSubtle
             onNeckHalfWidthChanged: topbarWindow.surfaceDirty = true
         }
         Components.VeloraMediaBackdrop {
@@ -467,7 +472,8 @@ Variants {
             z: 4
             anchors.top: parent.top
             x: (topbarWindow.width - width) / 2
-            width: Math.min(topbarWindow.width, item ? item.implicitWidth : topbarWindow.width)
+            width: topbarWindow.infiniteMode
+                ? Math.min(topbarWindow.width, item ? item.implicitWidth : topbarWindow.width) : topbarWindow.width
             height: topbarWindow.stripHeight
             onXChanged: { topbarWindow.surfaceDirty = true; Qt.callLater(popover.refreshAnchor) }
             onWidthChanged: { topbarWindow.surfaceDirty = true; Qt.callLater(popover.refreshAnchor) }

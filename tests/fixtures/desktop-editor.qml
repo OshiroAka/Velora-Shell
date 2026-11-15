@@ -41,6 +41,8 @@ ShellRoot {
         property int oppositeFrameWidth: 4
         property var unifiedTheme: historical
         property var composition: null
+        property var infiniteDesktopPanels: ({})
+        property bool infiniteDesktopMorphing: false
         property var importedUrls: []
         function importTopWallpaperUrls(urls) { importedUrls = urls; return true }
         function openLyricsMaskEditor() { }
@@ -56,6 +58,7 @@ ShellRoot {
         property int batteryPercent: 64
         property bool batteryCharging: false
         property bool muted: false
+        property real volume: .5
         property bool wifiConnected: false
         property bool wifiEnabled: false
         function toggleMuted() { }
@@ -113,7 +116,8 @@ ShellRoot {
         width: 1440; height: 900; visible: true; color: "#101113"
         TestCase { id: pointer; name: "DesktopEditorPointer"; when: false }
         Topbar.ReferenceBar {
-            id: bar; width: Math.min(parent.width, implicitWidth); x: (parent.width-width)/2; height: 40; z: 100
+            id: bar; width: packed ? Math.min(parent.width, implicitWidth) : parent.width
+            x: (parent.width-width)/2; height: 40; z: 100
             config: config; theme: theme; clock: clock; media: media; weather: weather
             status: status; system: system; timerService: timerService
             actions: actions; controller: panels; editorController: controller
@@ -179,12 +183,21 @@ ShellRoot {
                     if (Quickshell.env("VELORA_EDITOR_RELOAD")==="1") {
                         assert(config.topbarToolsOrder[0]==="timer","tool order lost on restart")
                         assert(config.topbarLayout.find(item=>item.type==="weather").section==="left","section lost on restart")
+                        assert(config.infiniteTopbarToolsOrder[config.infiniteTopbarToolsOrder.length-1]==="timer","Infinite Desk order lost on restart")
+                        assert(config.infiniteTopbarLayout.find(item=>item.type==="weather").section==="left","Infinite Desk section lost on restart")
                         assert(config.barItemBubblesEnabled,"bubble choice lost on restart")
                         assert(!config.barBackgroundEnabled,"background choice lost on restart")
                         assert(config.barItemBubblesSolid,"solid bubble choice lost on restart")
                         console.info("DESKTOP_EDITOR_OK reload");Qt.quit();return
                     }
                     config.setValue("appearance.reducedMotion",true)
+                    assert(!bar.packed && bar.width===window.width && bar.x===0,"standard topbar lost its full-width layout")
+                    assert(bar.legacyItemWidth("workspaces")===208*bar.unit && bar.rightInset===20,"standard topbar spacing changed")
+                    const standardBounds=JSON.stringify(bar.sectionBounds)
+                    const standardLayout=JSON.stringify(config.topbarLayout)
+                    const standardOrder=JSON.stringify(config.topbarToolsOrder)
+                    bar.desktopMorphProgress=1
+                    pointer.wait(25)
                     assert(bar.width < window.width && bar.x > 0,"topbar must detach from both screen edges")
                     assert(Math.abs(bar.x+bar.width/2-window.width/2)<1,"the entire topbar must stay centred")
                     assert(bar.sectionBounds.center.x===bar.sectionBounds.left.x+bar.sectionBounds.left.width,"sections must stay adjacent")
@@ -194,6 +207,17 @@ ShellRoot {
                         const label=textLabel(slot)
                         assert(label && slot.width>=label.implicitWidth+20,"text lost the minimum internal padding: "+type)
                     }
+                    bar.beginDrag("timer",find(bar,"topbarTool-timer"),0)
+                    bar.dragTo=bar.visibleTools.indexOf("clock")
+                    bar.finishDrag()
+                    const weatherId=config.infiniteTopbarLayout.find(item=>item.type==="weather").id
+                    bar.layoutDragId=weatherId;bar.layoutDropSection="left";bar.layoutBeforeId=""
+                    bar.finishLayoutDrag()
+                    assert(config.infiniteTopbarToolsOrder[config.infiniteTopbarToolsOrder.length-1]==="timer","Infinite Desk reorder failed")
+                    assert(JSON.stringify(config.topbarLayout)===standardLayout && JSON.stringify(config.topbarToolsOrder)===standardOrder,"Infinite Desk editing changed the standard bar")
+                    bar.desktopMorphProgress=0
+                    pointer.wait(25)
+                    assert(JSON.stringify(bar.sectionBounds)===standardBounds && bar.width===window.width,"leaving Infinite Desk did not restore the standard bar")
                     const weatherTrigger=find(bar,"topbarWeatherTrigger")
                     const drop=find(weatherTrigger,"weatherWallpaperDropArea")
                     assert(drop.enabled,"weather must accept downloaded wallpapers outside editing")
@@ -256,7 +280,7 @@ ShellRoot {
                     assert(config.topbarLayout.find(item=>item.type==="weather").section==="left","cross-section drag failed")
                 } else if (phase===7) {
                     const view=find(bar,"topbarRightToolsViewport")
-                    if (!resized) { window.width=560;resized=true;return }
+                    if (!resized) { window.width=800;resized=true;return }
                     view.contentX=30
                     originalX=center(find(bar,"topbarTool-notes"))
                     pointer.mousePress(bar,originalX,20,Qt.LeftButton)
@@ -328,7 +352,8 @@ ShellRoot {
                     assert(bar.controlBubbleRuns().length===2,"separate icon runs were merged across an unrelated tool")
                     config.setValue("topbar.toolsOrder",before)
                     historical.applyBarAppearance(56,.6,24,false,16,false)
-                    assert(Math.abs(bar.unit-56/48)<.001 && Math.abs(bar.iconOpacity-.6)<.001 && bar.itemGap===0,"icon settings or the packed layout do not reach horizontal items")
+                    assert(Math.abs(bar.unit-56/48)<.001 && Math.abs(bar.iconOpacity-.6)<.001 && bar.itemGap===6,"standard icon settings do not reach horizontal items")
+                    assert(config.infiniteTopbarToolsOrder[config.infiniteTopbarToolsOrder.length-1]==="timer","standard editing changed the Infinite Desk order")
                     assert(Math.abs(verticalBar.configuredIconOpacity-.6)<.001,"icon settings do not reach vertical items")
                     historical.applyBarAppearance(48,.8,16,false,16,false)
                 } else if (phase===11) {
