@@ -15,6 +15,9 @@ Item {
     property var controlStatus: null
     property var controlTimer: null
     property var controlsParent: null
+    property var visualizer: null
+    property bool waveformEnabled: true
+    property alias waveform: dockWaveform
     signal controlActivated(string type, var item)
     property alias controlsInput: controlsLoader
     readonly property var controls: controlsLoader.item
@@ -135,6 +138,21 @@ Item {
     // The window mask contains only interactive content, leaving the canvas
     // behind clients and empty regions available to the desktop pan gesture.
     property alias dockInput: appsViewport
+    InfiniteDockWaveform {
+        id: dockWaveform
+        objectName: "infiniteDeskDockWaveform"
+        x: (root.width-width)/2
+        y: root.height-root.dockHeight-height
+        width: root.dockWidth
+        height: 64*root.unit
+        unit: root.unit
+        analyzer: root.visualizer
+        ink: root.surface
+        reducedMotion: root.config.reducedMotion
+        visible: root.visible && root.waveformEnabled && root.entries.length > 0 && root.reveal > .99
+        opacity: root.reveal
+        z: 3
+    }
     Loader {
         id: controlsLoader
         parent: root.controlsParent || root
@@ -207,6 +225,7 @@ Item {
     }
     Flickable {
         id: appsViewport
+        z: 4
         objectName: "infiniteDeskPinnedDock"
         x: (root.width - width) / 2; y: root.height - root.dockHeight
         width: root.dockWidth; height: root.dockHeight

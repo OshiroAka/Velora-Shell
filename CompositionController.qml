@@ -41,6 +41,8 @@ Scope {
     readonly property var whatsappService: whatsapp
     readonly property var audioVisualizer: visualizer
     readonly property bool desktopVisualizerEnabled: config.desktopVisualizerEnabled
+    readonly property bool dockWaveformEnabled: config.desktopVisualizerEnabled && !preview.occluding
+        && !(editorController.shown && editorController.mode === "editing")
     readonly property bool desktopVisualizerSuppressed: !!root.shell && root.shell.edgeMediaOpen
     readonly property real visualizerDockProgress: root.shell ? root.shell.visualizerDockProgress : 0
     readonly property bool desktopVisualizerVisible: config.desktopVisualizerEnabled
@@ -258,6 +260,9 @@ Scope {
         lockOccluding: preview.occluding
         railVisible: !!root.shell && root.shell.sideBarLayoutEnabled && root.shell.sidebarMediaEnabled
         edgeMediaVisible: !!root.shell && root.shell.edgeSpectrumOpen
+        dockVisible: root.dockWaveformEnabled && !!root.shell
+            && root.shell.infiniteDesktopTargetReveal > .99 && !root.shell.shellSuppressedByFullscreen
+            && config.infiniteDeskPinnedItems.length > 0
         mediaPlaying: media.playing
     }
     Services.VisualizerService { id: visualizer; active: visualizerDemand.active }

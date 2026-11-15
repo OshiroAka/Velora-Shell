@@ -9,6 +9,7 @@ QtObject {
     property bool railVisible: false
     property bool mediaPlaying: false
     property bool edgeMediaVisible: false
-    readonly property bool active: (desktopEnabled && !lockOccluding && !editingDesktop)
+    property bool dockVisible: false
+    readonly property bool active: ((desktopEnabled || dockVisible) && !lockOccluding && !editingDesktop)
         || lockOccluding || ((railVisible || edgeMediaVisible) && !lockOccluding && mediaPlaying)
 }

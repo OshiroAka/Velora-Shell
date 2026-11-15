@@ -5347,6 +5347,8 @@ Scope {
                 controlStatus: root.composition.networkStatus
                 controlTimer: root.composition.clockTimerService
                 controlsParent: panel
+                visualizer: root.composition.audioVisualizer
+                waveformEnabled: root.composition.dockWaveformEnabled
                 onControlActivated: (type, item) => infiniteControlMenu.activate(type, item)
                 progress: root.infiniteDesktopFrameFoldProgress
                 reveal: root.infiniteDesktopTargetReveal
