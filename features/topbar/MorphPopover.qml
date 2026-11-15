@@ -31,7 +31,8 @@ FocusScope {
     property var anchorItem: controller.anchorItem
     default property alias content: contentHost.data
     readonly property var geometry: Geometry.panel(width, height, barHeight, anchorX,
-        anchorWidth, bodyWidth, bodyHeight, reveal, leftInset, rightInset, cornerAttachment)
+        anchorWidth, bodyWidth, bodyHeight, reveal, leftInset, rightInset, cornerAttachment,
+        reducedMotion ? 0 : Math.max(0, reveal - 1))
     readonly property rect panelRect: Qt.rect(geometry.x, geometry.y, geometry.width, geometry.height)
     readonly property real neckHalfWidth: geometry.neck
     readonly property bool interactive: desiredType === presentedType && desiredType.length > 0
@@ -127,7 +128,7 @@ FocusScope {
         easing.type: root.motion.easeHandoff
     }
 
-    NumberAnimation { id: opening; target: root; property: "reveal"; to: 1; duration: root.motion.geometryDuration; easing.type: root.motion.easeGeometry }
+    NumberAnimation { id: opening; target: root; property: "reveal"; to: 1; duration: root.motion.settleDuration; easing.type: root.motion.easeSettle; easing.overshoot: root.motion.settleOvershoot }
     Timer { id: contentDelay; interval: root.motion.contentDelay; onTriggered: if (root.desiredType) entering.start() }
     NumberAnimation { id: entering; target: root; property: "contentReveal"; to: 1; duration: root.motion.contentDuration; easing.type: root.motion.easeContent }
     SequentialAnimation {

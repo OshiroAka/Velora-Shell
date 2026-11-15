@@ -103,7 +103,7 @@ Scope {
         Platform.NativeBlur.dispatch("velora-blur:appearance commit "
             + Number(config.blurStrength).toFixed(4) + " "
             + Number(config.appearanceContrast).toFixed(4) + " "
-            + Number(config.reflectionStrength).toFixed(4))
+            + Number(config.reflectionStrength).toFixed(4) + " " + (config.reducedMotion ? "0" : "1"))
     }
 
     function syncTerminalLiquid() {
@@ -427,6 +427,7 @@ Scope {
         function onBlurStrengthChanged() { nativeAppearanceDebounce.restart() }
         function onAppearanceContrastChanged() { nativeAppearanceDebounce.restart() }
         function onReflectionStrengthChanged() { nativeAppearanceDebounce.restart() }
+        function onReducedMotionChanged() { nativeAppearanceDebounce.restart() }
         function onVisualStyleChanged() { nativeAppearanceDebounce.restart() }
     }
 

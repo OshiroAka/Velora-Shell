@@ -141,7 +141,7 @@ FocusScope {
     Keys.onEscapePressed: { blocked = triggerHovered; close() }
     Timer { id: enterDelay; interval: root.motion.intent; onTriggered: root.open() }
     Timer { id: leaveDelay; interval: root.motion.leaveGrace; onTriggered: if (root.closeOnLeave && !root.triggerHovered && !root.panelHovered && !root.panelHeld) root.close() }
-    NumberAnimation { id: expanding; target: root; property: "reveal"; to: 1; duration: root.motion.geometryDuration; easing.type: root.motion.easeGeometry }
+    NumberAnimation { id: expanding; target: root; property: "reveal"; to: 1; duration: root.motion.settleDuration; easing.type: root.motion.easeSettle; easing.overshoot: root.motion.settleOvershoot }
     NumberAnimation { id: handoffMotion; target: root; property: "handoffProgress"; to: 1; duration: root.motion.handoffDuration; easing.type: root.motion.easeHandoff; onFinished: root.handoffActive = false }
     Timer { id: contentDelay; interval: root.motion.contentDelay; onTriggered: if (root.opened) entering.restart() }
     NumberAnimation { id: entering; target: root; property: "contentReveal"; to: 1; duration: root.motion.contentDuration; easing.type: root.motion.easeContent }

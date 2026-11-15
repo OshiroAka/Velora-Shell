@@ -12,6 +12,12 @@ Item {
     readonly property int columns: Math.max(1, Math.min(options.length, Math.floor(width/tabWidth)))
     readonly property int selectedIndex: options.findIndex(option=>option.id === selected)
     readonly property real cellWidth: width/columns
+    readonly property real indicatorX: selectionX.value
+    readonly property real indicatorY: selectionY.value
+    Core.SettleValue { id: selectionX;target: (Math.max(0,root.selectedIndex)%root.columns)*root.cellWidth+2
+        reducedMotion: root.motion.reduced;duration: root.motion.settleDuration;overshoot: root.motion.settleOvershoot }
+    Core.SettleValue { id: selectionY;target: Math.floor(Math.max(0,root.selectedIndex)/root.columns)*36+2
+        reducedMotion: root.motion.reduced;duration: root.motion.settleDuration;overshoot: root.motion.settleOvershoot }
     implicitWidth: options.length*tabWidth
     implicitHeight: Math.ceil(options.length/columns)*36
     width: Math.min(parent ? parent.width : implicitWidth, implicitWidth)
@@ -24,13 +30,11 @@ Item {
     Rectangle { anchors.fill: parent; radius: 11; color: Qt.rgba(0,0,0,.10) }
     Rectangle {
         visible: root.selectedIndex >= 0
-        x: (Math.max(0,root.selectedIndex)%root.columns)*root.cellWidth+2
-        y: Math.floor(Math.max(0,root.selectedIndex)/root.columns)*36+2
+        x: Math.max(2,Math.min(root.width-width-2,root.indicatorX))
+        y: Math.max(2,Math.min(root.implicitHeight-height-2,root.indicatorY))
         width: root.cellWidth-4; height: 32; radius: 9
         color: Qt.rgba(root.theme.accent.r,root.theme.accent.g,root.theme.accent.b,.18)
         border.width: 1; border.color: root.theme.borderSubtle
-        Behavior on x { NumberAnimation { duration: root.motion.geometryDuration; easing.type: root.motion.easeGeometry } }
-        Behavior on y { NumberAnimation { duration: root.motion.geometryDuration; easing.type: root.motion.easeGeometry } }
     }
     Repeater {
         id: tabs

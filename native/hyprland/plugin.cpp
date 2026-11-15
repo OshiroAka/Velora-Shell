@@ -15,6 +15,8 @@
 #include <hyprland/src/managers/EventManager.hpp>
 #endif
 #include <hyprland/src/managers/eventLoop/EventLoopManager.hpp>
+#include <hyprland/src/managers/SessionLockManager.hpp>
+#include <hyprland/src/pointer/PointerManager.hpp>
 #include <hyprland/src/plugins/PluginAPI.hpp>
 #include <hyprland/src/render/ElementRenderer.hpp>
 #include <hyprland/src/render/OpenGL.hpp>
@@ -45,6 +47,7 @@
 #include "BarRefraction.hpp"
 #include "BarBubble.hpp"
 #include "OpticalDamage.hpp"
+#include "LightParallax.hpp"
 #include "LyricsBeat.hpp"
 #include "HyprlandCompat.hpp"
 #include "InfiniteDesktopInput.hpp"
@@ -80,6 +83,10 @@ CFunctionHook* g_blurMain = nullptr;
 #endif
 CHyprSignalListener g_tickListener;
 CHyprSignalListener g_infiniteDesktopAxisListener;
+CHyprSignalListener g_lightParallaxPointerListener, g_lightParallaxFrameListener;
+std::unordered_map<std::string, Velora::LightParallax> g_lightParallax;
+std::unordered_map<std::string, std::chrono::steady_clock::time_point> g_lightParallaxTimes;
+uint64_t g_lightParallaxFrames = 0;
 SP<CEventLoopTimer> g_causticsTimer;
 SP<Render::GL::CGLFramebuffer> g_clearBackdrop;
 std::unordered_map<std::string, SP<Render::GL::CGLFramebuffer>> g_frameBackdrops;
@@ -330,10 +337,22 @@ struct SAppearanceOptics {
     float contrast = 1.08F;
     float reflection = 0.35F;
     bool preview = false;
+    bool motionEnabled = true;
 };
 
 SAppearanceOptics g_committedAppearance;
 SAppearanceOptics g_activeAppearance;
+
+bool lightParallaxEnabled() {
+    return !g_unloading && g_activeAppearance.motionEnabled && g_activeAppearance.reflection > .001F
+        && !g_pSessionLockManager->isSessionLocked();
+}
+void setLightParallaxUniform(GLuint program, const std::string& monitor) {
+    const auto found = g_lightParallax.find(monitor);
+    const auto offset = lightParallaxEnabled() && found != g_lightParallax.end()
+        ? found->second.current * std::clamp(double(g_activeAppearance.reflection / .35F), 0., 1.) : Vector2D{};
+    glUniform2f(glGetUniformLocation(program, "lightParallax"), offset.x, offset.y);
+}
 
 int appearanceBlurSize(const int base) {
     const float factor = std::clamp(
@@ -464,6 +483,7 @@ uniform highp sampler2D bubbleBackdrop;
 int bubbleIndex = -1;
 uniform float barRefractionStrength;
 uniform float opticalScale;
+uniform vec2 lightParallax;
 uniform highp sampler2D frameBackdrop;
 uniform highp sampler2D frameBlur;
 uniform float frameFusion;
@@ -966,7 +986,7 @@ vec3 opticalSurface(vec2 location, float distanceToSurface, vec2 outward) {
     result *= 1.0 - 0.12*exp(-interior/6.0)*max(outward.y,0.0);
     result *= 1.0 - 0.10*exp(-interior/(shoulder*0.45));
 
-    float facingLight = dot(outward,normalize(vec2(-0.55,-0.83)));
+    float facingLight = dot(outward,normalize(vec2(-0.55,-0.83) + lightParallax));
     float reflection = pow(max(0.0,facingLight),1.6)
         + 0.55*pow(max(0.0,-facingLight),2.2);
     float contourLight = exp(-interior/1.1)*(0.18+0.78*reflection)
@@ -1246,7 +1266,7 @@ void main() {
 
     float rim = exp(-abs(sdf) / 2.25);
     float innerRim = exp(-abs(sdf + 10.0) / 8.5) * lens;
-    float directional = 0.42 + 0.58 * clamp(dot(normal, normalize(vec2(-0.62, -0.78))) * 0.5 + 0.5, 0.0, 1.0);
+    float directional = 0.42 + 0.58 * clamp(dot(normal, normalize(vec2(-0.62, -0.78) + lightParallax)) * 0.5 + 0.5, 0.0, 1.0);
     float adaptiveLight = mix(1.12, 0.54, smoothstep(0.18, 0.82, gray));
     glass += vec3(1.0, 1.0, 1.03) * rim * directional * adaptiveLight
         * mix(0.46, 0.25, barLens);
@@ -2163,6 +2183,7 @@ bool renderLiquidBackdrop(VeloraCompat::RenderContext& ctx, WP<CTexPassElement> 
     glUniform4f(glGetUniformLocation(shader->program(), "frameTopMetrics"), 0, 0, 0, 0);
     glUniform2f(glGetUniformLocation(shader->program(), "frameFold"), 0.F, 0.F);
     glUniform1f(glGetUniformLocation(shader->program(), "barRefractionStrength"), barRefractionStrength());
+    setLightParallaxUniform(shader->program(), monitorName);
     glUniform1f(glGetUniformLocation(shader->program(), "opticalScale"), layer && layer->m_monitor ? layer->m_monitor->m_scale : 1.F);
     glUniform1f(glGetUniformLocation(shader->program(), "barBrightness"), g_barBrightness);
     glUniform4f(glGetUniformLocation(shader->program(), "barMaterial"),
@@ -2604,6 +2625,8 @@ bool renderSharedWidgetsBackdrop(VeloraCompat::RenderContext& ctx, WP<CTexPassEl
     if (!shader)
         return false;
 
+    setLightParallaxUniform(shader->program(), monitorName);
+
     const float textureWidth = std::max(
         1.F, sc<float>(backdrop->getTexture()->m_size.x));
     const float textureHeight = std::max(
@@ -2923,6 +2946,64 @@ CBox monitorLockGlassBox(const PHLMONITOR& monitor) {
                        dialCenterY - dialHalfHeight,
                        dialDepth * 2.0, dialHalfHeight * 2.0};
     return unionBoxes(panelBox, dialBox, 3.0);
+}
+
+void damageParallaxSurfaces(const PHLMONITOR& monitor) {
+    if (!monitor || !g_pHyprRenderer) return;
+    const auto& name = monitor->m_name;
+    damageTopbarMorph({}, unifiedBarShape(name), name);
+    if (const auto found = g_connectedTopbars.find(name); found != g_connectedTopbars.end()) {
+        damageTopbarMorph({}, found->second, name);
+        if (found->second.active)
+            g_pHyprRenderer->damageBox(CBox{monitor->m_position, {monitor->m_size.x, found->second.barHeight * monitor->m_size.y + 2}});
+    }
+    for (const auto& shape : g_topbarShapes) damageTopbarMorph({}, shape, name);
+    for (const auto& shape : g_editorShapes) damageTopbarMorph({}, shape, name);
+    damageTopbarMorph({}, g_settingsMorph, name);
+    if (const auto found = g_bottomSettings.find(name); found != g_bottomSettings.end()) damageTopbarMorph({}, found->second, name);
+    if (g_rightMenuMorph.active) g_pHyprRenderer->damageBox(monitorRightMenuBox(monitor, g_rightMenuMorph).expand(4));
+    if (g_sharedWidgetShapesActive)
+        for (const auto& shape : g_sharedWidgetShapes)
+            if (visibleSharedWidgetShape(shape)) g_pHyprRenderer->damageBox(monitorSharedWidgetBox(monitor, shape).expand(4));
+}
+
+void aimLightParallax(const Vector2D& point) {
+    if (!State::monitorState()) return;
+    for (const auto& monitor : State::monitorState()->monitors()) {
+        if (!monitor) continue;
+        const auto material = g_desktopBarMaterials.find(monitor->m_name);
+        const bool glass = material != g_desktopBarMaterials.end() && material->second.mode >= 2 && material->second.tint[3] < .999F;
+        const bool bubbles = std::any_of(g_barBubbles.begin(), g_barBubbles.end(), [&](const auto& group) {
+            return group.first.starts_with(monitor->m_name + "|") && !group.second.empty();
+        });
+        const auto local = point - monitor->m_position;
+        Vector2D target;
+        if (lightParallaxEnabled() && (glass || bubbles || g_sharedWidgetShapesActive)
+            && local.x >= 0 && local.y >= 0 && local.x < monitor->m_size.x && local.y < monitor->m_size.y)
+            target = {local.x / monitor->m_size.x * 2. - 1., local.y / monitor->m_size.y * 2. - 1.};
+        if (g_lightParallax[monitor->m_name].aim(target)) damageParallaxSurfaces(monitor);
+    }
+}
+void advanceLightParallax(PHLMONITOR monitor) {
+    if (!monitor) return;
+    auto found = g_lightParallax.find(monitor->m_name);
+    if (found == g_lightParallax.end()) return;
+    if (!lightParallaxEnabled()) {
+        const bool changed = found->second.current != Vector2D{};
+        found->second = {};
+        if (changed) damageParallaxSurfaces(monitor);
+        return;
+    }
+    const auto now = std::chrono::steady_clock::now();
+    auto& last = g_lightParallaxTimes[monitor->m_name];
+    const double elapsed = last.time_since_epoch().count() ? std::chrono::duration<double>(now-last).count() : 1. / 60.;
+    last = now;
+    if (found->second.advance(elapsed)) {
+        ++g_lightParallaxFrames;
+        // Follow only while the light is moving, and damage the actual shell
+        // silhouettes rather than scheduling full desktop repaints.
+        damageParallaxSurfaces(monitor);
+    }
 }
 
 void damageCausticsRegion() {
@@ -3329,9 +3410,18 @@ SDispatchResult appearanceDispatcher(std::string arguments) {
                 .error = "expected preview, commit or reset"};
 
     SAppearanceOptics next;
+    next.motionEnabled = g_activeAppearance.motionEnabled;
     if (!(input >> next.blur >> next.contrast >> next.reflection))
         return {.success = false,
                 .error = "expected operation blur contrast reflection"};
+    input >> std::ws;
+    if (!input.eof()) {
+        int motion = 1;
+        std::string extra;
+        if (!(input >> motion) || (motion != 0 && motion != 1) || (input >> extra))
+            return {.success = false, .error = "expected optional motion flag 0 or 1"};
+        next.motionEnabled = motion;
+    }
     next.blur = std::clamp(next.blur, 0.F, 1.F);
     next.contrast = std::clamp(next.contrast, 0.8F, 1.35F);
     next.reflection = std::clamp(next.reflection, 0.F, 1.F);
@@ -3342,6 +3432,7 @@ SDispatchResult appearanceDispatcher(std::string arguments) {
         g_committedAppearance.preview = false;
         g_activeAppearance.preview = false;
     }
+    aimLightParallax(Pointer::mgr()->untransformedPosition());
     damageAllMonitors();
     return {};
 }
@@ -4103,6 +4194,7 @@ SP<Render::ITexture> terminalGlassBackdrop(VeloraCompat::RenderContext& ctx, WP<
     shader->setUniformInt(SHADER_TEX, 0);
     shader->setUniformFloat2(SHADER_FULL_SIZE, background->m_size.x, background->m_size.y);
     if (follows) {
+        setLightParallaxUniform(shader->program(), monitor->m_name);
         const float width = background->m_size.x, height = background->m_size.y;
         const float panelScale = width / 1600.F;
         const auto& frame = unifiedBarShape(monitor->m_name);
@@ -4388,8 +4480,9 @@ std::string status(VeloraCompat::OutputFormat format, std::string) {
 
     if (format == VeloraCompat::JSON_FORMAT)
         return std::format(
-            R"({{"active":true,"abi":"{}","materials":{},"capabilities":[{}"alpha-mask","infinite-desktop-dock","desktop-bar-material","transition","dial","caustics","topbar-connected","bar-blur","widget-blur","liquid-style","wallpaper","topbar-shape","unified-bar-shape","topbar-settle","right-menu-shape","settings-shape","settings-connected","settings-side-connected","editor-shape","appearance","lock-layout","shared-widgets-shape","wallpaper-transition","terminal-glass","terminal-glass-control","terminal-bar-match","bar-refraction","terminal-follow-bar","terminal-brightness","bar-brightness","lyrics-beat","lyrics-beat-palette","optical-glass","bar-bubble-liquid"{}],"opticalDamage":{{"frames":{},"blurExpansions":{},"padding":{},"staleBackdropRefreshes":{}}},"terminalGlass":{{"enabled":{},"strength":{:.3f},"draws":{},"sharpDraws":{},"desktopCopies":{},"shaderFailed":{},"source":"live-framebuffer-and-hyprland-blur","barMatch":{},"barMatchDraws":{},"followsBar":{},"followBarDraws":{},"brightness":{:.3f}}},"wallpaperBlur":{:.3f},"barRefraction":{:.3f},"barBrightness":{:.3f},"lyricsBeatCount":{},"liquidStyle":"{}","backdrop":"sharp-framebuffer","hyprlandBlur":{},"barBlur":{{"enabled":{},"source":"hyprland","topbarDraws":{},"sidebarDraws":{},"waveDraws":{}}},"appearance":{{"blur":{:.3f},"contrast":{:.3f},"reflection":{:.3f},"preview":{}}},"desktop":{{"size":{},"passes":{},"draws":{},"noise":{:.3f},"contrast":{:.3f},"brightness":{:.3f},"vibrancy":{:.3f},"vibrancyDarkness":{:.3f}}},"panel":{{"size":{},"passes":{},"draws":{},"refractionDraws":{},"noise":{:.3f},"contrast":{:.3f},"brightness":{:.3f},"vibrancy":{:.3f},"vibrancyDarkness":{:.3f},"refraction":{:.3f},"edgeWidth":{:.3f},"dispersion":{:.3f},"tint":{:.3f}}},"topbar":{{"size":{},"passes":{},"shapes":{},"draws":{},"refractionDraws":{},"noise":{:.3f},"contrast":{:.3f},"brightness":{:.3f},"vibrancy":{:.3f},"vibrancyDarkness":{:.3f}}},"rightMenu":{{"draws":{},"refractionDraws":{}}},"settings":{{"draws":{},"refractionDraws":{}}},"editor":{{"shapes":{},"draws":{},"refractionDraws":{},"connectedSettings":{}}},"sharedWidgets":{{"blurEnabled":{},"blurDraws":{},"active":{},"shapes":{},"draws":{},"refractionDraws":{},"caustics":{}}},"transition":{{"progress":{:.3f},"animating":{}}},"caustics":{{"enabled":{},"intensity":{:.3f},"lines":{},"animating":{},"frames":{}}}}})",
+            R"({{"active":true,"abi":"{}","materials":{},"capabilities":[{}"alpha-mask","infinite-desktop-dock","desktop-bar-material","transition","dial","caustics","topbar-connected","bar-blur","widget-blur","liquid-style","wallpaper","topbar-shape","unified-bar-shape","topbar-settle","right-menu-shape","settings-shape","settings-connected","settings-side-connected","editor-shape","appearance","lock-layout","shared-widgets-shape","wallpaper-transition","terminal-glass","terminal-glass-control","terminal-bar-match","bar-refraction","terminal-follow-bar","terminal-brightness","bar-brightness","lyrics-beat","lyrics-beat-palette","optical-glass","bar-bubble-liquid"{}],"parallax":{{"enabled":{},"frames":{},"moving":{}}},"opticalDamage":{{"frames":{},"blurExpansions":{},"padding":{},"staleBackdropRefreshes":{}}},"terminalGlass":{{"enabled":{},"strength":{:.3f},"draws":{},"sharpDraws":{},"desktopCopies":{},"shaderFailed":{},"source":"live-framebuffer-and-hyprland-blur","barMatch":{},"barMatchDraws":{},"followsBar":{},"followBarDraws":{},"brightness":{:.3f}}},"wallpaperBlur":{:.3f},"barRefraction":{:.3f},"barBrightness":{:.3f},"lyricsBeatCount":{},"liquidStyle":"{}","backdrop":"sharp-framebuffer","hyprlandBlur":{},"barBlur":{{"enabled":{},"source":"hyprland","topbarDraws":{},"sidebarDraws":{},"waveDraws":{}}},"appearance":{{"blur":{:.3f},"contrast":{:.3f},"reflection":{:.3f},"preview":{}}},"desktop":{{"size":{},"passes":{},"draws":{},"noise":{:.3f},"contrast":{:.3f},"brightness":{:.3f},"vibrancy":{:.3f},"vibrancyDarkness":{:.3f}}},"panel":{{"size":{},"passes":{},"draws":{},"refractionDraws":{},"noise":{:.3f},"contrast":{:.3f},"brightness":{:.3f},"vibrancy":{:.3f},"vibrancyDarkness":{:.3f},"refraction":{:.3f},"edgeWidth":{:.3f},"dispersion":{:.3f},"tint":{:.3f}}},"topbar":{{"size":{},"passes":{},"shapes":{},"draws":{},"refractionDraws":{},"noise":{:.3f},"contrast":{:.3f},"brightness":{:.3f},"vibrancy":{:.3f},"vibrancyDarkness":{:.3f}}},"rightMenu":{{"draws":{},"refractionDraws":{}}},"settings":{{"draws":{},"refractionDraws":{}}},"editor":{{"shapes":{},"draws":{},"refractionDraws":{},"connectedSettings":{}}},"sharedWidgets":{{"blurEnabled":{},"blurDraws":{},"active":{},"shapes":{},"draws":{},"refractionDraws":{},"caustics":{}}},"transition":{{"progress":{:.3f},"animating":{}}},"caustics":{{"enabled":{},"intensity":{:.3f},"lines":{},"animating":{},"frames":{}}}}})",
             __hyprland_api_get_client_hash(), materials, g_luaDispatch ? "\"lua-dispatch\"," : "", cameraCapability,
+            lightParallaxEnabled(), g_lightParallaxFrames, lightParallaxEnabled() && std::any_of(g_lightParallax.begin(), g_lightParallax.end(), [](const auto& item) { return item.second.moving(); }),
             g_opticalDamageFrames, g_opticalBlurExpansions, g_opticalDamagePadding, g_staleBackdropRefreshes,
             terminalGlassEnabled() ? "true" : "false",
             terminalGlassStrength(), g_terminalGlassDraws,
@@ -4651,6 +4744,8 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 
     g_tickListener = Event::bus()->m_events.tick.listen(onTick);
     g_infiniteDesktopAxisListener = Event::bus()->m_events.input.mouse.axis.listen(infiniteDesktopAxis);
+    g_lightParallaxPointerListener = Event::bus()->m_events.input.mouse.move.listen([](const Vector2D& point, Event::SCallbackInfo&) { aimLightParallax(point); });
+    g_lightParallaxFrameListener = Event::bus()->m_events.render.pre.listen(advanceLightParallax);
     g_causticsTimer = makeShared<CEventLoopTimer>(
         std::nullopt, onCausticsTimer, nullptr);
     g_pEventLoopManager->addTimer(g_causticsTimer);
@@ -4679,7 +4774,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         .name = "velora-blur",
         .description = "Clear live framebuffer refraction for Velora",
         .author = "Velora Shell",
-        .version = "0.17.37",
+        .version = "0.17.38",
     };
 }
 
@@ -4741,6 +4836,8 @@ APICALL EXPORT void PLUGIN_EXIT() {
     HyprlandAPI::removeDispatcher(g_handle, "velora-blur:transition");
     g_tickListener.reset();
     g_infiniteDesktopAxisListener.reset();
+    g_lightParallaxPointerListener.reset(); g_lightParallaxFrameListener.reset();
+    g_lightParallax.clear(); g_lightParallaxTimes.clear();
     if (g_statusCommand)
         HyprlandAPI::unregisterHyprCtlCommand(g_handle, g_statusCommand);
     g_statusCommand.reset();

@@ -22,6 +22,9 @@ QtObject {
     readonly property int easeGeometry: Easing.OutCubic
     readonly property int easeHandoff: Easing.InOutCubic
     readonly property int easeContent: Easing.OutCubic
+    readonly property int settleDuration: reduced ? 0 : Math.round(300 * pace)
+    readonly property int easeSettle: Easing.OutBack
+    readonly property real settleOvershoot: reduced ? 0 : 0.55
     readonly property int micro: reduced ? 70 : Math.round(140 * pace)
     readonly property int hover: reduced ? 80 : Math.round(190 * pace)
     readonly property int selection: reduced ? 80 : Math.round(240 * pace)

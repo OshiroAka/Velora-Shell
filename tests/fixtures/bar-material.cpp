@@ -154,6 +154,24 @@ int main(int argc, char** argv) {
             glReadPixels(x,HEIGHT-y-1,1,1,GL_RGBA,GL_UNSIGNED_BYTE,pixel.data());
             return pixel;
         };
+        for (const float mode : {2.F,3.F}) {
+            four("barMaterial",1,mode,1,0);
+            two("lightParallax",0,0);draw();
+            std::vector<unsigned char> fixed(WIDTH*HEIGHT*4), shifted(fixed.size()), restored(fixed.size());
+            glReadPixels(0,0,WIDTH,HEIGHT,GL_RGBA,GL_UNSIGNED_BYTE,fixed.data());
+            two("lightParallax",.12F,-.12F);draw();
+            glReadPixels(0,0,WIDTH,HEIGHT,GL_RGBA,GL_UNSIGNED_BYTE,shifted.data());
+            int changed=0;
+            for(size_t i=0;i<fixed.size();i+=4) {
+                check(fixed[i+3]==shifted[i+3],"Parallax moves the connected contour or changes its opacity");
+                if(fixed[i]!=shifted[i] || fixed[i+1]!=shifted[i+1] || fixed[i+2]!=shifted[i+2]) ++changed;
+            }
+            check(changed>20,"Pointer parallax does not change the material's actual reflected light");
+            two("lightParallax",0,0);draw();
+            glReadPixels(0,0,WIDTH,HEIGHT,GL_RGBA,GL_UNSIGNED_BYTE,restored.data());
+            check(restored==fixed,"Neutral parallax does not restore the original material exactly");
+        }
+        four("barMaterial",1,1,1,0);draw();
         const auto bubbleCommand = std::string("eDP-1 topbar bubble1 1 .1 .1 .2 .1 .1 .1 .2 .1 .01 .8 .8 .3 .5 .16");
         check(parseBarBubble(bubbleCommand).has_value(),"Valid bubble geometry rejected");
         check(parseBarBubble("eDP-1 sidebar bubble1 0").has_value(),"Bubble removal rejected");

@@ -1765,7 +1765,7 @@ Item {
 
         VeloraIcon {
             scale: iconMotion.zoom
-            transform: Translate { y: iconMotion.lift }
+            transform: Translate { x: iconMotion.drift; y: iconMotion.lift }
             id: toolIcon
 
             anchors {
@@ -1874,7 +1874,7 @@ Item {
 
         VeloraSidebarIcon {
             scale: iconMotion.zoom
-            transform: Translate { y: iconMotion.lift }
+            transform: Translate { x: iconMotion.drift; y: iconMotion.lift }
             anchors.centerIn: parent
             width: Math.round(22 * root.uiScale * root.configuredIconScale)
             height: Math.round(22 * root.uiScale * root.configuredIconScale)
@@ -1886,7 +1886,7 @@ Item {
 
         Loader {
             scale: iconMotion.zoom
-            transform: Translate { y: iconMotion.lift }
+            transform: Translate { x: iconMotion.drift; y: iconMotion.lift }
             anchors.centerIn: parent
             width: Math.round(22 * root.uiScale * root.configuredIconScale)
             height: width

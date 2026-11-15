@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Effects
 import "../../components" as Components
+import "../../core" as Core
 
 Item {
     id: root
@@ -18,7 +19,8 @@ Item {
     readonly property real cellWidth: (width - gap * Math.max(0, workspaceIds.length - 1)) / Math.max(1, workspaceIds.length)
     readonly property real step: cellWidth + gap
     readonly property real targetCenter: Math.max(0, selectedIndex) * step + cellWidth / 2
-    property real selectedCenter: targetCenter
+    readonly property real selectedCenter: selection.value
+    Core.SettleValue { id: selection;target: root.targetCenter;reducedMotion: root.reducedMotion;duration: 250 }
     property real travel: 0
     implicitWidth: workspaceIds.length * 32 + Math.max(0, workspaceIds.length - 1) * gap
     implicitHeight: 32
@@ -31,10 +33,13 @@ Item {
     }
     onActiveWorkspaceIdChanged: {
         if (activeWorkspaceId === pendingId) { pendingId = 0; acknowledgement.stop() }
-        if (ready) transition.restart()
+        if (ready && !reducedMotion) transition.restart()
+        else { transition.stop();travel=0 }
+    }
+    onReducedMotionChanged: if (reducedMotion) {
+        transition.stop();travel=0
     }
     Component.onCompleted: ready = true
-    Behavior on selectedCenter { enabled: root.ready; NumberAnimation { duration: 220; easing.type: Easing.InOutCubic } }
     Timer { id: acknowledgement; interval: 1200; onTriggered: root.pendingId = 0 }
     SequentialAnimation {
         id: transition
@@ -43,7 +48,7 @@ Item {
     }
     Rectangle {
         objectName: "workspaceActiveIndicator"
-        x: root.selectedCenter - width / 2; y: root.travel
+        x: Math.max(0, Math.min(root.width - width, root.selectedCenter - width / 2)); y: root.travel
         width: Math.min(32, root.cellWidth) + root.travel * 4
         height: 32 - root.travel * 2; radius: height / 2
         visible: root.selectedIndex >= 0
