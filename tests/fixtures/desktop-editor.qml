@@ -183,7 +183,7 @@ ShellRoot {
                     if (Quickshell.env("VELORA_EDITOR_RELOAD")==="1") {
                         assert(config.topbarToolsOrder[0]==="timer","tool order lost on restart")
                         assert(config.topbarLayout.find(item=>item.type==="weather").section==="left","section lost on restart")
-                        assert(config.infiniteTopbarToolsOrder[config.infiniteTopbarToolsOrder.length-1]==="timer","Infinite Desk order lost on restart")
+                        assert(config.infiniteTopbarToolsOrder[config.infiniteTopbarToolsOrder.length-1]==="thing","Infinite Desk order lost on restart")
                         assert(config.infiniteTopbarLayout.find(item=>item.type==="weather").section==="left","Infinite Desk section lost on restart")
                         assert(config.barItemBubblesEnabled,"bubble choice lost on restart")
                         assert(!config.barBackgroundEnabled,"background choice lost on restart")
@@ -202,18 +202,19 @@ ShellRoot {
                     assert(Math.abs(bar.x+bar.width/2-window.width/2)<1,"the entire topbar must stay centred")
                     assert(bar.sectionBounds.center.x===bar.sectionBounds.left.x+bar.sectionBounds.left.width,"sections must stay adjacent")
                     assert(bar.sectionBounds.right.x===bar.sectionBounds.center.x+bar.sectionBounds.center.width,"right tools must follow the other items")
-                    for (const type of ["timer","clock"]) {
+                    for (const type of ["clock"]) {
                         const slot=find(bar,"topbarTool-"+type)
                         const label=textLabel(slot)
                         assert(label && slot.width>=label.implicitWidth+20,"text lost the minimum internal padding: "+type)
                     }
-                    bar.beginDrag("timer",find(bar,"topbarTool-timer"),0)
+                    assert(!bar.visibleTools.some(type=>["battery","paint","monitor","controls","timer"].includes(type)),"Infinite Desk duplicates bottom controls in the topbar")
+                    bar.beginDrag("thing",find(bar,"topbarTool-thing"),0)
                     bar.dragTo=bar.visibleTools.indexOf("clock")
                     bar.finishDrag()
                     const weatherId=config.infiniteTopbarLayout.find(item=>item.type==="weather").id
                     bar.layoutDragId=weatherId;bar.layoutDropSection="left";bar.layoutBeforeId=""
                     bar.finishLayoutDrag()
-                    assert(config.infiniteTopbarToolsOrder[config.infiniteTopbarToolsOrder.length-1]==="timer","Infinite Desk reorder failed")
+                    assert(config.infiniteTopbarToolsOrder[config.infiniteTopbarToolsOrder.length-1]==="thing","Infinite Desk reorder failed")
                     assert(JSON.stringify(config.topbarLayout)===standardLayout && JSON.stringify(config.topbarToolsOrder)===standardOrder,"Infinite Desk editing changed the standard bar")
                     bar.desktopMorphProgress=0
                     pointer.wait(25)
@@ -353,7 +354,7 @@ ShellRoot {
                     config.setValue("topbar.toolsOrder",before)
                     historical.applyBarAppearance(56,.6,24,false,16,false)
                     assert(Math.abs(bar.unit-56/48)<.001 && Math.abs(bar.iconOpacity-.6)<.001 && bar.itemGap===6,"standard icon settings do not reach horizontal items")
-                    assert(config.infiniteTopbarToolsOrder[config.infiniteTopbarToolsOrder.length-1]==="timer","standard editing changed the Infinite Desk order")
+                    assert(config.infiniteTopbarToolsOrder[config.infiniteTopbarToolsOrder.length-1]==="thing","standard editing changed the Infinite Desk order")
                     assert(Math.abs(verticalBar.configuredIconOpacity-.6)<.001,"icon settings do not reach vertical items")
                     historical.applyBarAppearance(48,.8,16,false,16,false)
                 } else if (phase===11) {

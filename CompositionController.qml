@@ -58,6 +58,9 @@ Scope {
     property bool sidebarNetworkActive: false
     readonly property var fanPlusService: fanPlus
     readonly property var topbarTheme: theme
+    readonly property var topbarClock: clock
+    readonly property var topbarCalendar: calendarService
+    readonly property var topbarActions: actions
     readonly property string activeTopbarType: topbarController.activeType
     function closeTopbarTool() { topbarController.close() }
     function toggleTopbarWeather() { return topbarController.openByType("weather", compositor.focusedMonitorName) }

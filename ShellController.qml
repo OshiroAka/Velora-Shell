@@ -1,9 +1,11 @@
 import QtQuick
 import "platform" as Platform
 import "core/SurfaceGeometry.js" as SurfaceGeometry
+import "core/InfiniteDockGeometry.js" as InfiniteDockGeometry
 import "core" as Core
 import "services" as Services
 import "surfaces" as Surfaces
+import "features/topbar" as TopBarFeature
 import Qt5Compat.GraphicalEffects
 import Quickshell
 import Quickshell.Hyprland
@@ -3503,6 +3505,30 @@ Scope {
 
             mask: Region {
                 item: infiniteDesktopGesture
+                // The pan window shares the desktop layer with the dock.
+                // Leave its controls to the dock regardless of map order.
+                Region {
+                    intersection: Intersection.Subtract
+                    width: root.infiniteDesktopTargetReveal > .99 ? 128 * Math.min(1, infiniteDesktopGesturePanel.width/1280, (infiniteDesktopGesturePanel.height-40)/720) : 0
+                    height: width
+                    y: infiniteDesktopGesturePanel.height-height
+                }
+                Region {
+                    intersection: Intersection.Subtract
+                    width: root.infiniteDesktopTargetReveal > .99 ? 128 * Math.min(1, infiniteDesktopGesturePanel.width/1280, (infiniteDesktopGesturePanel.height-40)/720) : 0
+                    height: width
+                    x: infiniteDesktopGesturePanel.width-width
+                    y: infiniteDesktopGesturePanel.height-height
+                }
+                Region {
+                    intersection: Intersection.Subtract
+                    readonly property real unit: Math.min(1, infiniteDesktopGesturePanel.width/1280, (infiniteDesktopGesturePanel.height-40)/720)
+                    width: root.infiniteDesktopTargetReveal > .99 && root.composition
+                        ? InfiniteDockGeometry.dockWidth(infiniteDesktopGesturePanel.width, unit, root.composition.configStore.infiniteDeskPinnedItems.length) : 0
+                    height: 54*unit
+                    x: (infiniteDesktopGesturePanel.width-width)/2
+                    y: infiniteDesktopGesturePanel.height-height
+                }
             }
 
             VeloraInfiniteDesktopGesture {
@@ -4646,7 +4672,8 @@ Scope {
             readonly property int weatherTopTargetY: root.weatherTopOpen ? weatherTopOpenY : -weatherTopTargetHeight - 18
             readonly property int weatherTopCornerRadius: 24
             property var activeRailSystemPopover: null
-            readonly property bool wantsDrawerKeyboard: railControls.mounted || (edgePopover.mounted && !edgePopover.keepOpenOutside) || coffeePopover.mounted || notesPopover.mounted || bluetoothPopover.mounted || notificationsPopover.mounted || wifiPopover.mounted || root.focusMode || root.quickPopupType === "search" || root.quickPopupType === "agenda" || root.quickPopupType === "weatherPanel" || root.settingsPanelOpen || root.wallpaperSelectorOpen || (!root.topBarLayout && root.weatherTopKeyboardFocus) || root.leftMenuInteractiveFocus
+            readonly property var desktopEdgePanel: infiniteControlMenu.mounted ? infiniteControlMenu : edgePopover
+            readonly property bool wantsDrawerKeyboard: infiniteControlMenu.mounted || railControls.mounted || (edgePopover.mounted && !edgePopover.keepOpenOutside) || coffeePopover.mounted || notesPopover.mounted || bluetoothPopover.mounted || notificationsPopover.mounted || wifiPopover.mounted || root.focusMode || root.quickPopupType === "search" || root.quickPopupType === "agenda" || root.quickPopupType === "weatherPanel" || root.settingsPanelOpen || root.wallpaperSelectorOpen || (!root.topBarLayout && root.weatherTopKeyboardFocus) || root.leftMenuInteractiveFocus
             readonly property bool whatsappKeyboard: edgePopover.mounted && edgePopover.keepOpenOutside
 
             screen: modelData
@@ -4656,7 +4683,8 @@ Scope {
             exclusionMode: ExclusionMode.Normal
             focusable: wantsDrawerKeyboard || whatsappKeyboard
 
-            WlrLayershell.layer: WlrLayer.Overlay
+            WlrLayershell.layer: root.infiniteDesktopMorphProgress > .0001
+                && !wantsDrawerKeyboard && !whatsappKeyboard ? WlrLayer.Bottom : WlrLayer.Overlay
             WlrLayershell.namespace: "velora-shell-unified-bar"
             WlrLayershell.keyboardFocus: root.weatherTopKeyboardFocus
                 ? WlrKeyboardFocus.OnDemand
@@ -4706,18 +4734,18 @@ Scope {
                     + Number(railControls.nativePanel && railControls.nativePanel.extension ? railControls.nativePanel.extension.width / width : 0).toFixed(6) + " "
                     + Number(railControls.nativePanel && railControls.nativePanel.extension ? railControls.nativePanel.extension.height / height : 0).toFixed(6) + " "
                     + Number(root.oppositeFrameWidth / width).toFixed(6) + " "
-                    + Number(edgePopover.bodyY / height).toFixed(6) + " "
-                    + Number(edgePopover.mounted ? edgePopover.bodyWidth / width : 0).toFixed(6) + " "
-                    + Number(edgePopover.bodyHeight / height).toFixed(6) + " "
-                    + Number(edgePopover.contour).toFixed(6) + " "
-                    + Number(edgePopover.extension.y / height).toFixed(6) + " "
-                    + Number(edgePopover.extension.width / width).toFixed(6) + " "
-                    + Number(edgePopover.extension.height / height).toFixed(6) + " "
-                    + edgePopover.contourSamples.map(value => Number(value).toFixed(6)).join(" ") + " "
-                    + Number(edgePopover.sidebarWaveScale).toFixed(6) + " "
-                    + Number(edgePopover.dockProgress).toFixed(6) + " "
-                    + Number(edgePopover.sidebarWaveWidth / width).toFixed(6) + " "
-                    + edgePopover.sidebarSamples.map(value => Number(value).toFixed(6)).join(" ") + " "
+                    + Number(panel.desktopEdgePanel.bodyY / height).toFixed(6) + " "
+                    + Number(panel.desktopEdgePanel.mounted ? panel.desktopEdgePanel.bodyWidth / width : 0).toFixed(6) + " "
+                    + Number(panel.desktopEdgePanel.bodyHeight / height).toFixed(6) + " "
+                    + Number(panel.desktopEdgePanel.contour).toFixed(6) + " "
+                    + Number(panel.desktopEdgePanel.extension.y / height).toFixed(6) + " "
+                    + Number(panel.desktopEdgePanel.extension.width / width).toFixed(6) + " "
+                    + Number(panel.desktopEdgePanel.extension.height / height).toFixed(6) + " "
+                    + panel.desktopEdgePanel.contourSamples.map(value => Number(value).toFixed(6)).join(" ") + " "
+                    + Number(panel.desktopEdgePanel.sidebarWaveScale).toFixed(6) + " "
+                    + Number(panel.desktopEdgePanel.dockProgress).toFixed(6) + " "
+                    + Number(panel.desktopEdgePanel.sidebarWaveWidth / width).toFixed(6) + " "
+                    + panel.desktopEdgePanel.sidebarSamples.map(value => Number(value).toFixed(6)).join(" ") + " "
                     + Number(root.infiniteDesktopFrameFoldProgress).toFixed(6) + " "
                     + Number(infiniteBottomDock.dockWidth / width).toFixed(6))
             }
@@ -4754,6 +4782,8 @@ Scope {
                 intersection: Intersection.Combine
 
                 Region { item: infiniteBottomDock.visible && root.infiniteDesktopTargetReveal > .99 && infiniteBottomDock.entries.length ? infiniteBottomDock.dockInput : null }
+                Region { item: root.infiniteDesktopTargetReveal > .99 && infiniteBottomDock.controlsInput.visible ? infiniteBottomDock.controlsInput : null }
+                Region { item: infiniteControlMenu.maskItem }
                 Region { item: root.infiniteDesktopTargetReveal > .99 ? infiniteBottomDock.workspaceItem(0) : null; radius: 18 * infiniteBottomDock.unit }
                 Region { item: root.infiniteDesktopTargetReveal > .99 ? infiniteBottomDock.workspaceItem(1) : null; radius: 18 * infiniteBottomDock.unit }
                 Region { item: root.infiniteDesktopTargetReveal > .99 ? infiniteBottomDock.workspaceItem(2) : null; radius: 18 * infiniteBottomDock.unit }
@@ -5313,7 +5343,11 @@ Scope {
                 theme: root.composition.topbarTheme
                 screen: panel.modelData
                 shell: root
-                edgePanel: edgePopover
+                edgePanel: panel.desktopEdgePanel
+                controlStatus: root.composition.networkStatus
+                controlTimer: root.composition.clockTimerService
+                controlsParent: panel
+                onControlActivated: (type, item) => infiniteControlMenu.activate(type, item)
                 progress: root.infiniteDesktopFrameFoldProgress
                 reveal: root.infiniteDesktopTargetReveal
                 nativeMaterial: root.composition.nativeBarMaterial && Platform.NativeBlur.supports("infinite-desktop-dock-compact")
@@ -5321,6 +5355,26 @@ Scope {
                 surface: root.sidebarBarMaterialColor()
                 onDockWidthChanged: Qt.callLater(panel.syncUnifiedBarNativeShape)
                 z: 2
+            }
+            TopBarFeature.InfiniteDesktopMenu {
+                id: infiniteControlMenu
+                anchors.fill: parent
+                z: 12
+                composition: root.composition
+                shell: root
+                screenName: panel.modelData.name
+                enabled: root.infiniteDesktopTargetReveal > .99
+                railWidth: 4 * infiniteBottomDock.unit
+                onOpening: {
+                    edgePopover.closeInstant()
+                    root.composition.closeTopbarTool()
+                    if (toolType === "battery") root.composition.fanPlusService.refresh()
+                }
+                onShapeChanged: Qt.callLater(panel.syncUnifiedBarNativeShape)
+            }
+            Connections {
+                target: panel.desktopEdgePanel
+                function onShapeChanged() { Qt.callLater(panel.syncUnifiedBarNativeShape) }
             }
             Rectangle {
                 x: 0; y: 0; width: 1; height: 1
@@ -6788,7 +6842,7 @@ Scope {
                 anchorY: height - panel.modelData.height / 2
                 triggerHovered: edgeHover.hovered
                 onOpening: {
-                    coffeePopover.close(); notesPopover.close(); bluetoothPopover.close()
+                    infiniteControlMenu.close(); coffeePopover.close(); notesPopover.close(); bluetoothPopover.close()
                     notificationsPopover.close(); wifiPopover.close()
                     root.activeRailControl = ""
                     root.closeQuickPopup()
@@ -6927,9 +6981,9 @@ Scope {
                 id: railToolOutsideInput
                 z: 9
                 width: panel.width
-                height: railControls.mounted || (edgePopover.mounted && !edgePopover.keepOpenOutside) || coffeePopover.mounted || notesPopover.mounted || bluetoothPopover.mounted || notificationsPopover.mounted || wifiPopover.mounted ? panel.height : 0
+                height: infiniteControlMenu.mounted || railControls.mounted || (edgePopover.mounted && !edgePopover.keepOpenOutside) || coffeePopover.mounted || notesPopover.mounted || bluetoothPopover.mounted || notificationsPopover.mounted || wifiPopover.mounted ? panel.height : 0
                 acceptedButtons: Qt.AllButtons
-                onPressed: { root.activeRailControl = ""; if (!edgePopover.keepOpenOutside) edgePopover.close(); coffeePopover.close(); notesPopover.close(); bluetoothPopover.close(); notificationsPopover.close(); wifiPopover.close() }
+                onPressed: { infiniteControlMenu.close(); root.activeRailControl = ""; if (!edgePopover.keepOpenOutside) edgePopover.close(); coffeePopover.close(); notesPopover.close(); bluetoothPopover.close(); notificationsPopover.close(); wifiPopover.close() }
             }
             Connections {
                 target: root
@@ -6941,7 +6995,7 @@ Scope {
                 }
                 function onInfiniteDesktopFrameFoldProgressChanged() { panel.syncUnifiedBarNativeShape() }
                 function onInfiniteDesktopCanvasEnabledChanged() {
-                    edgePopover.close(); coffeePopover.closeInstant(); notesPopover.closeInstant()
+                    infiniteControlMenu.closeInstant(); edgePopover.close(); coffeePopover.closeInstant(); notesPopover.closeInstant()
                     bluetoothPopover.closeInstant(); notificationsPopover.closeInstant(); wifiPopover.closeInstant()
                 }
                 function onQuickPopupTypeChanged() {

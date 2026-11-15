@@ -3,6 +3,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Hyprland
 import "../core/InfiniteDockGeometry.js" as Geometry
+import "../features/topbar" as TopBar
 
 Item {
     id: root
@@ -11,6 +12,12 @@ Item {
     required property var screen
     required property var shell
     property var edgePanel: null
+    property var controlStatus: null
+    property var controlTimer: null
+    property var controlsParent: null
+    signal controlActivated(string type, var item)
+    property alias controlsInput: controlsLoader
+    readonly property var controls: controlsLoader.item
     property real progress: 0
     property real reveal: 0
     property bool nativeMaterial: false
@@ -128,6 +135,24 @@ Item {
     // The window mask contains only interactive content, leaving the canvas
     // behind clients and empty regions available to the desktop pan gesture.
     property alias dockInput: appsViewport
+    Loader {
+        id: controlsLoader
+        parent: root.controlsParent || root
+        z: 13
+        active: !!root.controlStatus && !!root.controlTimer
+        visible: active && root.reveal > .001
+        x: root.width - width; y: root.height - height
+        width: 128 * root.unit; height: width
+        opacity: root.reveal
+        sourceComponent: TopBar.InfiniteDesktopControls {
+            config: root.config; theme: root.theme
+            status: root.controlStatus; timerService: root.controlTimer
+            monitorName: root.screen.name
+            unit: root.unit
+            interactive: root.reveal > .99
+            onActivated: (type, item) => root.controlActivated(type, item)
+        }
+    }
     Flickable {
         id: workspacesViewport
         objectName: "infiniteDeskWorkspaces"

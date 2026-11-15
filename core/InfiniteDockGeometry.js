@@ -35,6 +35,19 @@ function workspacePosition(index, count, scale) {
         y: (a.y + (b.y-a.y)*t + outside*Math.sin(angle*Math.PI/180)) * scale,
         angle: angle}
 }
+function controlPosition(index, scale, visualWidth, visualHeight) {
+    const p = workspacePosition(index * 1.8, 5, 1)
+    const hw = visualWidth/2, hh = visualHeight/2, padding = 2
+    // Fit an upright glyph's whole rectangle into the curved shelf. Larger
+    // timer digits move down the curve instead of crossing its inner edge.
+    const needed = Math.min(187, visualWidth + padding*2)
+    const minimumY = -128 + 124*Math.sqrt(1-Math.pow((192-needed)/188,2)) + hh + padding
+    const y = Math.min(-hh-4, Math.max(p.y + 18*Math.cos(p.angle*Math.PI/180), minimumY))
+    const top = y-hh-padding
+    const inside = 192-188*Math.sqrt(Math.max(0,1-Math.pow((top+128)/124,2)))
+    const x = Math.max(hw+padding, Math.min(p.x-18*Math.sin(p.angle*Math.PI/180), inside-hw-padding))
+    return {x:x*scale,y:y*scale}
+}
 function path(c, width, height, count) {
     const s = unit(width, height), half = dockWidth(width, s, count) / 2
     const left = width / 2 - half, right = width / 2 + half

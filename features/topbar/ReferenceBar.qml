@@ -64,7 +64,8 @@ Item {
     readonly property var layout: packed ? config.infiniteTopbarLayout : config.topbarLayout
     readonly property var visibleTools: (packed ? config.infiniteTopbarToolsOrder : config.topbarToolsOrder).filter(type =>
         (type !== "thing" || config.topbarOneThingEnabled)
-        && (type !== "notes" || config.topbarNotesEnabled))
+        && (type !== "notes" || config.topbarNotesEnabled)
+        && (!packed || !["battery", "paint", "monitor", "controls", "timer"].includes(type)))
     function controlBubbleRuns() {
         const runs = []
         for (let index = 0; index < visibleTools.length; index += 1) {
@@ -679,40 +680,13 @@ Item {
                     muted: item.type === "wifi" && !root.status.wifiEnabled
                     connected: root.status.wifiConnected
                 }
-                Components.VeloraBarItemBubble {
-                    tint: root.theme.barBubbleTint || root.theme.accent
-                    exactColor: !!root.theme.manualPalette
-                    monitorName: root.host.screen.name
-                    surfaceTint: root.theme.barSurface
-                    solid: root.config.barItemBubblesSolid
-                    liquid: root.config.barItemBubblesEnabled && root.config.barItemBubblesLiquid
-                    id: timerSurface
-                    objectName: "barExistingBubble-timer"
+                TimerBadge {
                     anchors.centerIn: parent
+                    config: root.config; theme: root.theme; timerService: root.timerService
+                    monitor: root.host.screen.name
+                    compact: root.packed
+                    iconOpacity: root.iconOpacity
                     shown: item.type === "timer"
-                    opacity: root.theme.manualPalette ? 1 : root.iconOpacity
-                    width: parent.width - (root.packed ? 4 : root.config.barItemBubblesEnabled ? 14 : 10)
-                    height: root.config.barItemBubblesEnabled ? 28 : 25
-                    radius: 7
-                    color: nativeLiquid ? "transparent" : root.timerService.countdown.running || root.timerService.finished
-                        ? root.theme.textPrimary : root.config.barItemBubblesEnabled
-                            ? bubbleColor : root.theme.withAlpha(root.theme.textPrimary, 0.07)
-                    border.width: 1
-                    border.color: root.theme.withAlpha(root.theme.textPrimary, 0.18)
-                    Rectangle {
-                        visible: !root.config.barItemBubblesEnabled
-                        anchors.fill: parent; anchors.margins: 3
-                        radius: 4; color: "transparent"
-                        border.width: 1; border.color: root.theme.withAlpha(root.theme.textPrimary, 0.09)
-                    }
-                    Behavior on color { ColorAnimation { duration: 160 } }
-                    TimerLabel {
-                        anchors.centerIn: parent; text: root.timerService.barText || root.timerService.timerText
-                        transitionKey: root.timerService.duration + ":" + root.timerService.engaged
-                        color: root.timerService.countdown.running || root.timerService.finished ? root.theme.profileDark : root.theme.textPrimary
-                        family: root.theme.bodyFont; pixelSize: 14; tabular: true
-                        Behavior on color { ColorAnimation { duration: 160 } }
-                    }
                 }
                 Components.VeloraBarItemBubble {
                     tint: root.theme.barBubbleTint || root.theme.accent

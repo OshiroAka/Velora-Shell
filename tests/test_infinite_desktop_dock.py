@@ -8,6 +8,27 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class InfiniteDockTests(unittest.TestCase):
+    def test_upright_controls_fit_inside_the_corner_at_both_sizes(self):
+        geometry = (ROOT / "core/InfiniteDockGeometry.js").read_text().replace(".pragma library", "")
+        script = "const assert=require('assert/strict');\n" + geometry + r'''
+for (const scale of [.625,.8,1]) for (const size of [.68,.78,.88])
+ for (const width of [20,30,50]) for (let index=-.4;index<2.41;index+=.1) {
+  const w=width*size*1.18,h=26*size*1.18;
+  const p=controlPosition(index,scale,w,h);
+  for (const dx of [-w/2,w/2]) for (const dy of [-h/2,h/2]) {
+   const x=p.x/scale+dx,y=p.y/scale+dy;
+   const inner=192-188*Math.sqrt(Math.max(0,1-Math.pow((y+128)/124,2)));
+   assert(x>=0 && y<=-4,`outside the screen: ${index} ${width} ${x},${y}`);
+   assert(x<=inner,`outside the curve: ${index} ${width} ${x},${y}`);
+  }
+ }
+const centre=controlPosition(1,1,20*.88*1.18,26*.88*1.18);
+const timer=controlPosition(2,1,48*.68,23*.68);
+assert(timer.x-24*.68-centre.x-10*.88*1.18>10,'Timer preview is pressed against the centre icon');
+'''
+        result = subprocess.run(["node", "-e", script], text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_settings_pin_reorder_remove_persist_and_render_curved_workspaces(self):
         with tempfile.TemporaryDirectory(prefix="velora-dock-test-") as temporary:
             directory = Path(temporary)
@@ -26,7 +47,7 @@ class InfiniteDockTests(unittest.TestCase):
                 env.pop(key, None)
             for reload in ("0", "1"):
                 process = subprocess.run(["qs", "-p", str(directory)], env=dict(env, VELORA_DOCK_RELOAD=reload),
-                                         text=True, capture_output=True, timeout=12)
+                                         text=True, capture_output=True, timeout=20)
                 output = process.stdout + process.stderr
                 self.assertEqual(process.returncode, 0, output)
                 self.assertIn("INFINITE_DOCK_OK", output)

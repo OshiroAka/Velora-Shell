@@ -16,12 +16,34 @@ ShellRoot {
         property color textPrimary: "#f4f4f6"
         property color textSecondary: "#bdbdc5"
         property color accent: "#c8788f"
+        property color accentSoft: accent
+        property color warning: "#e7bd76"
+        property color danger: "#e07282"
+        property color profileDark: "#171a22"
+        property color barBubbleTint: accent
+        property bool manualPalette: false
         property color borderSubtle: "#40404a"
         property color barSurface: "#e8171a22"
         property string bodyFont: "Sans Serif"
         function withAlpha(c,a) { return Qt.rgba(c.r,c.g,c.b,a) }
     }
     QtObject { id: shell; property int settingsRequests: 0; function openUnifiedSettings() { settingsRequests++ } function toggleTopSearch() {} }
+    QtObject {
+        id: status
+        property bool hasBattery: true
+        property real batteryLevel: .72
+        property bool batteryCharging: false
+    }
+    QtObject {
+        id: timer
+        property string barText: "25:00"
+        property string timerText: barText
+        property var countdown: ({running:false})
+        property bool finished: false
+        property int duration: 1500000
+        property bool engaged: false
+    }
+    property string activatedControl: ""
     QtObject {
         id: edge
         property bool mounted: false
@@ -41,6 +63,8 @@ ShellRoot {
             anchors.fill: parent
             config: config; theme: theme; shell: shell; screen: Quickshell.screens[0]
             edgePanel: edge
+            controlStatus: status; controlTimer: timer
+            onControlActivated: (type, item) => test.activatedControl=type
             progress: 1; reveal: 1
         }
     }
@@ -81,6 +105,45 @@ ShellRoot {
             test.equal(config.infiniteDeskPinnedItems.join(","), "shell:settings,dock-test")
             wait(80)
             test.equal(dock.entries.length, 2)
+            const controls=dock.controls
+            test.check(!!controls,"Right-hand controls are missing")
+            test.equal(controls.focusedType,"battery")
+            test.equal(controls.tools.join(","),"battery,paint,monitor,controls,timer")
+            const focused=controls.itemForType("battery")
+            const idleScale=findChild(focused,"infiniteDeskControlFace").scale
+            test.check(idleScale < dock.unit,"Controls should stay small at rest")
+            test.check(controls.itemForType("timer").opacity < focused.opacity,"Outer roulette items need a fade")
+            win.requestActivate()
+            mouseClick(focused,focused.width/2,focused.height/2)
+            test.equal(test.activatedControl,"battery","Original battery action was lost")
+            const preview=controls.itemForType("paint")
+            mouseMove(preview,preview.width/2,preview.height/2)
+            mouseClick(preview,preview.width/2,preview.height/2)
+            test.equal(controls.focusedType,"battery","Preview hover stole the roulette focus")
+            test.equal(test.activatedControl,"battery","Only the centre item may open a menu")
+            mouseWheel(controls,controls.width-38,controls.height-38,0,-120)
+            wait(80)
+            test.check(controls.displayStart > -1 && controls.displayStart < 0,"Scroll must animate along the curve")
+            wait(320)
+            test.equal(controls.focusedType,"paint")
+            test.check(findChild(controls.itemForType("paint"),"infiniteDeskControlFace").scale > idleScale,"Scrolling should enlarge the focused icon")
+            config.setValue("appearance.reducedMotion",true)
+            controls.turn(3)
+            test.equal(controls.focusedType,"timer")
+            test.equal(controls.displayStart,controls.targetStart,"Reduced motion does not settle the controls")
+            const timerSlot=controls.itemForType("timer")
+            test.check(!!findChild(timerSlot,"barExistingBubble-timer"),"Timer must reuse its original badge")
+            mouseClick(timerSlot,timerSlot.width/2,timerSlot.height/2)
+            test.equal(test.activatedControl,"timer","Timer action was lost")
+            controls.turn(5)
+            test.equal(controls.focusedType,"timer","Roulette must wrap without losing tools")
+            controls.turn(-4)
+            test.equal(controls.focusedType,"battery")
+            wait(300)
+            config.setValue("appearance.reducedMotion",false)
+            // The software renderer cannot capture the live GPU mask.
+            dock.controlStatus=null
+            wait(10)
             const numbers = [1,2,3,4,5].map(id => findChild(dock,"infiniteDeskWorkspace"+id))
             test.check(!findChild(dock,"infiniteDeskWorkspaceGroupBubble"), "Workspace bubbles must be removed")
             test.equal(findChild(dock,"infiniteDeskWorkspaces").height, 128, "Workspace corner must stay compact")
@@ -119,6 +182,7 @@ ShellRoot {
             test.equal(dock.displayStart, 3, "Reduced motion must settle an active roulette")
             dock.activeWorkspace=1
             test.equal(dock.displayStart, 1)
+            wait(300)
             config.setValue("appearance.reducedMotion", false)
             dock.activeWorkspace=1
             wait(350)
@@ -148,5 +212,5 @@ ShellRoot {
         interval: 100; repeat: true
         onTriggered: if (!config.savePending) { console.info("INFINITE_DOCK_OK saved"); Qt.quit() }
     }
-    Timer { interval: 7000; running: true; onTriggered: { console.error("INFINITE_DOCK_FAILED timeout"); Qt.quit() } }
+    Timer { interval: 10000; running: true; onTriggered: { console.error("INFINITE_DOCK_FAILED timeout"); Qt.quit() } }
 }
