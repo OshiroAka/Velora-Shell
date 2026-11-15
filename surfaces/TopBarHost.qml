@@ -58,7 +58,7 @@ Variants {
         readonly property int stripHeight: 40
         readonly property bool infiniteMode: root.desktopMorphProgress > .0001
         readonly property bool nativeCompactBar: root.nativeBarMaterial
-            && (!infiniteMode || Platform.NativeBlur.supports("compact-topbar"))
+            && (!infiniteMode || Platform.NativeBlur.supports("infinite-top-frame"))
         readonly property bool wallpaperMounted: wallpaperPicker.mounted
         readonly property bool menuMounted: popover.mounted || wallpaperMounted
         readonly property rect menuRect: wallpaperMounted ? wallpaperPicker.panelRect : popover.panelRect
@@ -221,6 +221,8 @@ Variants {
                 chargingMorph.visible ? chargingMorph.y + chargingMorph.height + 12 : 0)
             barHeight: topbarWindow.stripHeight
             stripRect: Qt.rect(barLoader.x, 0, barLoader.width, topbarWindow.stripHeight)
+            frameUnit: topbarWindow.infiniteMode ? Math.min(1, topbarWindow.width / 1280,
+                (topbarWindow.modelData.height - topbarWindow.stripHeight) / 720) : 0
             backgroundHidden: root.config.barBackgroundEnabled === false ? 1 : 0
             panelRect: topbarWindow.menuRect
             anchorX: topbarWindow.menuAnchor

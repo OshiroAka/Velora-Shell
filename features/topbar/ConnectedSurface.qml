@@ -2,6 +2,7 @@ import QtQuick
 
 ShaderEffect {
     property rect stripRect: Qt.rect(0, 0, width, barHeight)
+    property real frameUnit: 0
     readonly property vector4d strip: Qt.vector4d(stripRect.x, stripRect.y, stripRect.width, stripRect.height)
     property real barHeight: 40
     property real backgroundHidden: 0

@@ -148,6 +148,18 @@ int main(int argc, char** argv) {
             check(alpha(200,15)>250,"Compact topbar lost the central material");
             check(alpha(200,75)>250,"Detached bar disconnects its open menu");
         }
+        one("infiniteDockUnit",1);
+        draw();
+        for (int x=0;x<WIDTH;++x)
+            check(alpha(x,1)>250,"Infinite Desk top frame has a gap");
+        check(alpha(1,15)>250 && alpha(398,15)>250,"Top frame does not meet the side borders");
+        check(alpha(20,6)==0 && alpha(380,6)==0,"Thin top border fills the empty space beside the bar");
+        check(alpha(77,5)>0 && alpha(77,12)==0,"Bar join lost its small concave curve");
+        for (int x=0;x<WIDTH/2;++x)
+            for (int y=0;y<30;++y)
+                check(std::abs(int(alpha(x,y))-int(alpha(WIDTH-x-1,y)))<=1,
+                    "Top frame and bar joins are not symmetric");
+        one("infiniteDockUnit",0);
         two("frameFold",0,0);four("topbarStrip",0,0,0,0);
         for (const float mode : {0.F, 1.F, 2.F, 3.F}) {
             four("barMaterial",1,mode,1,0);

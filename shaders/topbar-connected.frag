@@ -23,6 +23,7 @@ layout(std140, binding = 0) uniform buf {
     float timerRadius;
     float backgroundHidden;
     vec4 strip;
+    float frameUnit;
 } ubuf;
 float box(vec2 p, vec2 halfSize, float r) {
     vec2 q = abs(p) - halfSize + r;
@@ -66,7 +67,16 @@ vec3 barLightColor(vec3 base, vec2 point, vec4 light, float span, bool alert) {
 }
 void main() {
     vec2 p = qt_TexCoord0 * ubuf.surfaceSize;
-    float base = box(p - ubuf.strip.xy - ubuf.strip.zw*.5, ubuf.strip.zw*.5, min(8.0, ubuf.strip.w*.5));
+    float s = ubuf.frameUnit;
+    float radius = s > 0.0 ? 6.0*s : 8.0;
+    float base = box(p - ubuf.strip.xy - ubuf.strip.zw*.5, ubuf.strip.zw*.5, min(radius, ubuf.strip.w*.5));
+    if (s > 0.0) {
+        // The thin top and sides join the bar in the same material field.
+        float sides = min(p.x - 4.0*s, ubuf.surfaceSize.x - p.x - 4.0*s);
+        float frame = joined(p.y - 4.0*s, sides, 8.0*s);
+        frame = max(frame, p.y - ubuf.strip.w);
+        base = joined(base, frame, 8.0*s);
+    }
     float d = attach(ubuf.backgroundHidden > 0.5 ? 1e6 : base, p, ubuf.panel, ubuf.shapeMetrics, ubuf.panelRadius);
     d = attach(d, p, ubuf.executionPanel, ubuf.executionMetrics, ubuf.executionRadius);
     d = attach(d, p, ubuf.chargingPanel, ubuf.chargingMetrics, ubuf.chargingRadius);
