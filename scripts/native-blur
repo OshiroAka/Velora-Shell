@@ -234,6 +234,32 @@ def shell_ipc(method):
         pass
 
 
+def mapped_velora_plugins(proc_root=Path("/proc")):
+    """Recover the live library path if loaded.json belongs to an older load."""
+    signature = os.environ.get("HYPRLAND_INSTANCE_SIGNATURE", "")
+    if not re.fullmatch(r"[A-Za-z0-9_]+", signature):
+        return []
+    runtime = Path(os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}")
+    try:
+        pid = (runtime / "hypr" / signature / "hyprland.lock").read_text().splitlines()[0]
+        if not pid.isdecimal():
+            return []
+        lines = (proc_root / pid / "maps").read_text().splitlines()
+    except (OSError, IndexError):
+        return []
+    paths = []
+    for line in lines:
+        fields = line.split(maxsplit=5)
+        if len(fields) != 6:
+            continue
+        name = re.sub(r"\\([0-7]{3})", lambda match: chr(int(match[1], 8)), fields[5])
+        name = name.removesuffix(" (deleted)")
+        if (Path(name).is_absolute() and re.fullmatch(r"velora-blur(?:-[0-9a-f]{24})?\.so", Path(name).name)
+                and name not in paths):
+            paths.append(name)
+    return paths
+
+
 def load(plugin):
     plugin = Path(plugin).resolve()
     identity = read_json(plugin.with_suffix(".json"))
@@ -261,7 +287,16 @@ def load(plugin):
             if state["loaded"]:
                 old_path = previous.get("path") or str(runtime / "velora-blur.so")
                 run(["hyprctl", "plugin", "unload", old_path])
-                if inspect()["loaded"]:
+                still_loaded = inspect()["loaded"]
+                if still_loaded:
+                    for mapped_path in mapped_velora_plugins():
+                        if mapped_path == old_path:
+                            continue
+                        run(["hyprctl", "plugin", "unload", mapped_path])
+                        still_loaded = inspect()["loaded"]
+                        if not still_loaded:
+                            break
+                if still_loaded:
                     raise RuntimeError("Plugin anterior ainda carregado; não substituir sua biblioteca.")
             # A unique path prevents dlopen from reusing a previous image. Keep its
             # exact path for a later verified unload, including across checkouts.

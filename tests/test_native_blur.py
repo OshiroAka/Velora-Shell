@@ -195,6 +195,40 @@ class NativeBlurTests(unittest.TestCase):
             self.assertEqual(commands.call_args.args[0][2], "unload")
             self.assertEqual([call.args[0] for call in lifecycle.call_args_list], ["nativeBlurSuspend", "nativeBlurResume"])
 
+    def test_stale_load_record_recovers_actual_mapped_library_without_overwriting_it(self):
+        m = self.module
+        plugin = self.artifact()
+        actual = self.directory / ("velora-blur-" + "a"*24 + ".so")
+        actual.write_bytes(b"live library")
+        m.write_json(m.cache_dir() / "loaded.json", {"path": str(self.directory / "stale.so")})
+        old = {"loaded": True, "available": True, "capabilities": m.CAPABILITIES}
+        absent = {"loaded": False, "available": False, "capabilities": []}
+        with patch.object(m, "running_version", return_value={"abiHash": "abi"}), \
+                patch.object(m, "inspect", side_effect=[old, old, absent, old]), \
+                patch.object(m, "mapped_velora_plugins", return_value=[str(actual)]), \
+                patch.object(m, "run", return_value="ok") as commands, patch.object(m, "shell_ipc"):
+            self.assertTrue(m.load(plugin)["available"])
+        self.assertEqual([call.args[0][2] for call in commands.call_args_list], ["unload", "unload", "load"])
+        self.assertEqual(commands.call_args_list[1].args[0][-1], str(actual))
+        self.assertEqual(actual.read_bytes(), b"live library")
+        self.assertNotEqual(m.read_json(m.cache_dir() / "loaded.json")["path"], str(actual))
+
+    def test_mapping_discovery_only_targets_velora_in_selected_compositor(self):
+        m = self.module
+        runtime, proc = self.directory / "runtime", self.directory / "proc"
+        lock = runtime / "hypr/fixture_123/hyprland.lock"
+        lock.parent.mkdir(parents=True)
+        lock.write_text("321\nwayland-1\n")
+        (proc / "321").mkdir(parents=True)
+        library = "/home/user/build/velora-blur.so"
+        maps = proc / "321/maps"
+        maps.write_text("\n".join("0-1 r-xp 0 0 1 " + name for name in
+            [library, library, "/usr/lib/libQt6Core.so", "/tmp/another-plugin.so"]))
+        with patch.dict(os.environ, XDG_RUNTIME_DIR=str(runtime), HYPRLAND_INSTANCE_SIGNATURE="fixture_123"):
+            self.assertEqual(m.mapped_velora_plugins(proc), [library])
+            maps.unlink()
+            self.assertEqual(m.mapped_velora_plugins(proc), [])
+
     def test_loading_before_shell_start_does_not_require_qml_ipc(self):
         m = self.module
         with patch.object(m, "run", side_effect=subprocess.TimeoutExpired("qs", 2)):
