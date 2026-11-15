@@ -84,7 +84,7 @@ ShellRoot {
                 Qt.quit()
                 return
             }
-            for (const pair of [["com.spotify.Client", "Spotify"], ["com.discordapp.Discord", "Discord"], ["io.github.mimbrero.WhatsAppDesktop", "WhatsApp"], ["steam", ""]]) {
+            for (const pair of [["com.spotify.Client", "Spotify"], ["com.discordapp.Discord", "Discord"], ["io.github.mimbrero.WhatsAppDesktop", "WhatsApp"], ["steam", "Steam"], ["zen", "Zen"], ["brave-browser", "Brave"], ["Wallpaper Engine", "WallpaperEngine"], ["steam-game-123", ""]]) {
                 glyphProbe.identifier=pair[0]
                 test.equal(glyphProbe.sharedGlyph,pair[1],"Desktop ID must select the shared glyph automatically")
             }

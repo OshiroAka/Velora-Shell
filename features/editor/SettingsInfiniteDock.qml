@@ -50,7 +50,7 @@ Column {
         objectName: "infiniteDesk.outlineIcons"
         width: parent.width; theme: root.theme
         label: "Ícones em contorno"
-        hint: "Usar o estilo dos ícones do menu da direita nos apps fixados."
+        hint: "Usar desenhos simplificados. Apps sem variante mantêm o ícone original."
         checked: root.config.infiniteDeskOutlineIcons
         onTriggered: root.config.setValue("infiniteDesk.outlineIcons", !checked)
     }

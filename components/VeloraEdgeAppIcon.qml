@@ -43,6 +43,35 @@ Canvas {
             c.closePath(); c.stroke()
             c.beginPath(); c.ellipse(7.5, 10, 3, 4); c.fill()
             c.beginPath(); c.ellipse(13.5, 10, 3, 4); c.fill()
+        } else if (root.iconName === "Steam") {
+            c.beginPath(); c.arc(12, 12, 9.5, 0, Math.PI * 2); c.stroke()
+            c.beginPath(); c.arc(15.6, 8.4, 3.2, 0, Math.PI * 2); c.stroke()
+            c.beginPath(); c.arc(6.8, 15.8, 2.4, -.6, Math.PI * 1.6); c.stroke()
+            c.beginPath(); c.moveTo(8.1, 13.8); c.lineTo(12.8, 9.9)
+            c.moveTo(9, 16); c.lineTo(15.2, 11.6)
+            c.moveTo(2.6, 13.5); c.lineTo(5.2, 14.2); c.stroke()
+        } else if (root.iconName === "Zen") {
+            for (const radius of [9.5, 5.1]) {
+                c.beginPath(); c.arc(12, 12, radius, 0, Math.PI * 2); c.stroke()
+            }
+            c.beginPath(); c.arc(12, 12, 0.8, 0, Math.PI * 2); c.fill()
+        } else if (root.iconName === "Brave") {
+            // Keep the shield and the lion's main features, omitting fur texture.
+            c.beginPath(); c.moveTo(7, 3); c.lineTo(17, 3)
+            c.lineTo(20, 6); c.lineTo(18.5, 15.5); c.lineTo(12, 21.5)
+            c.lineTo(5.5, 15.5); c.lineTo(4, 6); c.closePath(); c.stroke()
+            c.beginPath(); c.moveTo(7.5, 8); c.lineTo(9, 6); c.lineTo(12, 7)
+            c.lineTo(15, 6); c.lineTo(16.5, 8)
+            c.moveTo(7.5, 10); c.lineTo(10, 10.8)
+            c.moveTo(16.5, 10); c.lineTo(14, 10.8)
+            c.moveTo(10, 13); c.lineTo(12, 14.5); c.lineTo(14, 13)
+            c.moveTo(9, 16); c.lineTo(12, 18); c.lineTo(15, 16); c.stroke()
+        } else if (root.iconName === "WallpaperEngine") {
+            c.beginPath(); c.roundedRect(3, 4.5, 18, 14, 2, 2); c.stroke()
+            c.beginPath(); c.arc(12, 11.5, 3.5, 0, Math.PI * 2); c.stroke()
+            c.beginPath(); c.moveTo(12, 18.5); c.lineTo(12, 21)
+            c.moveTo(8, 21); c.lineTo(16, 21)
+            c.moveTo(18, 7.5); c.lineTo(18.1, 7.5); c.stroke()
         } else {
             c.beginPath()
             c.moveTo(4.2, 17)
