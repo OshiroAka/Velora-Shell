@@ -87,11 +87,13 @@ ShellRoot {
             test.check(-numbers[4].position.y < 15, "Last number must stay close to the bottom")
             test.check(numbers[0].position.y > -90, "Workspace group must be shorter")
             const emptyPanelImage = grabImage(dock)
+            edge.extension = ({y: 124, width: 104, height: 44})
             edge.mounted = true
             wait(100)
             const panelImage = grabImage(dock)
             test.check(panelImage.red(1210, 170) !== emptyPanelImage.red(1210, 170), "Right menu must retain its background in Infinite Desk")
-            test.equal(panelImage.red(1000, 170), emptyPanelImage.red(1000, 170), "Right menu background must remain bounded")
+            test.equal(panelImage.red(900, 170), emptyPanelImage.red(900, 170), "Right menu background must remain bounded")
+            test.check(panelImage.red(1010, 146) !== emptyPanelImage.red(1010, 146), "Lyrics balloon must have a continuous background")
             test.check(panelImage.red(1278, 400) !== panelImage.red(1000, 400), "Existing border must remain visible above the bottom curve")
             edge.mounted = false
             for (let i=0; i<5; i++) {

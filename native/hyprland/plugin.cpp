@@ -245,6 +245,8 @@ struct STopbarMorph {
     float radius = 0.F;
     bool connected = false;
     float barHeight = 0.F;
+    float stripX = 0.F;
+    float stripWidth = 0.F;
     float anchorX = 0.F;
     float neckHalfWidth = 0.F;
     float joinSize = 0.F;
@@ -469,6 +471,7 @@ uniform float frameRadius;
 uniform vec2 frameFold; // progress, moving bottom in framebuffer coordinates
 uniform float infiniteDockUnit;
 uniform float infiniteDockWidth;
+uniform vec4 topbarStrip; // physical centre and half size; zero keeps legacy callers
 uniform vec4 sideLabel;
 uniform vec2 frost;
 uniform vec4 barTint;
@@ -654,12 +657,16 @@ float infiniteDockSdf(vec2 pixel) {
     float right = infiniteCornerSdf(vec2(w - p.x, p.y));
     if (infiniteDockWidth <= 0.0) return min(left, right) * s * reveal;
     float halfWidth = infiniteDockWidth / (2.0*s);
-    float shoulder = min(140.0, w * .09);
+    float shoulder = min(28.0, w * .04);
     float t = clamp((abs(p.x - w*.5) - halfWidth) / shoulder, 0.0, 1.0);
     float floorHeight = 54.0 - 50.0 * t*t*(3.0-2.0*t);
     float slope = 50.0 * 6.0*t*(1.0-t)/shoulder;
     float dock = (-floorHeight - p.y) / sqrt(1.0+slope*slope);
     return min(left, min(right, dock)) * s * reveal;
+}
+
+float topbarStripSdf(vec2 pixel) {
+    return roundedBoxSdf(pixel - topbarStrip.xy, topbarStrip.zw, min(8.0, topbarStrip.w));
 }
 
 float frameWithoutSettingsSdf(vec2 pixel) {
@@ -679,6 +686,10 @@ float frameWithoutSettingsSdf(vec2 pixel) {
         float rightStart = mix(middle, frameInterior.x + frameInterior.z - frameRadius, gather);
         if (pixel.y >= frameInterior.y)
             distance = max(distance, min(pixel.x - leftEnd, rightStart - pixel.x));
+    }
+    if (topbarStrip.z > 0.0) {
+        distance = max(distance, frameInterior.y - pixel.y);
+        distance = min(distance, topbarStripSdf(pixel));
     }
     distance = min(distance, infiniteDockSdf(pixel));
     if (barBackgroundHidden > .5) distance = 1e6;
@@ -800,8 +811,10 @@ float connectTopbar(float distance, vec2 point) {
 }
 
 float connectedTopbarSdf(vec2 point) {
+    vec2 pixel = point + (windowTopLeft + windowBottomRight) * fullSize * .5;
     return connectTopbar(frameRadius > 0.0 || frameFold.x > 0.0
-        ? frameSdf(point) : (barBackgroundHidden > .5 ? 1e6 : point.y - topLeft.y - bottomRight.y), point);
+        ? frameSdf(point) : (barBackgroundHidden > .5 ? 1e6 : topbarStrip.z > 0.0
+            ? topbarStripSdf(pixel) : point.y - topLeft.y - bottomRight.y), point);
 }
 
 float connectSidebar(float distance, vec2 point) {
@@ -1938,7 +1951,8 @@ bool renderLiquidBackdrop(VeloraCompat::RenderContext& ctx, WP<CTexPassElement> 
         timerBox = {surfaceBox.x + timer[0] * surfaceBox.width,
             surfaceBox.y + timer[1] * surfaceBox.height,
             timer[2] * surfaceBox.width, timer[3] * surfaceBox.height};
-        railBox = {surfaceBox.x, surfaceBox.y, surfaceBox.width,
+        railBox = {surfaceBox.x + independentShape->stripX * surfaceBox.width, surfaceBox.y,
+                   independentShape->stripWidth > 0.F ? independentShape->stripWidth * surfaceBox.width : surfaceBox.width,
                    std::round(independentShape->barHeight * surfaceBox.height)};
         drawBox = {surfaceBox.x, surfaceBox.y, surfaceBox.width,
                    std::max({railBox.height, panelBox.y + panelBox.height - surfaceBox.y,
@@ -2191,6 +2205,15 @@ bool renderLiquidBackdrop(VeloraCompat::RenderContext& ctx, WP<CTexPassElement> 
     glUniform4f(glGetUniformLocation(shader->program(), "frameTopPanel"), 0, 0, 0, 0);
     glUniform4f(glGetUniformLocation(shader->program(), "frameTopMetrics"), 0, 0, 0, 0);
     glUniform2f(glGetUniformLocation(shader->program(), "frameFold"), 0.F, 0.F);
+    glUniform4f(glGetUniformLocation(shader->program(), "topbarStrip"), 0, 0, 0, 0);
+    const auto stripSource = g_connectedTopbars.find(monitorName);
+    if ((connectedTopbar || connectedSidebar) && stripSource != g_connectedTopbars.end()
+            && stripSource->second.stripWidth > 0.F) {
+        const auto& strip = stripSource->second;
+        glUniform4f(glGetUniformLocation(shader->program(), "topbarStrip"),
+            (strip.stripX + strip.stripWidth*.5F)*textureWidth, strip.barHeight*textureHeight*.5F,
+            strip.stripWidth*textureWidth*.5F, strip.barHeight*textureHeight*.5F);
+    }
     glUniform1f(glGetUniformLocation(shader->program(), "barRefractionStrength"), barRefractionStrength());
     setLightParallaxUniform(shader->program(), monitorName);
     glUniform1f(glGetUniformLocation(shader->program(), "opticalScale"), layer && layer->m_monitor ? layer->m_monitor->m_scale : 1.F);
@@ -3118,6 +3141,13 @@ SDispatchResult connectedTopbarDispatcher(std::string arguments) {
             if (!(input >> value) || !std::isfinite(value) || value < 0.F || value > 1.F)
                 return {.success = false, .error = "invalid timer light anchor/progress/intensity"};
         }
+    }
+    input >> std::ws;
+    if (!input.eof()) {
+        if (!(input >> shape.stripX >> shape.stripWidth) || !std::isfinite(shape.stripX)
+                || !std::isfinite(shape.stripWidth) || shape.stripX < 0.F || shape.stripWidth <= 0.F
+                || shape.stripX + shape.stripWidth > 1.00001F)
+            return {.success = false, .error = "invalid topbar strip bounds"};
     }
     g_connectedTopbars[monitor] = shape;
     // QML damages only the changing surface; never start an idle render timer.
@@ -4489,7 +4519,7 @@ std::string status(VeloraCompat::OutputFormat format, std::string) {
 
     if (format == VeloraCompat::JSON_FORMAT)
         return std::format(
-            R"({{"active":true,"abi":"{}","materials":{},"capabilities":[{}"alpha-mask","infinite-desktop-dock","infinite-desktop-dock-compact","desktop-bar-material","transition","dial","caustics","topbar-connected","bar-blur","widget-blur","liquid-style","wallpaper","topbar-shape","unified-bar-shape","topbar-settle","right-menu-shape","settings-shape","settings-connected","settings-side-connected","editor-shape","appearance","lock-layout","shared-widgets-shape","wallpaper-transition","terminal-glass","terminal-glass-control","terminal-bar-match","bar-refraction","terminal-follow-bar","terminal-brightness","bar-brightness","lyrics-beat","lyrics-beat-palette","optical-glass","bar-bubble-liquid"{}],"parallax":{{"enabled":{},"frames":{},"moving":{}}},"opticalDamage":{{"frames":{},"blurExpansions":{},"padding":{},"staleBackdropRefreshes":{}}},"terminalGlass":{{"enabled":{},"strength":{:.3f},"draws":{},"sharpDraws":{},"desktopCopies":{},"shaderFailed":{},"source":"live-framebuffer-and-hyprland-blur","barMatch":{},"barMatchDraws":{},"followsBar":{},"followBarDraws":{},"brightness":{:.3f}}},"wallpaperBlur":{:.3f},"barRefraction":{:.3f},"barBrightness":{:.3f},"lyricsBeatCount":{},"liquidStyle":"{}","backdrop":"sharp-framebuffer","hyprlandBlur":{},"barBlur":{{"enabled":{},"source":"hyprland","topbarDraws":{},"sidebarDraws":{},"waveDraws":{}}},"appearance":{{"blur":{:.3f},"contrast":{:.3f},"reflection":{:.3f},"preview":{}}},"desktop":{{"size":{},"passes":{},"draws":{},"noise":{:.3f},"contrast":{:.3f},"brightness":{:.3f},"vibrancy":{:.3f},"vibrancyDarkness":{:.3f}}},"panel":{{"size":{},"passes":{},"draws":{},"refractionDraws":{},"noise":{:.3f},"contrast":{:.3f},"brightness":{:.3f},"vibrancy":{:.3f},"vibrancyDarkness":{:.3f},"refraction":{:.3f},"edgeWidth":{:.3f},"dispersion":{:.3f},"tint":{:.3f}}},"topbar":{{"size":{},"passes":{},"shapes":{},"draws":{},"refractionDraws":{},"noise":{:.3f},"contrast":{:.3f},"brightness":{:.3f},"vibrancy":{:.3f},"vibrancyDarkness":{:.3f}}},"rightMenu":{{"draws":{},"refractionDraws":{}}},"settings":{{"draws":{},"refractionDraws":{}}},"editor":{{"shapes":{},"draws":{},"refractionDraws":{},"connectedSettings":{}}},"sharedWidgets":{{"blurEnabled":{},"blurDraws":{},"active":{},"shapes":{},"draws":{},"refractionDraws":{},"caustics":{}}},"transition":{{"progress":{:.3f},"animating":{}}},"caustics":{{"enabled":{},"intensity":{:.3f},"lines":{},"animating":{},"frames":{}}}}})",
+            R"({{"active":true,"abi":"{}","materials":{},"capabilities":[{}"alpha-mask","compact-topbar","infinite-desktop-dock","infinite-desktop-dock-compact","desktop-bar-material","transition","dial","caustics","topbar-connected","bar-blur","widget-blur","liquid-style","wallpaper","topbar-shape","unified-bar-shape","topbar-settle","right-menu-shape","settings-shape","settings-connected","settings-side-connected","editor-shape","appearance","lock-layout","shared-widgets-shape","wallpaper-transition","terminal-glass","terminal-glass-control","terminal-bar-match","bar-refraction","terminal-follow-bar","terminal-brightness","bar-brightness","lyrics-beat","lyrics-beat-palette","optical-glass","bar-bubble-liquid"{}],"parallax":{{"enabled":{},"frames":{},"moving":{}}},"opticalDamage":{{"frames":{},"blurExpansions":{},"padding":{},"staleBackdropRefreshes":{}}},"terminalGlass":{{"enabled":{},"strength":{:.3f},"draws":{},"sharpDraws":{},"desktopCopies":{},"shaderFailed":{},"source":"live-framebuffer-and-hyprland-blur","barMatch":{},"barMatchDraws":{},"followsBar":{},"followBarDraws":{},"brightness":{:.3f}}},"wallpaperBlur":{:.3f},"barRefraction":{:.3f},"barBrightness":{:.3f},"lyricsBeatCount":{},"liquidStyle":"{}","backdrop":"sharp-framebuffer","hyprlandBlur":{},"barBlur":{{"enabled":{},"source":"hyprland","topbarDraws":{},"sidebarDraws":{},"waveDraws":{}}},"appearance":{{"blur":{:.3f},"contrast":{:.3f},"reflection":{:.3f},"preview":{}}},"desktop":{{"size":{},"passes":{},"draws":{},"noise":{:.3f},"contrast":{:.3f},"brightness":{:.3f},"vibrancy":{:.3f},"vibrancyDarkness":{:.3f}}},"panel":{{"size":{},"passes":{},"draws":{},"refractionDraws":{},"noise":{:.3f},"contrast":{:.3f},"brightness":{:.3f},"vibrancy":{:.3f},"vibrancyDarkness":{:.3f},"refraction":{:.3f},"edgeWidth":{:.3f},"dispersion":{:.3f},"tint":{:.3f}}},"topbar":{{"size":{},"passes":{},"shapes":{},"draws":{},"refractionDraws":{},"noise":{:.3f},"contrast":{:.3f},"brightness":{:.3f},"vibrancy":{:.3f},"vibrancyDarkness":{:.3f}}},"rightMenu":{{"draws":{},"refractionDraws":{}}},"settings":{{"draws":{},"refractionDraws":{}}},"editor":{{"shapes":{},"draws":{},"refractionDraws":{},"connectedSettings":{}}},"sharedWidgets":{{"blurEnabled":{},"blurDraws":{},"active":{},"shapes":{},"draws":{},"refractionDraws":{},"caustics":{}}},"transition":{{"progress":{:.3f},"animating":{}}},"caustics":{{"enabled":{},"intensity":{:.3f},"lines":{},"animating":{},"frames":{}}}}})",
             __hyprland_api_get_client_hash(), materials, g_luaDispatch ? "\"lua-dispatch\"," : "", cameraCapability,
             lightParallaxEnabled(), g_lightParallaxFrames, lightParallaxEnabled() && std::any_of(g_lightParallax.begin(), g_lightParallax.end(), [](const auto& item) { return item.second.moving(); }),
             g_opticalDamageFrames, g_opticalBlurExpansions, g_opticalDamagePadding, g_staleBackdropRefreshes,

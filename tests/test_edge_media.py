@@ -47,6 +47,9 @@ class EdgeMediaTests(unittest.TestCase):
     def test_hover_extension_full_height_and_demand_lifecycle(self):
         self.run_popover_fixture("EDGE_POPOVER_OK")
 
+    def test_lyrics_hover_balloon_stays_inside_its_surface(self):
+        self.run_popover_fixture("LYRICS_BALLOON_OK", {"VELORA_LYRICS_BALLOON_CHECK": "1"})
+
     def test_whatsapp_outside_input_and_contacts_drag(self):
         self.run_popover_fixture("WHATSAPP_DRAWER_OK", {"VELORA_WHATSAPP_DRAWER_CHECK": "1"})
 

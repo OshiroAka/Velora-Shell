@@ -4674,7 +4674,8 @@ Scope {
                 const active = root.composition
                     && (["liquid", "liquid-glass"].includes(root.composition.barMaterial) || root.composition.nativeBarMaterial)
                     && !(root.infiniteDesktopFrameFoldProgress > .999
-                        && !Platform.NativeBlur.supports("infinite-desktop-dock-compact"))
+                        && (!Platform.NativeBlur.supports("infinite-desktop-dock-compact")
+                            || !Platform.NativeBlur.supports("compact-topbar")))
                     && width > 0 && height > 0
                 if (!active) {
                     Platform.NativeBlur.dispatch("velora-blur:unified-bar-shape " + modelData.name + " 0")
@@ -4683,7 +4684,8 @@ Scope {
                 // Extend the vertical lens above this LayerShell surface.
                 // Its own rounded top edge stays off-screen; the visible
                 // L-shaped corner is drawn separately by the unified frame.
-                const opticalTopOverlap = Math.max(64, root.sidebarCornerRadius * 3)
+                const opticalTopOverlap = Platform.NativeBlur.supports("compact-topbar")
+                    ? Math.max(64, root.sidebarCornerRadius * 3) : 0
                 const top = -opticalTopOverlap / height
                 const rail = root.sidebarVisualWidth / width
                 // Move the vertical lens' medial axis outside the visible
@@ -5315,6 +5317,7 @@ Scope {
                 progress: root.infiniteDesktopFrameFoldProgress
                 reveal: root.infiniteDesktopTargetReveal
                 nativeMaterial: root.composition.nativeBarMaterial && Platform.NativeBlur.supports("infinite-desktop-dock-compact")
+                    && Platform.NativeBlur.supports("compact-topbar")
                 surface: root.sidebarBarMaterialColor()
                 onDockWidthChanged: Qt.callLater(panel.syncUnifiedBarNativeShape)
                 z: 2

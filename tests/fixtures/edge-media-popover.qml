@@ -279,6 +279,25 @@ TestCase {
     verify(charging.gradientProgress>0 && charging.gradientProgress<1,"Panel exit cannot restart the charging deadline")
     charging.charging=false
  }
+ function test_bounded_lyrics_balloon() {
+    edge.motion.reduced=true
+    edge.open()
+    edge.showPage("apps")
+    edge.spotifyHovered=true
+    tryCompare(edge,"labelReveal",1)
+    tryCompare(edge,"labelContent",1)
+    const label=findChild(edge,"edgeLyricsButton")
+    verify(label && label.enabled)
+    compare(edge.page,"apps","Hovering Lyrics must not open its page")
+    compare(edge.bodyWidth,56)
+    compare(label.width,edge.extension.width)
+    compare(label.height,edge.extension.height)
+    verify(edge.extension.y>=edge.bodyY+20,"Label crosses the upper shoulder")
+    verify(edge.extension.y+edge.extension.height<=edge.bodyY+edge.bodyHeight,"Label escapes its menu")
+    edge.showPage("media")
+    compare(edge.extension.width,0,"Hover-only Lyrics extension must leave with the app menu")
+    edge.close()
+ }
  function test_morph_lyrics_lifecycle() {
     fixture.visualizerEnabled=false
     edge.triggerHovered=true; tryCompare(edge,"opened",true)
@@ -421,11 +440,13 @@ TestCase {
  Timer { interval: 250; running: true; onTriggered: {
    const policy=Quickshell.env("VELORA_CHARGING_POLICY_CHECK")==="1"
    const drawer=Quickshell.env("VELORA_WHATSAPP_DRAWER_CHECK")==="1"
+   const balloon=Quickshell.env("VELORA_LYRICS_BALLOON_CHECK")==="1"
    try {
        if (policy) test.test_charging_side_panel_policy()
        else if (drawer) test.test_whatsapp_outside_input_and_contacts_drag()
+       else if (balloon) test.test_bounded_lyrics_balloon()
        else test.test_morph_lyrics_lifecycle()
-       console.info(policy ? "CHARGING_EDGE_POLICY_OK" : drawer ? "WHATSAPP_DRAWER_OK" : "EDGE_POPOVER_OK")
+       console.info(policy ? "CHARGING_EDGE_POLICY_OK" : drawer ? "WHATSAPP_DRAWER_OK" : balloon ? "LYRICS_BALLOON_OK" : "EDGE_POPOVER_OK")
    }
    catch(e) { console.error(policy ? "CHARGING_EDGE_POLICY_FAILED" : drawer ? "WHATSAPP_DRAWER_FAILED" : "EDGE_POPOVER_FAILED", String(e), e.stack) }
    Qt.quit()

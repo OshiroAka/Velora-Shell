@@ -140,6 +140,15 @@ int main(int argc, char** argv) {
         check(alpha(200,32)>250,"Notification connection lost its material");
         check(alpha(200,140)==0,"Top panel paints outside its shape");
         check(alpha(200,220)==0,"Wave was drawn above application windows");
+        four("topbarStrip",200,15,120,15);
+        for (float fold : {0.F,1.F}) {
+            two("frameFold",fold,30);
+            draw();
+            check(alpha(20,15)==0 && alpha(380,15)==0,"Compact topbar still touches the monitor walls");
+            check(alpha(200,15)>250,"Compact topbar lost the central material");
+            check(alpha(200,75)>250,"Detached bar disconnects its open menu");
+        }
+        two("frameFold",0,0);four("topbarStrip",0,0,0,0);
         for (const float mode : {0.F, 1.F, 2.F, 3.F}) {
             four("barMaterial",1,mode,1,0);
             one("barBackgroundHidden",1); draw();

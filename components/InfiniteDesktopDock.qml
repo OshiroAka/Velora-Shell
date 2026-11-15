@@ -107,17 +107,23 @@ Item {
                 const t = index / 160
                 c.lineTo(nose + panel.contourOffset(t), by + bh*t)
             }
-        } else if (panel.extension && panel.extension.width > .01) {
-            const ey = panel.extension.y, ew = panel.extension.width, eh = panel.extension.height
-            c.lineTo(nose, ey + eh + 8)
-            c.bezierCurveTo(nose, ey + eh - 4, nose - ew, ey + eh + 12, nose - ew, ey + eh - 10)
-            c.lineTo(nose - ew, ey + 10)
-            c.bezierCurveTo(nose - ew, ey - 12, nose, ey + 4, nose, ey - 8)
         }
         c.lineTo(nose, by + join)
         c.bezierCurveTo(nose, by - join, edge, by + join, edge, by - join)
         c.lineTo(width, by - join)
         c.closePath()
+        if (panel.contour <= .01 && panel.extension && panel.extension.width > .01) {
+            const x = nose - panel.extension.width, y = panel.extension.y
+            const w = panel.extension.width + Math.min(12, reach), h = panel.extension.height
+            const r = Math.min(10, w/2, h/2)
+            // One fill unions this rounded extension with the menu. Tracing
+            // it through the menu shoulder crossed the contour near Lyrics.
+            c.moveTo(x+r,y); c.lineTo(x+w-r,y)
+            c.arcTo(x+w,y,x+w,y+r,r); c.lineTo(x+w,y+h-r)
+            c.arcTo(x+w,y+h,x+w-r,y+h,r); c.lineTo(x+r,y+h)
+            c.arcTo(x,y+h,x,y+h-r,r); c.lineTo(x,y+r)
+            c.arcTo(x,y,x+r,y,r); c.closePath()
+        }
     }
     // The window mask contains only interactive content, leaving the canvas
     // behind clients and empty regions available to the desktop pan gesture.

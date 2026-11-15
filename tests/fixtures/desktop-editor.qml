@@ -113,7 +113,7 @@ ShellRoot {
         width: 1440; height: 900; visible: true; color: "#101113"
         TestCase { id: pointer; name: "DesktopEditorPointer"; when: false }
         Topbar.ReferenceBar {
-            id: bar; width: parent.width; height: 40; z: 100
+            id: bar; width: Math.min(parent.width, implicitWidth); x: (parent.width-width)/2; height: 40; z: 100
             config: config; theme: theme; clock: clock; media: media; weather: weather
             status: status; system: system; timerService: timerService
             actions: actions; controller: panels; editorController: controller
@@ -158,6 +158,11 @@ ShellRoot {
         return null
     }
     function center(item) { return item.mapToItem(bar,item.width/2,0).x }
+    function textLabel(item) {
+        if (item.currentText !== undefined && item.visible) return item
+        for (const child of item.children||[]) { const found=textLabel(child); if (found) return found }
+        return null
+    }
     function bubbles(item, result) {
         result = result || []
         if (item.objectName === "barItemBubble" || item.objectName.startsWith("barGroupBubble-")) result.push(item)
@@ -180,6 +185,15 @@ ShellRoot {
                         console.info("DESKTOP_EDITOR_OK reload");Qt.quit();return
                     }
                     config.setValue("appearance.reducedMotion",true)
+                    assert(bar.width < window.width && bar.x > 0,"topbar must detach from both screen edges")
+                    assert(Math.abs(bar.x+bar.width/2-window.width/2)<1,"the entire topbar must stay centred")
+                    assert(bar.sectionBounds.center.x===bar.sectionBounds.left.x+bar.sectionBounds.left.width,"sections must stay adjacent")
+                    assert(bar.sectionBounds.right.x===bar.sectionBounds.center.x+bar.sectionBounds.center.width,"right tools must follow the other items")
+                    for (const type of ["timer","clock"]) {
+                        const slot=find(bar,"topbarTool-"+type)
+                        const label=textLabel(slot)
+                        assert(label && slot.width>=label.implicitWidth+20,"text lost the minimum internal padding: "+type)
+                    }
                     const weatherTrigger=find(bar,"topbarWeatherTrigger")
                     const drop=find(weatherTrigger,"weatherWallpaperDropArea")
                     assert(drop.enabled,"weather must accept downloaded wallpapers outside editing")
@@ -242,7 +256,7 @@ ShellRoot {
                     assert(config.topbarLayout.find(item=>item.type==="weather").section==="left","cross-section drag failed")
                 } else if (phase===7) {
                     const view=find(bar,"topbarRightToolsViewport")
-                    if (!resized) { window.width=800;resized=true;return }
+                    if (!resized) { window.width=560;resized=true;return }
                     view.contentX=30
                     originalX=center(find(bar,"topbarTool-notes"))
                     pointer.mousePress(bar,originalX,20,Qt.LeftButton)
@@ -314,7 +328,7 @@ ShellRoot {
                     assert(bar.controlBubbleRuns().length===2,"separate icon runs were merged across an unrelated tool")
                     config.setValue("topbar.toolsOrder",before)
                     historical.applyBarAppearance(56,.6,24,false,16,false)
-                    assert(Math.abs(bar.unit-56/48)<.001 && Math.abs(bar.iconOpacity-.6)<.001 && bar.itemGap===6,"icon settings do not reach horizontal items")
+                    assert(Math.abs(bar.unit-56/48)<.001 && Math.abs(bar.iconOpacity-.6)<.001 && bar.itemGap===0,"icon settings or the packed layout do not reach horizontal items")
                     assert(Math.abs(verticalBar.configuredIconOpacity-.6)<.001,"icon settings do not reach vertical items")
                     historical.applyBarAppearance(48,.8,16,false,16,false)
                 } else if (phase===11) {

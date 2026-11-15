@@ -113,7 +113,7 @@ for (const [physicalW, physicalH] of matrix) for (const scale of [1,1.25,1.5,2])
 }
 const reference=bar.sections(1920,548,330,620,0,20);
 assert.equal(reference.left.x,0); assert.equal(reference.left.width,548);
-assert.equal(reference.center.x,795); assert.equal(reference.right.x,1280);
+assert.equal(reference.center.x,548); assert.equal(reference.right.x,878);
 const original={x:120,y:120,scale:1,rotation:0,opacity:1};
 assert.deepEqual(surface.pose(original,302,294,surface.designBounds(1920,1200,64,false,40,18)),original);
 console.log(JSON.stringify({cases:count,outputs:matrix.length,scales:4,sides:2}));

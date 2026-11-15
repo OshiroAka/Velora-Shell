@@ -21,7 +21,7 @@ Item {
     readonly property var sidebar: shell.infiniteDesktopPanels[host.screen.name] || null
     readonly property color ink: sidebar ? sidebar.desktopIconInk : theme.textPrimary
     readonly property real glyphSize: sidebar ? sidebar.desktopIconSize : 22
-    readonly property real targetWidth: tools.length * 34 + 24
+    readonly property real targetWidth: tools.length * 32
     width: targetWidth * progress
     height: 40
     opacity: reveal
@@ -34,7 +34,7 @@ Item {
     }
     Flickable {
         anchors.fill: parent
-        contentWidth: toolsRow.width + 24
+        contentWidth: toolsRow.width
         contentHeight: height
         clip: true
         interactive: root.reveal > .999 && contentWidth > width
@@ -47,13 +47,13 @@ Item {
             surfaceTint: root.theme.barSurface
             solid: root.config.barItemBubblesSolid
             liquid: root.config.barItemBubblesEnabled && root.config.barItemBubblesLiquid
-            x: 16; y: 6; height: 28
-            width: (root.rightSide ? root.tools.length : root.tools.length - 1) * 34 - 8
+            x: 0; y: 6; height: 28
+            width: (root.rightSide ? root.tools.length : root.tools.length - 1) * 32
             shown: root.config.barItemBubblesEnabled
         }
         Row {
             id: toolsRow
-            x: 12
+            x: 0
             height: root.height
             Repeater {
                 model: root.tools
@@ -62,7 +62,7 @@ Item {
                     required property string modelData
                     readonly property string type: modelData
                     readonly property bool popoverTool: !["media", "whatsapp", "avatar"].includes(type)
-                    width: 34
+                    width: 32
                     height: root.height
                     theme: root.theme
                     reducedMotion: root.config.reducedMotion

@@ -26,7 +26,8 @@ Item {
     property int opticsGeneration: 0
     property alias barSurfaceItem: background
     property real leftInset: 0
-    property real rightInset: 20
+    property real rightInset: 0
+    implicitWidth: leftDesktopTools.width + sectionWidth("left") + sectionWidth("center") + toolRow.width
     signal geometryChanged()
     function sectionWidth(section) {
         return config.topbarItemsForSection(section, false).reduce((sum, item) => sum + layoutItemWidth(item.type), 0)
@@ -47,9 +48,16 @@ Item {
     readonly property var barTheme: shell ? shell.unifiedTheme : null
     readonly property real unit: barTheme ? Math.max(.67, Math.min(1.17, barTheme.barIconSize / 48)) : 1
     readonly property real iconOpacity: barTheme ? barTheme.barIconOpacity : 1
-    readonly property real itemGap: barTheme ? barTheme.barIconSpacing / 4 : 1
-    readonly property bool compact: width < 1280
-    readonly property real density: width < 760 ? 0.8 : 1
+    readonly property real itemGap: 0
+    readonly property bool compact: host.screen.width < 1280
+    readonly property real density: host.screen.width < 760 ? 0.8 : 1
+    TextMetrics {
+        id: dateMetrics
+        font.family: root.theme.bodyFont; font.pixelSize: 12
+        text: root.clock.locale().toString(root.clock.now, "ddd d MMM  HH:mm").replace(/\./g, "")
+    }
+    TextMetrics { id: timerMetrics; font.family: root.theme.bodyFont; font.pixelSize: 14; text: root.timerService.barText || root.timerService.timerText }
+    TextMetrics { id: messageMetrics; font.family: root.theme.bodyFont; font.pixelSize: 12; text: root.system.oneThing || "What is the one thing?" }
     readonly property bool editing: editorController.shown && editorController.mode === "editing"
         && editorController.editSpace === "desktop"
     readonly property var visibleTools: config.topbarToolsOrder.filter(type =>
@@ -191,11 +199,11 @@ Item {
             search: "Busca", controls: "Configurações", weather: "Previsão do tempo", clock: "Data e calendário"})[type] || type
     }
     function legacyItemWidth(type) {
-        const widths = { workspaces: 208, context: compact ? 130 : 250,
-            clock: compact ? 210 : 330, media: compact ? 100 : 140,
-            wifi: 54, volume: 54, battery: 86, settings: 48, avatar: 48,
-            search: 48, weather: 124, brand: 90 }
-        return (widths[type] || 48) * unit
+        const widths = { workspaces: 176, context: compact ? 130 : 200,
+            clock: dateMetrics.width + 4, media: 100,
+            wifi: 30, volume: 30, battery: 38, settings: 30, avatar: 32,
+            search: 30, weather: 72, brand: 60 }
+        return (widths[type] || 32) * unit
     }
     function legacyGlyph(type) {
         if (type === "media") return media.playing ? "pause" : "play"
@@ -226,7 +234,7 @@ Item {
     Loader {
         id: leftDesktopTools
         active: !!root.shell && root.desktopMorphProgress > .0001
-        width: 228 * root.desktopMorphProgress
+        width: 192 * root.desktopMorphProgress
         height: root.height
         z: 5
         sourceComponent: InfiniteDesktopTools {
@@ -297,7 +305,7 @@ Item {
                     solid: root.config.barItemBubblesSolid
                     liquid: root.config.barItemBubblesEnabled && root.config.barItemBubblesLiquid
                     objectName: "barItemBubble"
-                    anchors.fill: parent; anchors.margins: 6
+                    anchors.fill: parent; anchors.topMargin: 6; anchors.bottomMargin: 6
                     shown: root.config.barItemBubblesEnabled
                 }
                 Rectangle {
@@ -317,7 +325,7 @@ Item {
                     id: entryVisual
                     opacity: root.iconOpacity
                     anchors.centerIn: parent
-                    spacing: 8 * root.unit
+                    spacing: 4 * root.unit
                     visible: !["workspaces", "context"].includes(entry.type)
                     Components.VeloraMaterialIcon {
                         scale: legacyIconMotion.zoom
@@ -364,17 +372,10 @@ Item {
                     }
                 }
 
-                Rectangle {
-                    anchors.right: parent.right
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: 1; height: 27 * root.unit
-                    color: root.theme.borderSubtle
-                    visible: ["workspaces", "media", "battery"].includes(entry.type)
-                }
                 Column {
-                    x: 14 * root.unit
+                    x: 8 * root.unit
                     anchors.verticalCenter: parent.verticalCenter
-                    width: parent.width - 24 * root.unit
+                    width: parent.width - 16 * root.unit
                     visible: entry.type === "context"
                     opacity: root.iconOpacity
                     spacing: -1 * root.unit
@@ -442,7 +443,7 @@ Item {
                 Loader {
                     anchors.centerIn: parent
                     active: entry.type === "workspaces"
-                    width: Math.min(176, entry.width - 32); height: 32
+                    width: Math.min(176, entry.width); height: 32
                     sourceComponent: WorkspaceSwitcher {
                         opacity: root.iconOpacity
                         theme: root.theme
@@ -524,9 +525,9 @@ Item {
                     root.toolItemsRevision
                     return toolRepeater.count > modelData.last ? toolRepeater.itemAt(modelData.last) : null
                 }
-                x: firstItem ? toolRow.x + firstItem.x + 4 : 0
+                x: firstItem ? toolRow.x + firstItem.x : 0
                 y: 6; height: Math.max(0, root.height - 12)
-                width: firstItem && lastItem ? lastItem.x + lastItem.width - firstItem.x - 8 : 0
+                width: firstItem && lastItem ? lastItem.x + lastItem.width - firstItem.x : 0
                 shown: !!firstItem && !!lastItem && width > 0
             }
         }
@@ -561,21 +562,11 @@ Item {
                 bubblesSolid: root.config.barItemBubblesSolid
                 bubblesLiquid: root.config.barItemBubblesLiquid
                 reducedMotion: root.config.reducedMotion
-                width: (type === "clock" ? 178 : type === "thing" ? (root.width < 1000 ? 90 : 160)
-                    : type === "timer" ? 74 : type === "battery" ? 44 : 36) * root.density
+                width: (type === "clock" ? Math.ceil(dateMetrics.width) + 24
+                    : type === "thing" ? Math.min(240, Math.max(64, Math.ceil(messageMetrics.width) + 24))
+                    : type === "timer" ? Math.ceil(timerMetrics.width) + 24 : type === "battery" ? 38 : 34)
                 height: root.height
                 label: root.label(type)
-                Rectangle {
-                    // A trailing divider for message, timer and search; avoid
-                    // doubling it when the calendar follows one of them.
-                    visible: ["thing", "timer"].includes(item.type)
-                        || (item.type === "clock" && item.index > 0
-                            && !["thing", "timer"].includes(root.visibleTools[item.index - 1]))
-                    x: item.type === "clock" ? 0 : parent.width - 1
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: 1; height: 16; radius: 0.5
-                    color: root.theme.withAlpha(root.theme.textPrimary, 0.32)
-                }
                 selected: panelTool && root.controller.owner === root.host && root.controller.activeType === type
                 dragToCreate: type === "notes" && !root.editing
                 onHoveredChanged: {
@@ -671,7 +662,7 @@ Item {
                     anchors.centerIn: parent
                     shown: item.type === "timer"
                     opacity: root.theme.manualPalette ? 1 : root.iconOpacity
-                    width: parent.width - (root.config.barItemBubblesEnabled ? 14 : 10)
+                    width: parent.width - 4
                     height: root.config.barItemBubblesEnabled ? 28 : 25
                     radius: 7
                     color: nativeLiquid ? "transparent" : root.timerService.countdown.running || root.timerService.finished
@@ -704,7 +695,7 @@ Item {
                     objectName: "barExistingBubble-message"
                     anchors.centerIn: parent
                     shown: item.type === "thing"
-                    width: parent.width - (root.config.barItemBubblesEnabled ? 12 : 16)
+                    width: parent.width - 4
                     height: root.config.barItemBubblesEnabled ? 28 : 25
                     radius: 7
                     color: nativeLiquid ? "transparent" : root.config.barItemBubblesEnabled ? bubbleColor : root.theme.withAlpha(root.theme.textPrimary, 0.07)
@@ -713,7 +704,7 @@ Item {
                 }
                 Text {
                     anchors.centerIn: parent
-                    width: parent.width - 28
+                    width: parent.width - 20
                     visible: item.type === "thing"
                     opacity: root.iconOpacity
                     text: item.type === "thing" ? root.system.oneThing || "What is the one thing?"

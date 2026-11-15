@@ -37,7 +37,8 @@ FocusScope {
         surfaceTint: root.theme.barSurface
         solid: root.bubblesSolid
         liquid: root.bubblesLiquid
-        anchors.fill: parent; anchors.margins: 6
+        anchors.fill: parent; anchors.topMargin: 6; anchors.bottomMargin: 6
+        anchors.leftMargin: 4; anchors.rightMargin: 4
         shown: root.bubblesEnabled
     }
     Rectangle {

@@ -5,7 +5,7 @@ function dockWidth(width, scale, count) {
     if (!count) return 0
     return Math.min(820 * scale, width * .43, (count * 44 + Math.max(0, count - 1) * 6 + 24) * scale)
 }
-function shoulder(width, scale) { return Math.min(140 * scale, width * .09) }
+function shoulder(width, scale) { return Math.min(28 * scale, width * .04) }
 function makeWorkspaceTrack() {
     const points = [], start = Math.acos(166 / 188), end = Math.acos(92 / 188)
     let length = 0

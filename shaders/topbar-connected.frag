@@ -22,6 +22,7 @@ layout(std140, binding = 0) uniform buf {
     vec4 timerMetrics;
     float timerRadius;
     float backgroundHidden;
+    vec4 strip;
 } ubuf;
 float box(vec2 p, vec2 halfSize, float r) {
     vec2 q = abs(p) - halfSize + r;
@@ -65,7 +66,8 @@ vec3 barLightColor(vec3 base, vec2 point, vec4 light, float span, bool alert) {
 }
 void main() {
     vec2 p = qt_TexCoord0 * ubuf.surfaceSize;
-    float d = attach(ubuf.backgroundHidden > 0.5 ? 1e6 : p.y - ubuf.shapeMetrics.x, p, ubuf.panel, ubuf.shapeMetrics, ubuf.panelRadius);
+    float base = box(p - ubuf.strip.xy - ubuf.strip.zw*.5, ubuf.strip.zw*.5, min(8.0, ubuf.strip.w*.5));
+    float d = attach(ubuf.backgroundHidden > 0.5 ? 1e6 : base, p, ubuf.panel, ubuf.shapeMetrics, ubuf.panelRadius);
     d = attach(d, p, ubuf.executionPanel, ubuf.executionMetrics, ubuf.executionRadius);
     d = attach(d, p, ubuf.chargingPanel, ubuf.chargingMetrics, ubuf.chargingRadius);
     d = attach(d, p, ubuf.timerPanel, ubuf.timerMetrics, ubuf.timerRadius);

@@ -56,6 +56,7 @@ Variants {
         readonly property bool editingBar: root.editorController.shown
             && root.editorController.mode === "editing" && root.editorController.editSpace === "desktop"
         readonly property int stripHeight: 40
+        readonly property bool nativeCompactBar: root.nativeBarMaterial && Platform.NativeBlur.supports("compact-topbar")
         readonly property bool wallpaperMounted: wallpaperPicker.mounted
         readonly property bool menuMounted: popover.mounted || wallpaperMounted
         readonly property rect menuRect: wallpaperMounted ? wallpaperPicker.panelRect : popover.panelRect
@@ -106,7 +107,7 @@ Variants {
         // the supplied video. There are no hidden optical islands underneath.
         BackgroundEffect.blurRegion: Region {
             item: root.config.referenceAppearance && root.config.barBlurEnabled
-                && (root.config.barMaterial === "glass" || !Platform.NativeBlur.supports("topbar-connected")) ? connectedSurface : null
+                && (root.config.barMaterial === "glass" || !nativeCompactBar) ? connectedSurface : null
         }
 
         // The reference panel owns its complete 40 px strip.
@@ -174,9 +175,10 @@ Variants {
                 t.x / width, t.y / height, t.width / width, t.height / height,
                 timerAlert.anchorX / width, timerAlert.neckHalfWidth / width,
                 timerAlert.cornerRadius / width, timerAlert.joinRadius / width,
-                timerAlert.anchorX / width, root.timerService.alertPhase, root.timerService.alertStrength]
+                timerAlert.anchorX / width, root.timerService.alertPhase, root.timerService.alertStrength,
+                barLoader.x / width, barLoader.width / width]
             Platform.NativeBlur.dispatch("velora-blur:topbar-connected " + screen.name + " "
-                + (["liquid", "liquid-glass"].includes(root.config.barMaterial) || root.nativeBarMaterial ? 1 : 0) + " "
+                + (nativeCompactBar ? 1 : 0) + " "
                 + values.map(value => Number(value).toFixed(8)).join(" "))
         }
         property alias surfaceDirty: surfacePublisher.dirty
@@ -214,6 +216,7 @@ Variants {
                 timerAlert.visible ? timerAlert.y + timerAlert.height + 12 : 0,
                 chargingMorph.visible ? chargingMorph.y + chargingMorph.height + 12 : 0)
             barHeight: topbarWindow.stripHeight
+            stripRect: Qt.rect(barLoader.x, 0, barLoader.width, topbarWindow.stripHeight)
             backgroundHidden: root.config.barBackgroundEnabled === false ? 1 : 0
             panelRect: topbarWindow.menuRect
             anchorX: topbarWindow.menuAnchor
@@ -239,10 +242,10 @@ Variants {
             timerJoin: timerAlert.joinRadius
             timerProgress: root.timerService.alertPhase
             timerStrength: root.timerService.alertStrength
-            fillColor: root.nativeBarMaterial ? "transparent" : root.theme.barSurface
+            fillColor: topbarWindow.nativeCompactBar ? "transparent" : root.theme.barSurface
             lineColor: topbarWindow.wallpaperMounted && !Platform.NativeBlur.supports("topbar-connected")
                 ? root.theme.borderSubtle
-                : ["liquid", "liquid-glass"].includes(root.config.barMaterial) || root.nativeBarMaterial ? "transparent" : root.theme.borderSubtle
+                : topbarWindow.nativeCompactBar ? "transparent" : root.theme.borderSubtle
             onNeckHalfWidthChanged: topbarWindow.surfaceDirty = true
         }
         Components.VeloraMediaBackdrop {
@@ -376,7 +379,7 @@ Variants {
             leftInset: popover.leftInset
             rightInset: popover.rightInset
             anchorX: Math.max(leftInset, Math.min(topbarWindow.width - rightInset,
-                barLoader.item ? barLoader.item.timerAnchorX : topbarWindow.width / 2))
+                barLoader.item ? barLoader.x + barLoader.item.timerAnchorX : topbarWindow.width / 2))
             onSurfaceRectChanged: topbarWindow.surfaceDirty = true
             onNeckHalfWidthChanged: topbarWindow.surfaceDirty = true
             onAnchorXChanged: topbarWindow.surfaceDirty = true
@@ -398,7 +401,7 @@ Variants {
             reducedMotion: root.config.reducedMotion
             barHeight: topbarWindow.stripHeight
             anchorX: Math.max(leftInset, Math.min(topbarWindow.width - rightInset,
-                barLoader.item ? barLoader.item.batteryAnchorX : 0))
+                barLoader.item ? barLoader.x + barLoader.item.batteryAnchorX : 0))
             availableWidth: topbarWindow.width
             availableHeight: topbarWindow.height
             leftInset: popover.leftInset
@@ -423,6 +426,7 @@ Variants {
         // edges keep the bar's own material.
         Canvas {
             id: topScreenCorners
+            visible: barLoader.width >= topbarWindow.width - 1
             z: 20
             width: topbarWindow.width
             height: topbarWindow.stripHeight + 3
@@ -462,9 +466,11 @@ Variants {
             id: barLoader
             z: 4
             anchors.top: parent.top
-            anchors.left: parent.left
-            anchors.right: parent.right
+            x: (topbarWindow.width - width) / 2
+            width: Math.min(topbarWindow.width, item ? item.implicitWidth : topbarWindow.width)
             height: topbarWindow.stripHeight
+            onXChanged: { topbarWindow.surfaceDirty = true; Qt.callLater(popover.refreshAnchor) }
+            onWidthChanged: { topbarWindow.surfaceDirty = true; Qt.callLater(popover.refreshAnchor) }
             sourceComponent: referenceComponent
         }
 
@@ -474,10 +480,13 @@ Variants {
                 shell: root.notificationSource
                 desktopMorphProgress: root.desktopMorphProgress
                 desktopTargetReveal: root.desktopTargetReveal
-                onGeometryChanged: Qt.callLater(popover.refreshAnchor)
+                onGeometryChanged: {
+                    topbarWindow.surfaceDirty = true
+                    Qt.callLater(popover.refreshAnchor)
+                }
                 controller: root.controller; host: topbarWindow
                 system: root.system; timerService: root.timerService
-                width: topbarWindow.width; height: topbarWindow.stripHeight
+                width: barLoader.width; height: topbarWindow.stripHeight
                 config: root.config; theme: root.theme; clock: root.clock
                 media: root.media; weather: root.weather
                 status: root.status; actions: root.actions

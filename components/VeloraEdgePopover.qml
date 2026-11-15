@@ -142,7 +142,8 @@ VeloraRailPopover {
         ? ({y: bodyY, width: embeddedContacts || !whatsappContactsVisible ? 0
             : contactsWidth * contactsReveal * reveal * Math.min(1,contactsFold * contactsHeight / Math.max(1,contactsWidth)),
             height: contactsHeight * contactsExtent})
-        : ({y: bodyY + 12, width: 104 * labelReveal * reveal, height: 44})
+        : ({y: bodyY + Math.min(24, Math.max(0, (bodyHeight - 44) / 2)),
+            width: page === "apps" && pendingPage === "apps" ? 104 * labelReveal * reveal : 0, height: 44})
     Behavior on preferredWidth { NumberAnimation { duration: root.reducedMotion ? 0 : root.pageMorphDuration; easing.type: Easing.InOutCubic } }
     Behavior on preferredHeight { NumberAnimation { duration: root.reducedMotion ? 0 : root.pageMorphDuration; easing.type: Easing.InOutCubic } }
     Behavior on contour { NumberAnimation { duration: root.reducedMotion ? 0 : root.pageMorphDuration; easing.type: Easing.InOutCubic } }
@@ -273,7 +274,7 @@ VeloraRailPopover {
             id: lyricsButton
             objectName: "edgeLyricsButton"
             visible: !root.whatsappPage
-            width: 104; height: 44
+            width: parent.width; height: parent.height
             text: "Lyrics"
             opacity: root.labelContent
             enabled: root.opened && root.lyricsAvailable && opacity > .95
@@ -286,6 +287,7 @@ VeloraRailPopover {
             contentItem: Text {
                 text: lyricsButton.text; color: root.ink; font.family: root.family; font.pixelSize: 14
                 horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                elide: Text.ElideRight; maximumLineCount: 1
             }
         }
         Loader {
