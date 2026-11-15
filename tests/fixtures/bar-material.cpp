@@ -155,6 +155,9 @@ int main(int argc, char** argv) {
         check(alpha(1,15)>250 && alpha(398,15)>250,"Top frame does not meet the side borders");
         check(alpha(20,6)==0 && alpha(380,6)==0,"Thin top border fills the empty space beside the bar");
         check(alpha(77,5)>0 && alpha(77,12)==0,"Bar join lost its small concave curve");
+        for (int x : {20,40,60,339,359,379})
+            for (int y : {28,29,30,31})
+                check(alpha(x,y)==0,"Folded topbar leaves a thin line across the desktop");
         for (int x=0;x<WIDTH/2;++x)
             for (int y=0;y<30;++y)
                 check(std::abs(int(alpha(x,y))-int(alpha(WIDTH-x-1,y)))<=1,

@@ -58,7 +58,7 @@ Variants {
         readonly property int stripHeight: 40
         readonly property bool infiniteMode: root.desktopMorphProgress > .0001
         readonly property bool nativeCompactBar: root.nativeBarMaterial
-            && (!infiniteMode || Platform.NativeBlur.supports("infinite-top-frame"))
+            && (!infiniteMode || Platform.NativeBlur.supports("infinite-top-frame-continuous"))
         readonly property bool wallpaperMounted: wallpaperPicker.mounted
         readonly property bool menuMounted: popover.mounted || wallpaperMounted
         readonly property rect menuRect: wallpaperMounted ? wallpaperPicker.panelRect : popover.panelRect
