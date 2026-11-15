@@ -54,6 +54,7 @@ var categories = [
 ]
 
 var entries = [
+    {"id":"infiniteDesk.pinnedItems","name":"Apps fixados na barra inferior","page":"infiniteDesk","section":"main","target":"infiniteDesk.pinnedItems","label":"","action":"","aliases":"InfiniteDesk; dock; ícones; aplicativos; fixar; remover; ordem"},
     {"id":"infiniteDesk.spacing","name":"Afastamento das janelas","page":"infiniteDesk","section":"main","target":"infiniteDesk.spacing","label":"","action":"","aliases":"InfiniteDesk; misturar; distância; próximas; distantes; espaço; separação"},
     {"id":"infiniteDesk.sensitivity","name":"Sensibilidade do arraste","page":"infiniteDesk","section":"main","target":"infiniteDesk.sensitivity","label":"","action":"","aliases":"InfiniteDesk; canvas; touchpad; dois dedos; mouse; velocidade"},
     {"id":"infiniteDesk.sizes","name":"Tamanhos ao misturar janelas","page":"infiniteDesk","section":"main","target":"infiniteDesk.sizes","label":"","action":"","aliases":"InfiniteDesk; automático; aleatório; largura; altura; apagar; remover"},

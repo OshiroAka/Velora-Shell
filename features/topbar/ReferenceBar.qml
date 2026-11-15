@@ -29,8 +29,9 @@ Item {
     property real rightInset: 20
     signal geometryChanged()
     function sectionWidth(section) {
-        return config.topbarItemsForSection(section, false).reduce((sum, item) => sum + legacyItemWidth(item.type), 0)
+        return config.topbarItemsForSection(section, false).reduce((sum, item) => sum + layoutItemWidth(item.type), 0)
     }
+    function layoutItemWidth(type) { return type === "workspaces" ? legacyItemWidth(type) * (1 - desktopMorphProgress) : legacyItemWidth(type) }
     readonly property var sectionBounds: BarGeometry.sections(width,
         sectionWidth("left"), sectionWidth("center"), toolRow.width, leftInset + leftDesktopTools.width, rightInset + rightDesktopTools.width)
     onSectionBoundsChanged: geometryChanged()
@@ -138,7 +139,7 @@ Item {
             let x = 0
             for (const item of items) {
                 if (item.id === identifier) break
-                x += legacyItemWidth(item.type)
+                x += layoutItemWidth(item.type)
             }
             return x
         }
@@ -264,7 +265,9 @@ Item {
                 readonly property bool panelSelected: panelType.length > 0
                     && root.controller.owner === root.host && root.controller.activeType === panelType
                 readonly property bool wallpaperDropHovered: wallpaperDrop.containsDrag
-                width: root.legacyItemWidth(type)
+                width: root.layoutItemWidth(type)
+                visible: type !== "workspaces" || root.desktopMorphProgress < .999
+                opacity: type === "workspaces" ? 1 - root.desktopMorphProgress : 1
                 height: root.height
                 z: root.layoutDragId === modelData.id ? 10 : 0
                 transform: Translate {

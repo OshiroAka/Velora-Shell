@@ -12,6 +12,7 @@ Scope {
     id: root
 
     required property var shell
+    readonly property var configStore: config
     readonly property bool lockOccluding: preview.occluding
     readonly property bool referenceAppearance: config.referenceAppearance
     readonly property bool barItemBubblesEnabled: config.barItemBubblesEnabled

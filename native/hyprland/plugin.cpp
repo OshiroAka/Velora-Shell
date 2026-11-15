@@ -258,6 +258,7 @@ struct STopbarMorph {
     float sideLabelWidth = 0.F;
     float sideLabelHeight = 0.F;
     float desktopFold = 0.F;
+    float desktopDockWidth = 0.F;
     // Optional execution/notification panel, independent of the open menu.
     std::array<float, 8> statusPanel{};
     // Charging extends the same bar while menus and notifications stay open.
@@ -447,6 +448,8 @@ uniform float sideWaveWidth;
 uniform float sideCurve[21];
 uniform float frameRadius;
 uniform vec2 frameFold; // progress, moving bottom in framebuffer coordinates
+uniform float infiniteDockUnit;
+uniform float infiniteDockWidth;
 uniform vec4 sideLabel;
 uniform vec2 frost;
 uniform vec4 barTint;
@@ -609,6 +612,33 @@ float sideWaveSdf(vec2 pixel) {
     return pixel.x - edge;
 }
 
+float infiniteCornerSdf(vec2 p) {
+    float q = clamp(1.0 - p.x / 246.0, 0.0, 1.0);
+    float floorHeight = 4.0 + 160.0*q*q;
+    float slope = 320.0*q/246.0;
+    return (-floorHeight - p.y) / sqrt(1.0+slope*slope);
+}
+
+float infiniteDockSdf(vec2 pixel) {
+    if (infiniteDockUnit <= 0.0 || frameFold.x <= .65) return 1e6;
+    float reveal = smoothstep(.65, 1.0, frameFold.x);
+    float s = infiniteDockUnit;
+    // Logical geometry matches InfiniteDockGeometry: a curved workspace
+    // shelf, a broad central plateau, and the unoccupied right corner.
+    vec2 p = vec2(pixel.x / s, (pixel.y - fullSize.y) / (s * reveal));
+    float w = fullSize.x / s;
+    float left = infiniteCornerSdf(p);
+    float right = infiniteCornerSdf(vec2(w - p.x, p.y));
+    if (infiniteDockWidth <= 0.0) return min(left, right) * s * reveal;
+    float halfWidth = infiniteDockWidth / (2.0*s);
+    float shoulder = min(140.0, w * .09);
+    float t = clamp((abs(p.x - w*.5) - halfWidth) / shoulder, 0.0, 1.0);
+    float floorHeight = 54.0 - 50.0 * t*t*(3.0-2.0*t);
+    float slope = 50.0 * 6.0*t*(1.0-t)/shoulder;
+    float dock = (-floorHeight - p.y) / sqrt(1.0+slope*slope);
+    return min(left, min(right, dock)) * s * reveal;
+}
+
 float frameWithoutSettingsSdf(vec2 pixel) {
     float distance = -roundedBoxSdf(pixel - frameInterior.xy - frameInterior.zw * 0.5,
                          frameInterior.zw * 0.5, frameRadius);
@@ -627,6 +657,7 @@ float frameWithoutSettingsSdf(vec2 pixel) {
         if (pixel.y >= frameInterior.y)
             distance = max(distance, min(pixel.x - leftEnd, rightStart - pixel.x));
     }
+    distance = min(distance, infiniteDockSdf(pixel));
     if (barBackgroundHidden > .5) distance = 1e6;
     if (barMaterial.x > .5 && oppositePanel.z > .01)
         distance = smoothUnion(distance, oppositePanelSdf(pixel), min(24.0, oppositePanel.z));
@@ -2204,6 +2235,8 @@ bool renderLiquidBackdrop(VeloraCompat::RenderContext& ctx, WP<CTexPassElement> 
         glUniform1fv(glGetUniformLocation(shader->program(), "barBands"), 96, material->second.bands.data());
     }
     const float kittyScale = layer && layer->m_monitor ? sc<float>(layer->m_monitor->m_scale) : 1.F;
+    glUniform1f(glGetUniformLocation(shader->program(), "infiniteDockUnit"), 0.F);
+    glUniform1f(glGetUniformLocation(shader->program(), "infiniteDockWidth"), 0.F);
     // One lens field across connected bars/frame passes; changing the draw
     // rectangle must not introduce an optical seam at their junctions.
     const CBox kittyBox{0, 0, textureWidth, textureHeight};
@@ -2225,6 +2258,10 @@ bool renderLiquidBackdrop(VeloraCompat::RenderContext& ctx, WP<CTexPassElement> 
             ? g_connectedTopbars.find(layer->m_monitor->m_name) : g_connectedTopbars.end();
         const float top = found != g_connectedTopbars.end()
             ? found->second.barHeight * textureHeight : sc<float>(surfaceBox.y);
+        glUniform1f(glGetUniformLocation(shader->program(), "infiniteDockUnit"),
+            kittyScale * std::min({1.F, textureWidth / kittyScale / 1280.F,
+                (textureHeight - top) / kittyScale / 720.F}));
+        glUniform1f(glGetUniformLocation(shader->program(), "infiniteDockWidth"), frameShape.desktopDockWidth * textureWidth);
         const float remaining = 1.F - frameShape.desktopFold;
         const float rise = std::clamp((frameShape.desktopFold - .35F) / .65F, 0.F, 1.F);
         const float railRemaining = std::min(1.F, remaining / .22F);
@@ -3164,6 +3201,12 @@ SDispatchResult unifiedBarShapeDispatcher(std::string arguments) {
             return {.success = false, .error = "invalid desktop fold progress"};
     }
     shape.desktopFold = fold;
+    float dockWidth = 0.F;
+    if (input >> dockWidth) {
+        if (!std::isfinite(dockWidth) || dockWidth < 0.F || dockWidth > .5F)
+            return {.success = false, .error = "invalid infinite desktop dock width"};
+    }
+    shape.desktopDockWidth = dockWidth;
     shape.oppositeLabel = {std::clamp(oppositeLabel[0], 0.F, 1.F),
         std::clamp(oppositeLabel[1], 0.F, 0.25F), std::clamp(oppositeLabel[2], 0.F, 1.F)};
     shape.sideLabelY = std::clamp(labelY, 0.F, 1.F);
@@ -3174,7 +3217,7 @@ SDispatchResult unifiedBarShapeDispatcher(std::string arguments) {
     shape.sideBodyHeight = std::clamp(bodyHeight, 0.F, 1.F);
     shape.bottomHeight = std::clamp(bottomHeight, 0.F, 0.1F);
     damageTopbarMorph(previous, shape, monitor);
-    if (previous.desktopFold != shape.desktopFold)
+    if (previous.desktopFold != shape.desktopFold || previous.desktopDockWidth != shape.desktopDockWidth)
         damageAllMonitors();
     return {};
 }
@@ -4345,7 +4388,7 @@ std::string status(VeloraCompat::OutputFormat format, std::string) {
 
     if (format == VeloraCompat::JSON_FORMAT)
         return std::format(
-            R"({{"active":true,"abi":"{}","materials":{},"capabilities":[{}"alpha-mask","desktop-bar-material","transition","dial","caustics","topbar-connected","bar-blur","widget-blur","liquid-style","wallpaper","topbar-shape","unified-bar-shape","topbar-settle","right-menu-shape","settings-shape","settings-connected","settings-side-connected","editor-shape","appearance","lock-layout","shared-widgets-shape","wallpaper-transition","terminal-glass","terminal-glass-control","terminal-bar-match","bar-refraction","terminal-follow-bar","terminal-brightness","bar-brightness","lyrics-beat","lyrics-beat-palette","optical-glass","bar-bubble-liquid"{}],"opticalDamage":{{"frames":{},"blurExpansions":{},"padding":{},"staleBackdropRefreshes":{}}},"terminalGlass":{{"enabled":{},"strength":{:.3f},"draws":{},"sharpDraws":{},"desktopCopies":{},"shaderFailed":{},"source":"live-framebuffer-and-hyprland-blur","barMatch":{},"barMatchDraws":{},"followsBar":{},"followBarDraws":{},"brightness":{:.3f}}},"wallpaperBlur":{:.3f},"barRefraction":{:.3f},"barBrightness":{:.3f},"lyricsBeatCount":{},"liquidStyle":"{}","backdrop":"sharp-framebuffer","hyprlandBlur":{},"barBlur":{{"enabled":{},"source":"hyprland","topbarDraws":{},"sidebarDraws":{},"waveDraws":{}}},"appearance":{{"blur":{:.3f},"contrast":{:.3f},"reflection":{:.3f},"preview":{}}},"desktop":{{"size":{},"passes":{},"draws":{},"noise":{:.3f},"contrast":{:.3f},"brightness":{:.3f},"vibrancy":{:.3f},"vibrancyDarkness":{:.3f}}},"panel":{{"size":{},"passes":{},"draws":{},"refractionDraws":{},"noise":{:.3f},"contrast":{:.3f},"brightness":{:.3f},"vibrancy":{:.3f},"vibrancyDarkness":{:.3f},"refraction":{:.3f},"edgeWidth":{:.3f},"dispersion":{:.3f},"tint":{:.3f}}},"topbar":{{"size":{},"passes":{},"shapes":{},"draws":{},"refractionDraws":{},"noise":{:.3f},"contrast":{:.3f},"brightness":{:.3f},"vibrancy":{:.3f},"vibrancyDarkness":{:.3f}}},"rightMenu":{{"draws":{},"refractionDraws":{}}},"settings":{{"draws":{},"refractionDraws":{}}},"editor":{{"shapes":{},"draws":{},"refractionDraws":{},"connectedSettings":{}}},"sharedWidgets":{{"blurEnabled":{},"blurDraws":{},"active":{},"shapes":{},"draws":{},"refractionDraws":{},"caustics":{}}},"transition":{{"progress":{:.3f},"animating":{}}},"caustics":{{"enabled":{},"intensity":{:.3f},"lines":{},"animating":{},"frames":{}}}}})",
+            R"({{"active":true,"abi":"{}","materials":{},"capabilities":[{}"alpha-mask","infinite-desktop-dock","desktop-bar-material","transition","dial","caustics","topbar-connected","bar-blur","widget-blur","liquid-style","wallpaper","topbar-shape","unified-bar-shape","topbar-settle","right-menu-shape","settings-shape","settings-connected","settings-side-connected","editor-shape","appearance","lock-layout","shared-widgets-shape","wallpaper-transition","terminal-glass","terminal-glass-control","terminal-bar-match","bar-refraction","terminal-follow-bar","terminal-brightness","bar-brightness","lyrics-beat","lyrics-beat-palette","optical-glass","bar-bubble-liquid"{}],"opticalDamage":{{"frames":{},"blurExpansions":{},"padding":{},"staleBackdropRefreshes":{}}},"terminalGlass":{{"enabled":{},"strength":{:.3f},"draws":{},"sharpDraws":{},"desktopCopies":{},"shaderFailed":{},"source":"live-framebuffer-and-hyprland-blur","barMatch":{},"barMatchDraws":{},"followsBar":{},"followBarDraws":{},"brightness":{:.3f}}},"wallpaperBlur":{:.3f},"barRefraction":{:.3f},"barBrightness":{:.3f},"lyricsBeatCount":{},"liquidStyle":"{}","backdrop":"sharp-framebuffer","hyprlandBlur":{},"barBlur":{{"enabled":{},"source":"hyprland","topbarDraws":{},"sidebarDraws":{},"waveDraws":{}}},"appearance":{{"blur":{:.3f},"contrast":{:.3f},"reflection":{:.3f},"preview":{}}},"desktop":{{"size":{},"passes":{},"draws":{},"noise":{:.3f},"contrast":{:.3f},"brightness":{:.3f},"vibrancy":{:.3f},"vibrancyDarkness":{:.3f}}},"panel":{{"size":{},"passes":{},"draws":{},"refractionDraws":{},"noise":{:.3f},"contrast":{:.3f},"brightness":{:.3f},"vibrancy":{:.3f},"vibrancyDarkness":{:.3f},"refraction":{:.3f},"edgeWidth":{:.3f},"dispersion":{:.3f},"tint":{:.3f}}},"topbar":{{"size":{},"passes":{},"shapes":{},"draws":{},"refractionDraws":{},"noise":{:.3f},"contrast":{:.3f},"brightness":{:.3f},"vibrancy":{:.3f},"vibrancyDarkness":{:.3f}}},"rightMenu":{{"draws":{},"refractionDraws":{}}},"settings":{{"draws":{},"refractionDraws":{}}},"editor":{{"shapes":{},"draws":{},"refractionDraws":{},"connectedSettings":{}}},"sharedWidgets":{{"blurEnabled":{},"blurDraws":{},"active":{},"shapes":{},"draws":{},"refractionDraws":{},"caustics":{}}},"transition":{{"progress":{:.3f},"animating":{}}},"caustics":{{"enabled":{},"intensity":{:.3f},"lines":{},"animating":{},"frames":{}}}}})",
             __hyprland_api_get_client_hash(), materials, g_luaDispatch ? "\"lua-dispatch\"," : "", cameraCapability,
             g_opticalDamageFrames, g_opticalBlurExpansions, g_opticalDamagePadding, g_staleBackdropRefreshes,
             terminalGlassEnabled() ? "true" : "false",

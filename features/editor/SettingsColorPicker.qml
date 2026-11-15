@@ -34,24 +34,6 @@ Column {
     onInitialColorChanged: seed(initialColor)
     Keys.onEscapePressed: canceled()
 
-    component PickerAction: Button {
-        id: action
-        property bool primary: false
-        implicitWidth: 110; implicitHeight: 36
-        opacity: enabled ? 1 : .45
-        contentItem: Text {
-            text: action.text; color: root.theme.textPrimary
-            font.family: root.theme.bodyFont; font.pixelSize: 12
-            horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
-        }
-        background: Rectangle {
-            radius: 10
-            color: action.primary ? root.theme.withAlpha(root.theme.accent, action.down ? .35 : .22)
-                : action.down ? root.theme.surfaceHover : root.theme.surfaceSoft
-            border.width: 1
-            border.color: action.activeFocus ? root.theme.accent : root.theme.borderSubtle
-        }
-    }
 
     Text {
         text: "Cor: " + root.label
@@ -163,11 +145,13 @@ Column {
     }
     Row {
         spacing: 10
-        PickerAction {
+        SettingsPickerAction {
+            theme: root.theme
             objectName: "manualColorPicker.cancel"; text: "Cancelar"
             onClicked: root.canceled()
         }
-        PickerAction {
+        SettingsPickerAction {
+            theme: root.theme
             primary: true
             objectName: "manualColorPicker.apply"; text: "Aplicar cor"
             enabled: root.validHex

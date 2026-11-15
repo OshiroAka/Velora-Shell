@@ -4714,7 +4714,8 @@ Scope {
                     + Number(edgePopover.dockProgress).toFixed(6) + " "
                     + Number(edgePopover.sidebarWaveWidth / width).toFixed(6) + " "
                     + edgePopover.sidebarSamples.map(value => Number(value).toFixed(6)).join(" ") + " "
-                    + Number(root.infiniteDesktopFrameFoldProgress).toFixed(6))
+                    + Number(root.infiniteDesktopFrameFoldProgress).toFixed(6) + " "
+                    + Number(infiniteBottomDock.dockWidth / width).toFixed(6))
             }
 
             DesktopBarMaterial {
@@ -4747,6 +4748,15 @@ Scope {
 
             mask: Region {
                 intersection: Intersection.Combine
+
+                Region { item: infiniteBottomDock.visible && root.infiniteDesktopTargetReveal > .99 && infiniteBottomDock.entries.length ? infiniteBottomDock.dockInput : null }
+                Region { item: root.infiniteDesktopTargetReveal > .99 ? infiniteBottomDock.workspaceItem(0) : null; radius: 18 * infiniteBottomDock.unit }
+                Region { item: root.infiniteDesktopTargetReveal > .99 ? infiniteBottomDock.workspaceItem(1) : null; radius: 18 * infiniteBottomDock.unit }
+                Region { item: root.infiniteDesktopTargetReveal > .99 ? infiniteBottomDock.workspaceItem(2) : null; radius: 18 * infiniteBottomDock.unit }
+                Region { item: root.infiniteDesktopTargetReveal > .99 ? infiniteBottomDock.workspaceItem(3) : null; radius: 18 * infiniteBottomDock.unit }
+                Region { item: root.infiniteDesktopTargetReveal > .99 ? infiniteBottomDock.workspaceItem(4) : null; radius: 18 * infiniteBottomDock.unit }
+                Region { item: root.infiniteDesktopTargetReveal > .99 ? infiniteBottomDock.workspaceItem(5) : null; radius: 14 * infiniteBottomDock.unit }
+                Region { item: root.infiniteDesktopTargetReveal > .99 ? infiniteBottomDock.workspaceItem(6) : null; radius: 14 * infiniteBottomDock.unit }
 
                 Region {
                     item: root.infiniteDesktopSourceReveal > .99 ? barRoot.panelMaskItem : null
@@ -5291,6 +5301,20 @@ Scope {
                 surface: root.sidebarBarMaterialColor()
                 visible: root.barBackgroundEnabled && progress > 0 && progress < 1 && (!root.composition || !root.composition.nativeBarMaterial)
                 z: 0
+            }
+            InfiniteDesktopDock {
+                id: infiniteBottomDock
+                anchors.fill: parent
+                config: root.composition.configStore
+                theme: root.composition.topbarTheme
+                screen: panel.modelData
+                shell: root
+                progress: root.infiniteDesktopFrameFoldProgress
+                reveal: root.infiniteDesktopTargetReveal
+                nativeMaterial: root.composition.nativeBarMaterial && Platform.NativeBlur.supports("infinite-desktop-dock")
+                surface: root.sidebarBarMaterialColor()
+                onDockWidthChanged: Qt.callLater(panel.syncUnifiedBarNativeShape)
+                z: 2
             }
             Rectangle {
                 x: 0; y: 0; width: 1; height: 1

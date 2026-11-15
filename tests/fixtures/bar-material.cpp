@@ -406,6 +406,30 @@ int main(int argc, char** argv) {
                 two("uvSize",30,65);
             }
         }
+        // The new Infinite Desk shelf belongs to the same material field.
+        // Exercise its final pose at a fractional output density in both
+        // rendering passes: only the sidebar pass owns the lower shelf.
+        one("infiniteDockUnit", .3125F);
+        two("frameFold",1,30);
+        four("frameInterior",0,30,WIDTH,.01F);
+        one("frameRadius",0);
+        two("uvSize",0,0);
+        one("thick",4);
+        for (float pass : {1.F,2.F}) {
+            four("barMaterial",pass,1,1,0);
+            for (float width : {0.F,100.F}) {
+                one("infiniteDockWidth",width);
+                draw();
+                check((alpha(200,290)>250) == (pass==1.F && width>0.F), "Empty dock gains a fixed centre or incorrect ownership");
+                check((alpha(7,268)>250) == (pass==1.F), "Curved workspace shelf is missing");
+                check(alpha(7,268)==alpha(392,268),"Bottom corners are not mirrored");
+                check(alpha(200,260)==0,"Central dock extends above its intended height");
+                check(alpha(200,120)==0,"Infinite Desk shelf fills the desktop");
+                check(alpha(350,288)==0,"Empty right-hand bottom area gained a shelf");
+            }
+        }
+        one("infiniteDockWidth",0);
+        one("infiniteDockUnit",0);
         two("frameFold",0,0);
         four("frameInterior",40,30,420,252);
         one("frameRadius",20);

@@ -32,6 +32,7 @@ Column {
         text: "Infinite Desk"; color: root.theme.textPrimary
         font.family: root.theme.bodyFont; font.pixelSize: 22
     }
+    SettingsInfiniteDock { width: parent.width; config: root.config; theme: root.theme }
     Components.VeloraSettingsSlider {
         objectName: "infiniteDesk.sensitivity"
         width: parent.width; theme: root.theme
