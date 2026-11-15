@@ -75,6 +75,7 @@ Scope {
     property bool infiniteDesktopTopbarEnabled: true
     property real infiniteDeskDragSensitivity: 1.15
     property real infiniteDeskWindowSpacing: 1
+    property bool infiniteDeskOutlineIcons: true
     property var infiniteDeskPinnedItems: []
     property var infiniteDeskSizes: [{width: 800, height: 600}, {width: 1040, height: 500}, {width: 1280, height: 400}]
     property bool terminalLiquidEnabled: true
@@ -505,6 +506,8 @@ Scope {
         widgetBlurEnabled = Boolean(valueAt(resolved, "lockPreview.sharedWidgets.blurEnabled", true))
         barMatchKittyMaterial = Boolean(valueAt(resolved, "bar.matchKittyMaterial", false))
         infiniteDesktopTopbarEnabled = Boolean(valueAt(resolved, "bar.infiniteDesktopTopbarEnabled", true))
+        const outlineIcons = valueAt(resolved, "infiniteDesk.outlineIcons", true)
+        infiniteDeskOutlineIcons = typeof outlineIcons === "boolean" ? outlineIcons : true
         const pinned = valueAt(resolved, "infiniteDesk.pinnedItems", [])
         const normalizedPins = Array.isArray(pinned) ? [...new Set(pinned.filter(value => typeof value === "string" && value.length > 0 && value.length <= 256))].slice(0, 40) : []
         if (JSON.stringify(normalizedPins) !== JSON.stringify(infiniteDeskPinnedItems)) infiniteDeskPinnedItems = normalizedPins

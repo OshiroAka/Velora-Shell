@@ -242,11 +242,15 @@ Item {
                         width: parent.width; height: width; radius: 12 * root.unit
                         color: root.theme.withAlpha(root.theme.textPrimary, .08 * iconMotion.emphasis)
                     }
-                    Image {
+                    VeloraDockAppIcon {
+                        objectName: "infiniteDeskAppIcon-" + pinned.modelData
                         anchors.centerIn: parent
                         width: 28 * root.unit; height: width
                         source: pinned.desktopEntry ? Quickshell.iconPath(pinned.desktopEntry.icon, "application-x-executable") : ""
-                        sourceSize: Qt.size(64, 64)
+                        iconName: pinned.desktopEntry ? pinned.desktopEntry.icon : ""
+                        identifier: pinned.modelData
+                        outline: root.config.infiniteDeskOutlineIcons
+                        ink: root.theme.textPrimary
                         visible: !!pinned.desktopEntry
                         scale: iconMotion.zoom
                         transform: Translate { y: iconMotion.lift }

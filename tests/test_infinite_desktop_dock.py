@@ -1,4 +1,5 @@
 import os
+import re
 from pathlib import Path
 import subprocess
 import tempfile
@@ -8,6 +9,38 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class InfiniteDockTests(unittest.TestCase):
+    def test_automatic_icon_contours_keep_alpha_and_interior_details(self):
+        from PIL import Image, ImageDraw
+        with tempfile.TemporaryDirectory(prefix="velora-icon-render-") as directory:
+            base = Path(directory)
+            shader = (ROOT / "shaders/app-outline.frag").read_text()
+            shader = shader.replace("#version 440", "#version 300 es\nprecision highp float;")
+            shader = shader.replace("layout(location = 0) in", "in")
+            shader = re.sub(r"layout\(std140, binding = 0\) uniform buf \{.*?\} ubuf;",
+                            "uniform float qt_Opacity; uniform vec2 pixelStep; uniform vec4 ink; uniform float symbolic;", shader, flags=re.S)
+            shader = shader.replace("layout(binding = 1) uniform", "uniform").replace("ubuf.", "")
+            (base / "icon.frag").write_text(shader)
+            flags = subprocess.check_output(["pkg-config", "--cflags", "--libs", "egl", "glesv2"], text=True).split()
+            subprocess.run(["c++", "-std=c++20", str(ROOT / "tests/fixtures/app-outline.cpp"),
+                            "-o", str(base / "render"), *flags], check=True, capture_output=True)
+            for background in [(0, 0, 0, 0), (20, 40, 180, 255)]:
+                image = Image.new("RGBA", (112, 112), background)
+                draw = ImageDraw.Draw(image)
+                draw.rectangle((24, 24, 87, 87), fill=(240, 70, 20, 255))
+                draw.rectangle((48, 40, 63, 71), fill=(255, 255, 255, 255))
+                (base / "input").write_bytes(image.tobytes())
+                result = subprocess.run([str(base / "render"), str(base / "icon.frag"),
+                                         str(base / "input"), str(base / "output")],
+                                        env=dict(os.environ, EGL_PLATFORM="surfaceless", LIBGL_ALWAYS_SOFTWARE="1"),
+                                        capture_output=True, text=True, timeout=10)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                output = Image.frombytes("RGBA", (112, 112), (base / "output").read_bytes())
+                self.assertEqual(output.getpixel((35, 56))[3], 0, "Solid fill must become transparent")
+                self.assertGreater(output.getpixel((24, 56))[3], 120, "Outer contour must remain")
+                self.assertGreater(output.getpixel((48, 56))[3], 120, "Interior logo details must remain")
+                for red, green, blue, alpha in output.get_flattened_data():
+                    self.assertEqual((red, green, blue), (alpha, alpha, alpha), "Contours must use one premultiplied ink")
+
     def test_upright_controls_fit_inside_the_corner_at_both_sizes(self):
         geometry = (ROOT / "core/InfiniteDockGeometry.js").read_text().replace(".pragma library", "")
         script = "const assert=require('assert/strict');\n" + geometry + r'''
@@ -32,7 +65,7 @@ assert(timer.x-24*.68-centre.x-10*.88*1.18>10,'Timer preview is pressed against 
     def test_settings_pin_reorder_remove_persist_and_render_curved_workspaces(self):
         with tempfile.TemporaryDirectory(prefix="velora-dock-test-") as temporary:
             directory = Path(temporary)
-            for name in ("core", "config", "components", "features", "platform", "services", "assets"):
+            for name in ("core", "config", "components", "features", "platform", "services", "assets", "shaders"):
                 (directory / name).symlink_to(ROOT / name, target_is_directory=True)
             (directory / "shell.qml").write_text((ROOT / "tests/fixtures/infinite-dock.qml").read_text().replace('"../../', '"./'))
             applications = directory / "data/applications"

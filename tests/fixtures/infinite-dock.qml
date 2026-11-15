@@ -11,6 +11,7 @@ ShellRoot {
     function equal(actual, expected, message) { if (actual !== expected) throw Error((message || "compare") + ": " + actual + " !== " + expected) }
     function check(value, message) { if (!value) throw Error(message || "verify") }
     Core.ConfigStore { id: config }
+    Components.VeloraDockAppIcon { id: glyphProbe; visible: false }
     QtObject {
         id: theme
         property color textPrimary: "#f4f4f6"
@@ -78,9 +79,14 @@ ShellRoot {
         function run() {
             if (Quickshell.env("VELORA_DOCK_RELOAD") === "1") {
                 test.equal(config.infiniteDeskPinnedItems.join(","), "shell:settings,dock-test")
+                test.equal(config.infiniteDeskOutlineIcons, false, "Icon preference must persist")
                 console.info("INFINITE_DOCK_OK persisted")
                 Qt.quit()
                 return
+            }
+            for (const pair of [["com.spotify.Client", "Spotify"], ["com.discordapp.Discord", "Discord"], ["io.github.mimbrero.WhatsAppDesktop", "WhatsApp"], ["steam", ""]]) {
+                glyphProbe.identifier=pair[0]
+                test.equal(glyphProbe.sharedGlyph,pair[1],"Desktop ID must select the shared glyph automatically")
             }
             test.equal(config.infiniteDeskPinnedItems.length, 0)
             test.equal(dock.dockWidth, 0, "Empty dock must have no central elevation")
@@ -105,6 +111,16 @@ ShellRoot {
             test.equal(config.infiniteDeskPinnedItems.join(","), "shell:settings,dock-test")
             wait(80)
             test.equal(dock.entries.length, 2)
+            const icon = findChild(dock, "infiniteDeskAppIcon-dock-test")
+            const outlineSwitch = findChild(page, "infiniteDesk.outlineIcons")
+            test.equal(icon.outline, true, "Outline icons are enabled by default")
+            outlineSwitch.forceActiveFocus(); keyClick(Qt.Key_Space)
+            test.equal(icon.outline, false, "Keyboard switch restores original icons immediately")
+            mouseClick(outlineSwitch)
+            test.equal(icon.outline, true, "Mouse switch enables contours immediately")
+            config.setValue("infiniteDesk.outlineIcons", "invalid")
+            test.equal(config.infiniteDeskOutlineIcons, true, "Invalid preference falls back")
+            config.setValue("infiniteDesk.outlineIcons", false)
             const controls=dock.controls
             test.check(!!controls,"Right-hand controls are missing")
             test.equal(controls.focusedType,"battery")

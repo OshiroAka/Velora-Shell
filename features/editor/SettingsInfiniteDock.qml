@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import Quickshell
+import "../../components" as Components
 
 Column {
     id: root
@@ -44,6 +45,14 @@ Column {
         width: parent.width; wrapMode: Text.WordWrap
         text: "Escolha os ícones e aplicativos do centro da barra. A ordem abaixo é a ordem na barra."
         color: root.theme.textSecondary; font.family: root.theme.bodyFont; font.pixelSize: 12
+    }
+    Components.VeloraSettingsSwitch {
+        objectName: "infiniteDesk.outlineIcons"
+        width: parent.width; theme: root.theme
+        label: "Ícones em contorno"
+        hint: "Usar o estilo dos ícones do menu da direita nos apps fixados."
+        checked: root.config.infiniteDeskOutlineIcons
+        onTriggered: root.config.setValue("infiniteDesk.outlineIcons", !checked)
     }
     TextField {
         id: search
