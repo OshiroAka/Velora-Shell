@@ -48,26 +48,38 @@ function controlPosition(index, scale, visualWidth, visualHeight) {
     const x = Math.max(hw+padding, Math.min(p.x-18*Math.sin(p.angle*Math.PI/180), inside-hw-padding))
     return {x:x*scale,y:y*scale}
 }
-function path(c, width, height, count) {
-    const s = unit(width, height), half = dockWidth(width, s, count) / 2
-    const left = width / 2 - half, right = width / 2 + half
-    const reach = shoulder(width, s)
+// One contour keeps the bottom anchored while the rail narrows, the corner
+// opens into its shelf and the central plateau rises from the existing rim.
+function path(c, width, height, count, progress = 1, rail = 63, opposite = 4,
+              bottomHeight = 16, radius = 24, rightSide = false) {
+    const s = unit(width, height), t = Math.max(0, Math.min(1, progress))
+    const mix = (a,b) => a + (b-a)*t
+    const left = mix(rightSide ? opposite : rail, 4*s)
+    const right = width - mix(rightSide ? rail : opposite, 4*s)
+    const bottom = height - mix(bottomHeight, 4*s)
+    const rx = mix(radius, 188*s), ry = mix(radius, 124*s)
+    const topR = radius*(1-t), k = .55228475
+    const half = dockWidth(width, s, count) / 2
+    const dockLeft = width/2-half, dockRight = width/2+half
+    const reach = shoulder(width,s), crest = bottom-50*s*t
     c.beginPath()
-    c.moveTo(0, 0)
-    c.lineTo(4*s, 0)
-    c.lineTo(4*s, height - 128*s)
-    c.bezierCurveTo(4*s, height - 59.51665*s, 88.17047*s, height - 4*s, 192*s, height - 4*s)
+    c.moveTo(0,0)
+    c.lineTo(left+topR,0)
+    if (topR > .001) c.arcTo(left,0,left,topR,topR)
+    c.lineTo(left,bottom-ry)
+    c.bezierCurveTo(left,bottom-ry+k*ry,left+rx-k*rx,bottom,left+rx,bottom)
     if (half > 0) {
-        c.lineTo(left - reach, height - 4 * s)
-        c.bezierCurveTo(left - reach*2/3, height - 4 * s, left - reach/3, height - 54 * s, left, height - 54 * s)
-        c.lineTo(right, height - 54 * s)
-        c.bezierCurveTo(right + reach/3, height - 54 * s, right + reach*2/3, height - 4 * s, right + reach, height - 4 * s)
+        c.lineTo(dockLeft-reach,bottom)
+        c.bezierCurveTo(dockLeft-reach*2/3,bottom,dockLeft-reach/3,crest,dockLeft,crest)
+        c.lineTo(dockRight,crest)
+        c.bezierCurveTo(dockRight+reach/3,crest,dockRight+reach*2/3,bottom,dockRight+reach,bottom)
     }
-    c.lineTo(width - 192 * s, height - 4 * s)
-    c.bezierCurveTo(width - 88.17047*s, height - 4*s, width - 4*s, height - 59.51665*s, width - 4*s, height - 128*s)
-    c.lineTo(width - 4*s, 0)
-    c.lineTo(width, 0)
-    c.lineTo(width, height)
-    c.lineTo(0, height)
+    c.lineTo(right-rx,bottom)
+    c.bezierCurveTo(right-rx+k*rx,bottom,right,bottom-ry+k*ry,right,bottom-ry)
+    c.lineTo(right,topR)
+    if (topR > .001) c.arcTo(right,0,right-topR,0,topR)
+    c.lineTo(width,0)
+    c.lineTo(width,height)
+    c.lineTo(0,height)
     c.closePath()
 }

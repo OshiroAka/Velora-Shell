@@ -468,7 +468,7 @@ uniform float waveDockProgress;
 uniform float sideWaveWidth;
 uniform float sideCurve[21];
 uniform float frameRadius;
-uniform vec2 frameFold; // progress, moving bottom in framebuffer coordinates
+uniform vec2 frameFold; // morph progress; the frame stays at its full-screen bounds
 uniform float infiniteDockUnit;
 uniform float infiniteDockWidth;
 uniform vec4 topbarStrip; // physical centre and half size; zero keeps legacy callers
@@ -646,8 +646,8 @@ float infiniteCornerSdf(vec2 p) {
 }
 
 float infiniteDockSdf(vec2 pixel) {
-    if (infiniteDockUnit <= 0.0 || frameFold.x <= .65) return 1e6;
-    float reveal = smoothstep(.65, 1.0, frameFold.x);
+    if (infiniteDockUnit <= 0.0) return 1e6;
+    float reveal = 1.0;
     float s = infiniteDockUnit;
     // Logical geometry matches InfiniteDockGeometry: a curved workspace
     // shelf, a broad central plateau, and the unoccupied right corner.
@@ -669,38 +669,26 @@ float topbarStripSdf(vec2 pixel) {
     float s = infiniteDockUnit > 0.0 ? infiniteDockUnit
         : min(opticalScale, min(fullSize.x / 1280.0, (fullSize.y - topbarStrip.w*2.0) / 720.0));
     float bar = roundedBoxSdf(pixel - topbarStrip.xy, topbarStrip.zw, min(6.0*s, topbarStrip.w));
-    float sides = min(pixel.x - 4.0*s, fullSize.x - pixel.x - 4.0*s);
-    float frame = smoothUnion(pixel.y - 4.0*s, sides, 8.0*s);
+    float morph = frameFold.x;
+    float sides = min(pixel.x - 4.0*s*morph, fullSize.x - pixel.x - 4.0*s*morph);
+    float frame = smoothUnion(pixel.y - 4.0*s*morph, sides, max(.01, 8.0*s*morph));
     frame = max(frame, pixel.y - topbarStrip.w*2.0);
-    return smoothUnion(bar, frame, 8.0*s);
+    return morph > 0.0 ? smoothUnion(bar, frame, max(.01, 8.0*s*morph)) : bar;
 }
 
 float frameWithoutSettingsSdf(vec2 pixel) {
     float distance = -roundedBoxSdf(pixel - frameInterior.xy - frameInterior.zw * 0.5,
                          frameInterior.zw * 0.5, frameRadius);
-    // Retract the U-shaped frame upward, leaving the existing topbar intact.
-    // Clip its outside too: an inverted box otherwise fills below the bottom.
-    if (frameFold.x > 0.0) {
-        distance = frameFold.x >= .9999 ? pixel.y - frameInterior.y
-            : max(distance, pixel.y - frameFold.y);
-        // The bottom divides and retracts toward its two corners. Only the
-        // corner tails subsequently rise along the sides; no horizontal
-        // strip travels across the middle of the desktop.
-        float gather = clamp(frameFold.x / .35, 0.0, 1.0);
-        float middle = fullSize.x * .5;
-        float leftEnd = mix(middle, frameInterior.x + frameRadius, gather);
-        float rightStart = mix(middle, frameInterior.x + frameInterior.z - frameRadius, gather);
-        if (pixel.y >= frameInterior.y)
-            distance = max(distance, min(pixel.x - leftEnd, rightStart - pixel.x));
-    }
+    // Interpolate the two complete contours. Neither frame is clipped into
+    // travelling rectangles, and the lower corners remain anchored on screen.
+    if (infiniteDockUnit > 0.0 && frameFold.x > 0.0)
+        distance = mix(distance, infiniteDockSdf(pixel), frameFold.x);
+    else if (frameFold.x >= .9999)
+        distance = 1e6;
     if (topbarStrip.z > 0.0) {
-        // The fully folded legacy frame is only a half-plane. Clipping it
-        // against its inverse leaves abs(y - barBottom): an invisible surface
-        // whose antialias fringe still draws a line across the desktop.
-        distance = frameFold.x >= .9999 ? 1e6 : max(distance, frameInterior.y - pixel.y);
+        distance = max(distance, frameInterior.y - pixel.y);
         distance = min(distance, topbarStripSdf(pixel));
     }
-    distance = min(distance, infiniteDockSdf(pixel));
     if (barBackgroundHidden > .5) distance = 1e6;
     if (barMaterial.x > .5 && oppositePanel.z > .01)
         distance = smoothUnion(distance, oppositePanelSdf(pixel), min(24.0, oppositePanel.z));
@@ -1530,6 +1518,14 @@ CBox liquidPanelBox(const CBox& surfaceBox) {
     };
 }
 
+// The interpolated field stays inside the union of the source frame and
+// destination dock. Existing side damage covers the rails; only this lower
+// band grows beyond their old bottom corners. Coordinates may be fractional.
+CBox infiniteDesktopBottomBox(const CBox& output, const double unit) {
+    const double band = std::min(output.height, 128.0 * unit + 4.0);
+    return {output.x, output.y + output.height - band, output.width, band};
+}
+
 CRegion roundedPanelRegion(const CBox& box, const double radius) {
     CRegion region;
     const double safeRadius = std::clamp(
@@ -2040,8 +2036,12 @@ bool renderLiquidBackdrop(VeloraCompat::RenderContext& ctx, WP<CTexPassElement> 
         // the draw/scissor as well, including a fractional rail edge at x=63.
         liquidDamage.add(CBox{panelBox.x - 2.0, panelBox.y - 2.0,
             panelBox.width + 4.0, panelBox.height + 4.0});
-    if (connectedSidebar && independentShape->desktopFold > 0.F)
-        liquidDamage.add(surfaceBox);
+    if (connectedSidebar && independentShape->desktopFold > 0.F) {
+        const double scale = layer && layer->m_monitor ? layer->m_monitor->m_scale : 1.0;
+        const double unit = scale * std::min({1.0, surfaceBox.width / scale / 1280.0,
+            surfaceBox.height / scale / 720.0});
+        liquidDamage.add(infiniteDesktopBottomBox(surfaceBox, unit));
+    }
     if (connectedTopbar && panelBox.height > 0.01) {
         const double neck = independentShape->neckHalfWidth * surfaceBox.width;
         const double anchor = surfaceBox.x + independentShape->anchorX * surfaceBox.width;
@@ -2323,20 +2323,17 @@ bool renderLiquidBackdrop(VeloraCompat::RenderContext& ctx, WP<CTexPassElement> 
             kittyScale * std::min({1.F, textureWidth / kittyScale / 1280.F,
                 (textureHeight - top) / kittyScale / 720.F}));
         glUniform1f(glGetUniformLocation(shader->program(), "infiniteDockWidth"), frameShape.desktopDockWidth * textureWidth);
-        const float remaining = 1.F - frameShape.desktopFold;
-        const float rise = std::clamp((frameShape.desktopFold - .35F) / .65F, 0.F, 1.F);
-        const float railRemaining = std::min(1.F, remaining / .22F);
-        const float side = frameShape.width * textureWidth * 0.5F * railRemaining;
-        commonFrameRadius = frameShape.radius * textureWidth * (1.F - rise);
-        const float farEdge = commonFrameRadius * 2.F;
+        // Keep the source contour stable; the shader morphs its distance
+        // field directly into the dock instead of lifting a clipped frame.
+        const float side = frameShape.width * textureWidth * 0.5F;
+        commonFrameRadius = frameShape.radius * textureWidth;
         const float opposite = frameShape.oppositeWidth > 0.F
-            ? frameShape.oppositeWidth * textureWidth * railRemaining : -farEdge;
+            ? frameShape.oppositeWidth * textureWidth : -commonFrameRadius * 2.F;
         const float left = frameShape.x > 0.5F ? opposite : side;
         const float interiorWidth = textureWidth - side - opposite;
-        const float extent = (textureHeight - top) * (1.F - rise);
-        const float bottom = std::min(extent * .5F, frameShape.bottomHeight * (textureHeight - top) * railRemaining);
-        glUniform2f(glGetUniformLocation(shader->program(), "frameFold"),
-            frameShape.desktopFold, top + extent);
+        const float extent = textureHeight - top;
+        const float bottom = std::min(extent * .5F, frameShape.bottomHeight * extent);
+        glUniform2f(glGetUniformLocation(shader->program(), "frameFold"), frameShape.desktopFold, textureHeight);
         glUniform4f(glGetUniformLocation(shader->program(), "frameInterior"),
                     left, top, interiorWidth, std::max(0.01F, extent - bottom));
         if (found != g_connectedTopbars.end() && found->second.height > .000001F) {
@@ -2935,6 +2932,21 @@ void damageTopbarMorph(const STopbarMorph& previous,
     }
 }
 
+void damageInfiniteDesktopMorph(const std::string& monitorName) {
+    if (!State::monitorState() || !g_pHyprRenderer) return;
+    for (const auto& monitor : State::monitorState()->monitors()) {
+        if (!monitor || monitor->m_name != monitorName) continue;
+        const CBox output{monitor->m_position.x, monitor->m_position.y,
+            monitor->m_size.x, monitor->m_size.y};
+        const auto topbar = g_connectedTopbars.find(monitorName);
+        const double top = topbar != g_connectedTopbars.end()
+            ? topbar->second.barHeight * output.height : 40.0;
+        const double unit = std::min({1.0, output.width / 1280.0, (output.height-top) / 720.0});
+        g_pHyprRenderer->damageBox(CBox{output.x, output.y, output.width, top + 4.0});
+        g_pHyprRenderer->damageBox(infiniteDesktopBottomBox(output, unit));
+    }
+}
+
 CBox monitorRightMenuBox(const PHLMONITOR& monitor,
                          const SRightMenuMorph& morph) {
     const double depth = morph.depth * monitor->m_size.x;
@@ -3346,7 +3358,7 @@ SDispatchResult unifiedBarShapeDispatcher(std::string arguments) {
     shape.bottomHeight = std::clamp(bottomHeight, 0.F, 0.1F);
     damageTopbarMorph(previous, shape, monitor);
     if (previous.desktopFold != shape.desktopFold || previous.desktopDockWidth != shape.desktopDockWidth)
-        damageAllMonitors();
+        damageInfiniteDesktopMorph(monitor);
     return {};
 }
 
@@ -4821,7 +4833,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         .name = "velora-blur",
         .description = "Clear live framebuffer refraction for Velora",
         .author = "Velora Shell",
-        .version = "0.17.38",
+        .version = "0.17.39",
     };
 }
 

@@ -277,7 +277,9 @@ Scope {
     readonly property int sideVisualizerWaveWidth: 58
     readonly property real sideVisualizerCapReach: Math.min(38, sideVisualizerWaveWidth * 0.46)
     readonly property int barPanelWidth: sideBarLayoutEnabled ? sidebarVisualWidth + sidebarOuterMargin : 0
-    readonly property int barReserveWidth: sideBarLayoutEnabled ? Math.round(barPanelWidth * infiniteDesktopRailRemaining) : 0
+    // Layer-shell exclusion is discrete. Animating it forces client layout and
+    // Wayland configure roundtrips on every pose of an otherwise visual morph.
+    readonly property int barReserveWidth: sideBarLayoutEnabled && !infiniteDesktopTransition.effectiveActive ? barPanelWidth : 0
     readonly property int desktopFrameRadius: 24
     readonly property bool frameVisualsEnabled: veloraTheme.desktopFrameEnabled && !topBarLayout
     readonly property int frameVisualInset: frameVisualsEnabled ? desktopFrameMargin : 0
@@ -4698,6 +4700,10 @@ Scope {
                     && (root.composition.barMaterial === "glass" || !Platform.NativeBlur.supports("unified-bar-shape")) ? unifiedFrameCanvas : null
             }
 
+            Core.FramePublisher {
+                id: unifiedShapePublisher
+                onPublish: panel.syncUnifiedBarNativeShape()
+            }
             function syncUnifiedBarNativeShape() {
                 const active = root.composition
                     && (["liquid", "liquid-glass"].includes(root.composition.barMaterial) || root.composition.nativeBarMaterial)
@@ -5332,6 +5338,7 @@ Scope {
                 anchors.fill: parent
                 progress: root.infiniteDesktopFrameFoldProgress
                 rightSide: root.barOnRight
+                dockCount: infiniteBottomDock.entries.length
                 surface: root.sidebarBarMaterialColor()
                 visible: root.barBackgroundEnabled && progress > 0 && progress < 1 && (!root.composition || !root.composition.nativeBarMaterial)
                 z: 0
@@ -5386,42 +5393,37 @@ Scope {
 
             // Physical screen corner cutouts. They suggest a rounded display
             // without painting black strips along any straight edge.
-            Canvas {
-                id: bottomScreenCorners
-                z: 100
-                anchors.fill: parent
-                visible: root.barBackgroundEnabled && root.sideBarLayoutEnabled
-                opacity: root.infiniteDesktopFrameRemaining
-                antialiasing: true
-
-                onPaint: {
-                    const ctx = getContext("2d")
-                    const radius = Math.min(root.screenCornerRadius,
-                        width / 2, height)
-                    ctx.clearRect(0, 0, width, height)
-                    ctx.globalAlpha = 1
-                    ctx.fillStyle = "#000000"
-
-                    ctx.beginPath()
-                    ctx.moveTo(0, height)
-                    ctx.lineTo(0, height - radius)
-                    ctx.arc(radius, height - radius, radius,
-                        Math.PI, Math.PI / 2, true)
-                    ctx.closePath()
-                    ctx.fill()
-
-                    ctx.beginPath()
-                    ctx.moveTo(width, height)
-                    ctx.lineTo(width - radius, height)
-                    ctx.arc(width - radius, height - radius, radius,
-                        Math.PI / 2, 0, true)
-                    ctx.closePath()
-                    ctx.fill()
+            // Keep each fading cutout bounded to its own corner. A transparent
+            // full-screen Canvas still damages the whole output when faded.
+            Repeater {
+                model: 2
+                Canvas {
+                    required property int index
+                    z: 100
+                    width: Math.min(root.screenCornerRadius, panel.width / 2, panel.height)
+                    height: width
+                    x: index === 0 ? 0 : panel.width - width
+                    y: panel.height - height
+                    visible: root.barBackgroundEnabled && root.sideBarLayoutEnabled
+                    opacity: root.infiniteDesktopFrameRemaining
+                    antialiasing: true
+                    onPaint: {
+                        const c = getContext("2d")
+                        c.clearRect(0,0,width,height)
+                        c.save()
+                        if (index === 1) { c.translate(width,0); c.scale(-1,1) }
+                        c.fillStyle = "#000000"
+                        c.beginPath()
+                        c.moveTo(0,height)
+                        c.lineTo(0,0)
+                        c.arc(width,0,width,Math.PI,Math.PI/2,true)
+                        c.closePath(); c.fill(); c.restore()
+                    }
+                    Component.onCompleted: requestPaint()
+                    onWidthChanged: requestPaint()
+                    onHeightChanged: requestPaint()
+                    onVisibleChanged: if (visible) requestPaint()
                 }
-                Component.onCompleted: requestPaint()
-                onWidthChanged: requestPaint()
-                onHeightChanged: requestPaint()
-                onVisibleChanged: if (visible) requestPaint()
             }
 
             Connections {
@@ -6995,7 +6997,7 @@ Scope {
                     coffeePopover.close(); notesPopover.close(); bluetoothPopover.close()
                     notificationsPopover.close(); wifiPopover.close()
                 }
-                function onInfiniteDesktopFrameFoldProgressChanged() { panel.syncUnifiedBarNativeShape() }
+                function onInfiniteDesktopFrameFoldProgressChanged() { unifiedShapePublisher.dirty = true }
                 function onInfiniteDesktopCanvasEnabledChanged() {
                     infiniteControlMenu.closeInstant(); edgePopover.close(); coffeePopover.closeInstant(); notesPopover.closeInstant()
                     bluetoothPopover.closeInstant(); notificationsPopover.closeInstant(); wifiPopover.closeInstant()

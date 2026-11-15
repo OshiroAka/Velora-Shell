@@ -23,12 +23,21 @@ Item {
     property var shell: null
     property real desktopMorphProgress: 0
     property real desktopTargetReveal: 0
-    readonly property bool packed: desktopMorphProgress > .0001
+    readonly property bool packed: desktopMorphProgress >= .5
     property int opticsGeneration: 0
     property alias barSurfaceItem: background
     property real leftInset: 0
     property real rightInset: packed ? 0 : 20
-    implicitWidth: packed ? leftDesktopTools.width + sectionWidth("left") + sectionWidth("center") + toolRow.width : 0
+    // Measure the destination independently of the currently displayed model.
+    // Switching the item set halfway must never resize the moving surface.
+    readonly property real packedWidth: (shell ? 192 : 0)
+        + config.infiniteTopbarLayout.filter(item => item.enabled && item.type !== "workspaces")
+            .reduce((sum, item) => sum + legacyItemWidth(item.type, true), 0)
+        + toolsForMode(true).reduce((sum, type) => sum + toolWidth(type, true), 0)
+    readonly property real availableWidth: host.width > 0 ? host.width : host.screen.width
+    readonly property real morphWidth: availableWidth
+        + (Math.min(availableWidth, packedWidth) - availableWidth) * desktopMorphProgress
+    implicitWidth: packedWidth
     signal geometryChanged()
     function sectionWidth(section) {
         return config.topbarItemsForSection(section, false, packed).reduce((sum, item) => sum + layoutItemWidth(item.type), 0)
@@ -50,8 +59,8 @@ Item {
     readonly property real unit: barTheme ? Math.max(.67, Math.min(1.17, barTheme.barIconSize / 48)) : 1
     readonly property real iconOpacity: barTheme ? barTheme.barIconOpacity : 1
     readonly property real itemGap: packed ? 0 : barTheme ? barTheme.barIconSpacing / 4 : 1
-    readonly property bool compact: (packed ? host.screen.width : width) < 1280
-    readonly property real density: (packed ? host.screen.width : width) < 760 ? 0.8 : 1
+    readonly property bool compact: availableWidth < 1280
+    readonly property real density: availableWidth < 760 ? 0.8 : 1
     TextMetrics {
         id: dateMetrics
         font.family: root.theme.bodyFont; font.pixelSize: 12
@@ -62,10 +71,11 @@ Item {
     readonly property bool editing: editorController.shown && editorController.mode === "editing"
         && editorController.editSpace === "desktop"
     readonly property var layout: packed ? config.infiniteTopbarLayout : config.topbarLayout
-    readonly property var visibleTools: (packed ? config.infiniteTopbarToolsOrder : config.topbarToolsOrder).filter(type =>
+    readonly property var visibleTools: toolsForMode(packed)
+    function toolsForMode(infinite) { return (infinite ? config.infiniteTopbarToolsOrder : config.topbarToolsOrder).filter(type =>
         (type !== "thing" || config.topbarOneThingEnabled)
         && (type !== "notes" || config.topbarNotesEnabled)
-        && (!packed || !["battery", "paint", "monitor", "controls", "timer"].includes(type)))
+        && (!infinite || !["battery", "paint", "monitor", "controls", "timer"].includes(type))) }
     function controlBubbleRuns() {
         const runs = []
         for (let index = 0; index < visibleTools.length; index += 1) {
@@ -201,8 +211,8 @@ Item {
             thing: "One Thing", notes: "Notas · arraste para baixo para criar", battery: "Bateria", monitor: "Monitores", paint: "Misturar cores do wallpaper", wifi: "Wi-Fi",
             search: "Busca", controls: "Configurações", weather: "Previsão do tempo", clock: "Data e calendário"})[type] || type
     }
-    function legacyItemWidth(type) {
-        if (!packed) {
+    function legacyItemWidth(type, infinite = packed) {
+        if (!infinite) {
             const widths = { workspaces: 208, context: compact ? 130 : 250,
                 clock: compact ? 210 : 330, media: compact ? 100 : 140,
                 wifi: 54, volume: 54, battery: 86, settings: 48, avatar: 48,
@@ -214,6 +224,13 @@ Item {
             wifi: 30, volume: 30, battery: 38, settings: 30, avatar: 32,
             search: 30, weather: 72, brand: 60 }
         return (widths[type] || 32) * unit
+    }
+    function toolWidth(type, infinite) {
+        return !infinite ? (type === "clock" ? 178 : type === "thing" ? (root.width < 1000 ? 90 : 160)
+            : type === "timer" ? 74 : type === "battery" ? 44 : 36) * root.density
+            : (type === "clock" ? Math.ceil(dateMetrics.width) + 24
+            : type === "thing" ? Math.min(240, Math.max(64, Math.ceil(messageMetrics.width) + 24))
+            : type === "timer" ? Math.ceil(timerMetrics.width) + 24 : type === "battery" ? 38 : 34)
     }
     function legacyGlyph(type) {
         if (type === "media") return media.playing ? "pause" : "play"
@@ -243,8 +260,9 @@ Item {
     Item { id: background; anchors.fill: parent }
     Loader {
         id: leftDesktopTools
-        active: !!root.shell && root.desktopMorphProgress > .0001
-        width: 192 * root.desktopMorphProgress
+        active: !!root.shell
+        visible: root.packed && root.desktopTargetReveal > .001
+        width: root.packed ? 192 : 0
         height: root.height
         z: 5
         sourceComponent: InfiniteDesktopTools {
@@ -581,11 +599,7 @@ Item {
                 bubblesLiquid: root.config.barItemBubblesLiquid
                 compactPadding: root.packed
                 reducedMotion: root.config.reducedMotion
-                width: !root.packed ? (type === "clock" ? 178 : type === "thing" ? (root.width < 1000 ? 90 : 160)
-                    : type === "timer" ? 74 : type === "battery" ? 44 : 36) * root.density
-                    : (type === "clock" ? Math.ceil(dateMetrics.width) + 24
-                    : type === "thing" ? Math.min(240, Math.max(64, Math.ceil(messageMetrics.width) + 24))
-                    : type === "timer" ? Math.ceil(timerMetrics.width) + 24 : type === "battery" ? 38 : 34)
+                width: root.toolWidth(type, root.packed)
                 height: root.height
                 label: root.label(type)
                 Rectangle {

@@ -404,50 +404,38 @@ int main(int argc, char** argv) {
         check(alpha(200,290)>250,"Disabling the spectrum removes the bottom frame");
         check(alpha(200,220)==0,"Disabled spectrum still draws a wave");
         check(alpha(20,140)==0,"Disabled spectrum duplicates the upper sidebar");
-        // The moving bottom must be an actual contour, with no old strips
-        // below it. Exercise both passes and reversed intermediate poses.
-        for (float progress : {0.25F,0.5F,0.75F,1.F,0.75F,0.5F,0.25F,0.F}) {
-            float remaining = 1-progress;
-            float railRemaining = std::min(1.F,remaining/.22F);
-            float rise = std::clamp((progress-.35F)/.65F,0.F,1.F);
-            float limit = 30 + 270*(1-rise);
-            four("frameInterior",40*railRemaining,30,WIDTH-44*railRemaining,std::max(.01F,270*(1-rise)-18*railRemaining));
-            one("frameRadius",20*(1-rise));
-            two("frameFold",progress,limit);
+        // Morph the complete field without clipping the side into blocks or
+        // sweeping a horizontal edge through the wallpaper. Composite the two
+        // ownership passes and check all successive/reversed output poses.
+        one("infiniteDockUnit", .3125F);
+        one("infiniteDockWidth",100);
+        four("frameInterior",40,30,WIDTH-44,252);
+        one("frameRadius",20);
+        std::vector<unsigned char> previousMorph;
+        for (int step=0;step<=80;++step) {
+            float progress=(step<=40?step:80-step)/40.F;
+            two("frameFold",progress,HEIGHT);
+            std::vector<unsigned char> composite(WIDTH*HEIGHT);
             for (float pass : {1.F,2.F}) {
-                four("barMaterial",pass,1,1,0);
-                draw();
-                if (progress>0) {
-                    check(alpha(200,290)==0,"Fold leaves the old bottom frame on screen");
-                    if (progress>.35) {
-                        check(alpha(2,290)==0,"Fold leaves the old sidebar below its moving corners");
-                        check(alpha(398,290)==0,"Fold leaves the opposite frame below its moving corners");
-                    }
-                }
-                if (remaining>.01 && pass==2.F)
-                    check(alpha(2,std::lround(limit-3))>250,"Bottom frame loses its moving corner");
-                if (progress>0 && progress<1)
-                    check(alpha(200,std::lround(limit-3))==0,"Bottom frame crosses the middle instead of rising along its corners");
-                if (remaining>.01 && pass==1.F)
-                    check(alpha(2,std::lround(30+100*(1-rise)))>250,"Side frame disappears during morph");
-                if (progress==1.F)
-                    check(alpha(200,80)==0 && alpha(2,80)==0,"Folded frame still covers the canvas");
+                four("barMaterial",pass,1,1,0); draw();
+                std::vector<unsigned char> pixels(WIDTH*HEIGHT*4);
+                glReadPixels(0,0,WIDTH,HEIGHT,GL_RGBA,GL_UNSIGNED_BYTE,pixels.data());
+                for (size_t index=0;index<composite.size();++index)
+                    composite[index]=std::max(composite[index],pixels[index*4+3]);
             }
-            if (progress==1.F) {
-                one("thick",3);
-                four("barMaterial",1,1,1,0);
-                two("topLeft",0,-135);
-                two("bottomRight",200,15);
-                two("uvSize",0,0);
-                draw();
-                check(alpha(200,15)>250,"Infinite Desktop removes the existing topbar");
-                check(alpha(200,80)==0,"Folded topbar adds a second surface below the strip");
-                one("thick",4);
-                two("topLeft",-200,0);
-                two("bottomRight",40,180);
-                two("uvSize",30,65);
+            auto coverage=[&](int x,int y) { return composite[(HEIGHT-y-1)*WIDTH+x]; };
+            check(coverage(0,150)>128,"Morph breaks the anchored side border");
+            check(coverage(200,HEIGHT-1)>128,"Morph detaches from the bottom edge");
+            check(coverage(200,150)==0,"Morph crosses the centre of the wallpaper");
+            if (!previousMorph.empty()) {
+                size_t changed=0;
+                for (size_t index=0;index<composite.size();++index)
+                    if (std::abs(int(composite[index])-int(previousMorph[index]))>128) ++changed;
+                check(changed<WIDTH*HEIGHT/20,"A frame strip pops between adjacent morph poses");
             }
+            previousMorph=std::move(composite);
         }
+        one("infiniteDockWidth",0);
         // The new Infinite Desk shelf belongs to the same material field.
         // Exercise its final pose at a fractional output density in both
         // rendering passes: only the sidebar pass owns the lower shelf.

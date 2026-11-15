@@ -78,8 +78,8 @@ Item {
     Canvas {
         id: surfaceCanvas
         anchors.fill: parent
-        visible: !root.nativeMaterial && root.config.barBackgroundEnabled
-        opacity: Math.max(0, Math.min(1, (root.progress - .65) / .35))
+        visible: !root.nativeMaterial && root.config.barBackgroundEnabled && root.progress >= 1
+        opacity: 1
         antialiasing: true
         onPaint: {
             const c = getContext("2d")
@@ -149,7 +149,7 @@ Item {
         analyzer: root.visualizer
         ink: root.surface
         reducedMotion: root.config.reducedMotion
-        visible: root.visible && root.waveformEnabled && root.entries.length > 0 && root.reveal > .99
+        visible: root.visible && root.waveformEnabled && root.entries.length > 0 && root.reveal > .001
         opacity: root.reveal
         z: 3
     }

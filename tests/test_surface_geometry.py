@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class SurfaceGeometryTests(unittest.TestCase):
-    def test_native_topbar_bounds_are_exclusive_to_infinite_desk(self):
+    def test_native_topbar_bounds_follow_the_surface_through_the_morph(self):
         source = (ROOT / "surfaces/TopBarHost.qml").read_text()
         function = "function syncConnectedSurface() {" + source.split(
             "function syncConnectedSurface() {", 1)[1].split(
@@ -26,7 +26,7 @@ const menuMounted=false,menuAnchor=960,menuNeck=120,menuRadius=18,menuJoin=8;
 const executionIndicator={surfaceRect:Qt.rect(0,0,0,0),neckHalfWidth:0,cornerRadius:18,joinRadius:8};
 const chargingMorph={...executionIndicator,anchorX:960,gradientProgress:1,gradientStrength:0};
 const timerAlert={...executionIndicator,anchorX:960};
-const barLoader={x:500,width:920};
+const barLoader={x:0,width:1920};
 let infiniteMode=false,nativeCompactBar=true;
 const messages=[],Platform={NativeBlur:{dispatch:message=>messages.push(message)}};
 '''
@@ -35,9 +35,16 @@ syncConnectedSurface();
 const standard=messages.at(-1).split(' ');
 infiniteMode=true; syncConnectedSurface();
 const desk=messages.at(-1).split(' ');
-assert.equal(desk.length,standard.length+2);
-assert(Math.abs(+desk.at(-2)-500/1920)<1e-8);
-assert(Math.abs(+desk.at(-1)-920/1920)<1e-8);
+assert.equal(desk.length,standard.length);
+for (const progress of [0,.1,.49,.5,.51,.9,1]) {
+    barLoader.width=1920+(920-1920)*progress;
+    barLoader.x=(1920-barLoader.width)/2;
+    syncConnectedSurface();
+    const pose=messages.at(-1).split(' ');
+    assert(Math.abs(+pose.at(-2)-barLoader.x/1920)<1e-8);
+    assert(Math.abs(+pose.at(-1)-barLoader.width/1920)<1e-8);
+}
+barLoader.x=0; barLoader.width=1920;
 infiniteMode=false; syncConnectedSurface();
 assert.equal(messages.at(-1),standard.join(' '));
 root.nativeBarMaterial=false; nativeCompactBar=false; syncConnectedSurface();

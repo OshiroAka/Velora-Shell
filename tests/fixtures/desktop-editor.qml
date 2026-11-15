@@ -49,7 +49,7 @@ ShellRoot {
     }
     QtObject { id: wallpaperStore; property string activeKey: "fixture" }
     Core.SettingsController { id: controller; config: config; editor: scene; motion: motion; preview: preview; profileService: profiles; shell: shell }
-    QtObject { id: environment; property var screen: Quickshell.screens[0]; property var activeToplevel: null }
+    QtObject { id: environment; property var screen: Quickshell.screens[0]; property real width: window.width; property var activeToplevel: null }
     Services.ClockService { id: clock }
     QtObject {
         id: status
@@ -116,7 +116,7 @@ ShellRoot {
         width: 1440; height: 900; visible: true; color: "#101113"
         TestCase { id: pointer; name: "DesktopEditorPointer"; when: false }
         Topbar.ReferenceBar {
-            id: bar; width: packed ? Math.min(parent.width, implicitWidth) : parent.width
+            id: bar; width: morphWidth
             x: (parent.width-width)/2; height: 40; z: 100
             config: config; theme: theme; clock: clock; media: media; weather: weather
             status: status; system: system; timerService: timerService
@@ -148,6 +148,7 @@ ShellRoot {
     }
     property bool resized: false
     property int phase: 0
+    property bool stepping: false
     Component { id: opticsType; Components.BarBubbleOptics {} }
     property var opticsProbe: null
     property string opticsBefore: ""
@@ -176,7 +177,8 @@ ShellRoot {
     Timer {
         interval: 180; running: true; repeat: true
         onTriggered: {
-            if (!config.ready) return
+            if (!config.ready || stepping) return
+            stepping=true
             try {
                 const home=chrome.settingsItem
                 if (phase===0) {
@@ -196,6 +198,14 @@ ShellRoot {
                     const standardBounds=JSON.stringify(bar.sectionBounds)
                     const standardLayout=JSON.stringify(config.topbarLayout)
                     const standardOrder=JSON.stringify(config.topbarToolsOrder)
+                    const packedWidth=bar.packedWidth
+                    for (const progress of [.1,.25,.49,.5,.51,.75]) {
+                        bar.desktopMorphProgress=progress
+                        pointer.wait(16)
+                        assert(Math.abs(bar.packedWidth-packedWidth)<.1,"destination width changed while switching item models")
+                        const expected=window.width+(Math.min(window.width,packedWidth)-window.width)*progress
+                        assert(Math.abs(bar.width-expected)<.1,"topbar geometry jumped during the morph")
+                    }
                     bar.desktopMorphProgress=1
                     pointer.wait(25)
                     assert(bar.width < window.width && bar.x > 0,"topbar must detach from both screen edges")
@@ -392,7 +402,7 @@ ShellRoot {
                         }
                     }
                     theme.accent=oldTint
-                    for (const bubble of bubbles(bar).concat(bubbles(verticalBar))) {
+                    for (const bubble of bubbles(bar).concat(bubbles(verticalBar)).filter(item=>item.visible)) {
                         assert(bubble.radius <= 7, "bubble corners remain pill-shaped")
                         assert(bubble.solid && bubble.bubbleColor.a===1,"solid choice does not reach both bar legs")
                     }
@@ -446,6 +456,7 @@ ShellRoot {
                 }
                 phase++
             } catch(error) {console.error("DESKTOP_EDITOR_FAILED",String(error),error.stack);Qt.quit()}
+            finally { stepping=false }
         }
     }
     Timer {interval:12000;running:true;onTriggered:{console.error("DESKTOP_EDITOR_FAILED timeout");Qt.quit()}}

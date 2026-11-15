@@ -37,6 +37,7 @@ Variants {
     property var edgeMediaPanels: ({})
     property var edgeFullHeightPanels: ({})
     readonly property real desktopMorphProgress: notificationSource ? notificationSource.infiniteDesktopMorphProgress : 0
+    readonly property real desktopSourceReveal: notificationSource ? notificationSource.infiniteDesktopSourceReveal : 1
     readonly property real desktopTargetReveal: notificationSource ? notificationSource.infiniteDesktopTargetReveal : 0
     readonly property real desktopRailRemaining: notificationSource ? notificationSource.infiniteDesktopRailRemaining : 1
     readonly property int sidebarRailWidth: 64
@@ -179,7 +180,7 @@ Variants {
                 timerAlert.anchorX / width, timerAlert.neckHalfWidth / width,
                 timerAlert.cornerRadius / width, timerAlert.joinRadius / width,
                 timerAlert.anchorX / width, root.timerService.alertPhase, root.timerService.alertStrength]
-            if (infiniteMode) values.push(barLoader.x / width, barLoader.width / width)
+            values.push(barLoader.x / width, barLoader.width / width)
             Platform.NativeBlur.dispatch("velora-blur:topbar-connected " + screen.name + " "
                 + ((infiniteMode ? nativeCompactBar
                     : ["liquid", "liquid-glass"].includes(root.config.barMaterial) || root.nativeBarMaterial) ? 1 : 0) + " "
@@ -221,8 +222,8 @@ Variants {
                 chargingMorph.visible ? chargingMorph.y + chargingMorph.height + 12 : 0)
             barHeight: topbarWindow.stripHeight
             stripRect: Qt.rect(barLoader.x, 0, barLoader.width, topbarWindow.stripHeight)
-            frameUnit: topbarWindow.infiniteMode ? Math.min(1, topbarWindow.width / 1280,
-                (topbarWindow.modelData.height - topbarWindow.stripHeight) / 720) : 0
+            frameUnit: root.desktopMorphProgress * Math.min(1, topbarWindow.width / 1280,
+                (topbarWindow.modelData.height - topbarWindow.stripHeight) / 720)
             backgroundHidden: root.config.barBackgroundEnabled === false ? 1 : 0
             panelRect: topbarWindow.menuRect
             anchorX: topbarWindow.menuAnchor
@@ -433,11 +434,11 @@ Variants {
         // edges keep the bar's own material.
         Canvas {
             id: topScreenCorners
-            visible: barLoader.width >= topbarWindow.width - 1
+            visible: opacity > .001
             z: 20
             width: topbarWindow.width
             height: topbarWindow.stripHeight + 3
-            opacity: 1
+            opacity: 1 - root.desktopMorphProgress
             antialiasing: true
 
             onPaint: {
@@ -474,8 +475,9 @@ Variants {
             z: 4
             anchors.top: parent.top
             x: (topbarWindow.width - width) / 2
-            width: topbarWindow.infiniteMode
-                ? Math.min(topbarWindow.width, item ? item.implicitWidth : topbarWindow.width) : topbarWindow.width
+            width: item ? item.morphWidth : topbarWindow.width
+            opacity: root.desktopMorphProgress < .5 ? root.desktopSourceReveal : root.desktopTargetReveal
+            enabled: root.desktopSourceReveal > .99 || root.desktopTargetReveal > .99
             height: topbarWindow.stripHeight
             onXChanged: { topbarWindow.surfaceDirty = true; Qt.callLater(popover.refreshAnchor) }
             onWidthChanged: { topbarWindow.surfaceDirty = true; Qt.callLater(popover.refreshAnchor) }

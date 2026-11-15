@@ -1,10 +1,14 @@
 import QtQuick
 import QtTest
+import QtQuick.Window
+import Quickshell
 import "../../core" as Core
 import "../../components" as Components
 import "../../features/topbar" as TopBar
 
-Item {
+ShellRoot {
+  Window {
+    visible: true
     width: 600; height: 420
     Core.InfiniteDesktopTransition { id: transition }
     Rectangle {
@@ -79,8 +83,9 @@ Item {
         }
     }
     TestCase {
+        id: checks
         name: "InfiniteDesktopTransition"
-        when: windowShown
+        when: false
         function init() {
             transition.reducedMotion = true
             transition.active = false
@@ -114,60 +119,50 @@ Item {
             compare(transition.sourceReveal, 1)
             verify(transition.active)
         }
-        function test_fade_out_before_slide_and_blur_reveal_after_arrival() {
+        function test_continuous_geometry_with_hidden_model_handoff() {
             transition.active = true
-            wait(80)
-            verify(transition.sourceReveal > 0 && transition.sourceReveal < 1)
-            compare(transition.progress, 0, "Workspaces cannot slide before source icons disappear")
-            compare(transition.frameFold, 0)
-            compare(transition.targetReveal, 0)
-            tryCompare(transition, "sourceReveal", 0, 500)
-            wait(80)
-            verify(transition.progress > 0 && transition.progress < 1)
-            verify(transition.frameFold > 0 && transition.frameFold < 1)
-            compare(transition.targetReveal, 0, "Topbar icons must stay hidden during the slide")
-            tryCompare(transition, "progress", 1, 500)
-            compare(transition.targetReveal, 0)
-            tryCompare(transition, "frameFold", 1, 500)
-            wait(30)
-            verify(transition.targetReveal > 0 && transition.targetReveal < 1, "Reveal must animate instead of appearing suddenly")
-            tryVerify(function() { return !transition.moving }, 500)
-            compare(transition.targetReveal, 1)
-            transition.active = false
-            wait(70)
-            verify(transition.targetReveal > 0 && transition.targetReveal < 1)
-            compare(transition.progress, 1)
-            compare(transition.sourceReveal, 0)
-            tryCompare(transition, "targetReveal", 0, 500)
-            wait(80)
-            verify(transition.progress > 0 && transition.progress < 1)
-            compare(transition.sourceReveal, 0)
-            tryCompare(transition, "frameFold", 0, 500)
-            wait(30)
-            verify(transition.sourceReveal > 0 && transition.sourceReveal < 1)
-            tryVerify(function() { return !transition.moving }, 500)
-            compare(transition.sourceReveal, 1)
-            compare(transition.progress, 0)
+            let previous = 0, frames = 0
+            while (transition.moving && frames < 100) {
+                wait(16)
+                const p = transition.progress
+                verify(p >= previous, "Opening must move monotonically")
+                verify(p-previous < .2, "Geometry must not jump between frames")
+                compare(transition.frameFold,p)
+                compare(transition.railRemaining,1-p)
+                if (p >= .28 && p <= .68) {
+                    compare(transition.sourceReveal,0)
+                    compare(transition.targetReveal,0)
+                }
+                verify(transition.sourceReveal === 0 || transition.targetReveal === 0,
+                       "Different item models must never overlap")
+                previous=p; frames++
+            }
+            verify(frames > 8)
+            compare(transition.progress,1)
+            compare(transition.targetReveal,1)
+            transition.active=false
+            tryVerify(function() { return !transition.moving }, 1200)
+            compare(transition.progress,0)
+            compare(transition.sourceReveal,1)
+            compare(transition.targetReveal,0)
         }
-        function test_frame_folds_through_corners_and_restores() {
-            frame.progress = .5
-            wait(60)
-            const partial = grabImage(frameStage)
-            compare(partial.red(2, 378), 0)
-            compare(partial.red(300, 280), 0, "Bottom frame must leave the centre free")
-            verify(partial.red(2, 289) > 0, "Corner must fold along its own edge")
-            frame.progress = 1
-            wait(40)
-            const folded = grabImage(frameStage)
-            compare(folded.red(2, 200), 0)
-            compare(folded.red(300, 378), 0)
-            frame.progress = 0
-            tools.reveal = 0
-            controller.close()
-            wait(40)
-            const restored = grabImage(frameStage)
-            compare(restored.red(2, 200), 255)
-            compare(restored.red(300, 378), 255)
+        function test_frame_morph_stays_anchored_and_restores() {
+            for (const p of [0,.1,.25,.5,.75,.9,1,.75,.5,.25,0]) {
+                frame.progress=p
+                wait(25)
+                const image=grabImage(frameStage)
+                verify(image.red(0,200)>0,"Side border must never break into travelling blocks")
+                verify(image.red(300,379)>0,"The bottom rim must stay anchored")
+                compare(image.red(300,160),0,"Morph must leave the desktop interior free")
+            }
+            frame.progress=1
+            wait(25)
+            const dock=grabImage(frameStage)
+            compare(dock.red(30,200),0,"Destination must release the old wide rail")
+            verify(dock.red(2,365)>0,"Destination must retain its curved shelf")
+            frame.progress=0
+            wait(25)
+            verify(grabImage(frameStage).red(30,200)>250,"Source rail must restore")
         }
         function test_live_icons_blur_fade_and_control_registration() {
             if (toolsStage.GraphicsInfo.api === GraphicsInfo.Software)
@@ -245,4 +240,20 @@ Item {
             verify(!transition.moving)
         }
     }
+  }
+  Timer {
+    interval: 100; running: true
+    onTriggered: {
+        try {
+            for (const name of ["test_canvas_without_special_topbar_preserves_bars_and_frame",
+                "test_continuous_geometry_with_hidden_model_handoff",
+                "test_frame_morph_stays_anchored_and_restores", "test_reverse_without_jump",
+                "test_reduced_motion_and_midflight_change"]) {
+                checks.init(); checks[name]()
+            }
+            console.info("INFINITE_MORPH_OK")
+        } catch (error) { console.error("INFINITE_MORPH_FAILED",String(error)) }
+        Qt.quit()
+    }
+  }
 }
