@@ -1,5 +1,6 @@
 import QtQuick
 import "../../components" as Components
+import "../../core/WidgetCatalog.js" as Catalog
 
 Column {
     id: root
@@ -19,7 +20,11 @@ Column {
     onVisibleChanged: if (!visible) { contextEntrance.stop(); context.opacity = 1 }
     readonly property var selectedWidget: config.sharedWidgets.find(item => item.kind === selectedKind) || null
     readonly property string selectedName: selectedWidget ? selectedWidget.name
-        : selectedKind === "visualizer" ? "Visualizador" : "Moldura"
+        : selectedKind === "visualizer" ? "Visualizador" : "Widgets"
+    readonly property var variants: Catalog.variants(selectedKind)
+    readonly property string selectedVariant: selectedWidget
+        ? Catalog.resolve(selectedKind, selectedWidget.variantId).id : ""
+    readonly property int variantColumns: Math.max(1, Math.min(3, Math.floor((width + 12) / 220)))
     readonly property int columns: Math.max(1, Math.min(4, Math.floor((width+12)/190)))
     spacing: 10
 
@@ -37,7 +42,6 @@ Column {
     function prepareResult(result) {
         let kind = ""
         if (result.id.indexOf("legacy.visualizer") === 0 || result.id === "desktop.visualizer") kind = "visualizer"
-        else if (result.id.indexOf("legacy.frame") === 0 || result.id === "legacy.attach") kind = "frame"
         else if (result.id.indexOf("scene.gallery") === 0) kind = "gallery"
         else if (result.id.indexOf("widget.") === 0) kind = result.id.split(".")[1]
         if (kind && selectedKind !== kind) { selectedKind = kind; return true }
@@ -70,7 +74,7 @@ Column {
         width: parent.width; wrapMode: Text.WordWrap
         text: root.space === "desktop" && !root.config.desktopWidgetsEnabled
             ? "Widgets ocultos no desktop. Suas escolhas estão preservadas."
-            : "Selecione uma miniatura para ajustar. Use o switch para mostrar ou ocultar."
+            : "Escolha uma família e depois a aparência do widget. A posição continua no editor."
     }
 
     component WidgetCard: Rectangle {
@@ -82,7 +86,7 @@ Column {
         property string toggleName: ""
         signal toggleRequested()
         readonly property bool selected: root.selectedKind === kind
-        width: (root.width-(root.columns-1)*12)/root.columns; height: 132; radius: 17
+        width: (root.width-(root.columns-1)*12)/root.columns; height: 151; radius: 17
         color: Qt.rgba(root.theme.accent.r,root.theme.accent.g,root.theme.accent.b,selected ? .14 : hover.hovered ? .08 : .035)
         border.color: selected || activeFocus ? root.theme.accentSoft : root.theme.borderSubtle
         border.width: 1
@@ -100,19 +104,27 @@ Column {
         SettingsWidgetPreview {
             anchors.top: parent.top; anchors.topMargin: 9; anchors.horizontalCenter: parent.horizontalCenter
             width: parent.width-28; height: 81; theme: root.theme; kind: card.kind
+            variantId: Catalog.resolve(card.kind, (root.config.sharedWidgetByKind(card.kind) || {}).variantId)
+                ? Catalog.resolve(card.kind, (root.config.sharedWidgetByKind(card.kind) || {}).variantId).id : "editorial"
             solid: root.config.widgetSurfaceMode === "solid"
             visualizerMode: root.legacyTheme ? root.legacyTheme.visualizerMode : "wave"
             opacity: card.checked ? 1 : .56
             Accessible.ignored: true
         }
         Text {
-            x: 13; y: 102; width: parent.width-70
+            x: 13; y: 99; width: parent.width-70
             text: card.title; color: root.theme.textPrimary; font.family: root.theme.bodyFont
             font.pixelSize: 11; elide: Text.ElideRight
         }
+        Text {
+            x: 13; y: 122; width: parent.width - 26
+            text: Catalog.variants(card.kind).length ? Catalog.variants(card.kind).length + " aparências" : "Ajustes da composição"
+            color: root.theme.textSecondary; font.family: root.theme.bodyFont; font.pixelSize: 9
+            elide: Text.ElideRight
+        }
         Toggle {
             objectName: card.toggleName
-            anchors.right: parent.right; anchors.rightMargin: 10; y: 92
+            anchors.right: parent.right; anchors.rightMargin: 10; y: 90
             width: 42; label: card.title + " no desktop"
             checked: card.checked; enabled: card.canToggle
             onTriggered: card.toggleRequested()
@@ -137,13 +149,7 @@ Column {
             checked: root.config.desktopVisualizerEnabled
             onToggleRequested: root.config.setValue("desktop.visualizerEnabled", !checked)
         }
-        WidgetCard {
-            visible: root.space === "desktop"; objectName: "widgetCard.frame"
-            kind: "frame"; title: "Moldura"; toggleName: "legacy.frame"
-            checked: root.legacyTheme ? root.legacyTheme.desktopFrameEnabled : false
-            canToggle: !!root.legacyTheme
-            onToggleRequested: root.legacyTheme.setDesktopFrameEnabled(!checked)
-        }
+
     }
     Rectangle {
         width: parent.width; height: context.implicitHeight+22; radius: 14
@@ -156,9 +162,59 @@ Column {
                 Link { visible: !!root.selectedWidget; label: "Posição e estilo ↗"; onTriggered: root.editSelected() }
             }
             Caption {
+                visible: root.variants.length > 0
+                width: parent.width; wrapMode: Text.WordWrap
+                text: Catalog.description(root.selectedKind) + " · " + root.variants.length + " aparências. A escolha é salva para este widget."
+            }
+            Flow {
+                objectName: "widgetVariants"
+                width: parent.width; spacing: 10
+                Repeater {
+                    model: root.variants
+                    Rectangle {
+                        id: choice
+                        required property var modelData
+                        readonly property bool chosen: root.selectedVariant === modelData.id
+                        objectName: "widgetVariant." + root.selectedKind + "." + modelData.id
+                        width: (context.width - (root.variantColumns - 1) * 10) / root.variantColumns
+                        height: 176; radius: 14
+                        color: Qt.rgba(root.theme.accent.r, root.theme.accent.g, root.theme.accent.b, chosen ? .10 : .025)
+                        border.width: 1; border.color: chosen || activeFocus ? root.theme.accent : root.theme.borderSubtle
+                        activeFocusOnTab: true
+                        function choose() { root.config.setWidgetVariant(root.selectedKind, modelData.id) }
+                        Accessible.role: Accessible.RadioButton
+                        Accessible.name: root.selectedName + ": " + modelData.name
+                        Accessible.checkable: true; Accessible.checked: chosen
+                        Accessible.onPressAction: choose()
+                        Keys.onSpacePressed: choose()
+                        Keys.onReturnPressed: choose()
+                        SettingsWidgetPreview {
+                            x: 14; y: 12; width: parent.width - 28; height: 112
+                            theme: root.theme; kind: root.selectedKind; variantId: choice.modelData.id
+                            Accessible.ignored: true
+                        }
+                        Text {
+                            x: 13; y: 134; width: parent.width - 38; text: choice.modelData.name
+                            font.family: root.theme.bodyFont; font.pixelSize: 11; color: root.theme.textPrimary
+                            elide: Text.ElideRight
+                        }
+                        Text {
+                            x: 13; y: 154; width: parent.width - 26; text: choice.modelData.detail
+                            font.family: root.theme.bodyFont; font.pixelSize: 9; color: root.theme.textSecondary
+                            elide: Text.ElideRight
+                        }
+                        Rectangle {
+                            anchors.right: parent.right; anchors.rightMargin: 13; y: 137
+                            width: 7; height: 7; radius: 4; color: root.theme.accent; visible: choice.chosen
+                        }
+                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: choice.choose() }
+                    }
+                }
+            }
+            Caption {
                 visible: !!root.selectedWidget && root.selectedKind !== "gallery"
                 width: parent.width; wrapMode: Text.WordWrap
-                text: ({clock:"Tipografia e tamanho no editor.",weather:"A previsão acompanha sua localização configurada.",media:"Controles conectados ao seu player.",system:"CPU, memória e armazenamento no desktop."})[root.selectedKind] || ""
+                text: ({clock:"Tipografia e tamanho no editor.",weather:"A previsão acompanha sua localização configurada.",media:"Controles conectados ao seu player.",system:"CPU, memória e armazenamento no desktop.",battery:"Nível de carga e alimentação do dispositivo."})[root.selectedKind] || ""
             }
             Loader {
                 width: parent.width; active: root.selectedKind === "gallery"
@@ -207,20 +263,7 @@ Column {
                     }
                 }
             }
-            Loader {
-                width: parent.width; active: root.selectedKind === "frame" && !!root.legacyTheme
-                sourceComponent: Column {
-                    width: parent.width; spacing: 4
-                    Toggle { objectName: "legacy.attach"; label: "Painéis unidos à barra"; checked: root.legacyTheme.popupAttachedToBar; onTriggered: root.legacyTheme.setPopupAttachedToBar(!checked) }
-                    Components.VeloraSettingsSlider {
-                        objectName: "legacy.frame-opacity"; theme: root.theme; label: "Transparência da moldura"
-                        minimum: root.legacyTheme.minOpacityForRole("sidebar"); maximum: .98
-                        value: root.legacyTheme.sidebarOpacity
-                        onEdited: value => root.legacyTheme.applyOpacity(value,root.legacyTheme.popupOpacity,root.legacyTheme.cardOpacity)
-                    }
 
-                }
-            }
         }
     }
     Flow {

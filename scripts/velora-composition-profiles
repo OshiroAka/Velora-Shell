@@ -257,12 +257,12 @@ def normalize_snapshot(value: object) -> dict:
     shared_widgets = value.get("sharedWidgets")
     if isinstance(shared_widgets, dict) and isinstance(shared_widgets.get("items"), list):
         items = copy.deepcopy(shared_widgets["items"])
-        if len(items) != 6:
-            raise ValueError("a composição precisa dos seis widgets compartilhados")
+        if len(items) not in (6, 7):
+            raise ValueError("a composição precisa dos seis widgets-base e bateria opcional")
         identifiers: set[str] = set()
         kinds: set[str] = set()
         allowed_kinds = {
-            "clock", "calendar", "weather", "media", "gallery", "system",
+            "clock", "calendar", "weather", "media", "gallery", "system", "battery",
         }
         for position, item in enumerate(items):
             if not isinstance(item, dict):
@@ -275,7 +275,7 @@ def normalize_snapshot(value: object) -> dict:
                 raise ValueError(f"tipo de widget inválido: {item.get('kind')}")
             identifiers.add(identifier)
             kinds.add(kind)
-        if kinds != allowed_kinds:
+        if kinds - {"battery"} != allowed_kinds - {"battery"}:
             raise ValueError("a composição precisa dos seis widgets-base")
         template = str(shared_widgets.get("layoutTemplate", "custom"))
         allowed_templates = {

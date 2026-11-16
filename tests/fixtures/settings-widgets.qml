@@ -93,14 +93,15 @@ ShellRoot {
                 } else if (step === 4) {
                     assert(widgets.columns === 2,"compact grid wraps")
                     assert(!find(widgets,"widgetCard.calendar"),"removed calendar has no card")
-                    for(const kind of ["clock","weather","media","gallery","system","visualizer","frame"]) {
+                    for(const kind of ["clock","weather","media","gallery","system","battery","visualizer"]) {
                         const card=find(widgets,"widgetCard."+kind)
                         const point=card.mapToItem(widgets,0,0)
                         assert(point.x>=0 && point.x+card.width<=widgets.width+.5,"card stays within content: "+kind)
                     }
-                    widgets.prepareResult({id:"legacy.frame-opacity"})
+                    widgets.prepareResult({id:"widget.clock.variants"})
                 } else if (step === 5) {
-                    assert(!!find(widgets,"legacy.frame-opacity"),"frame context preserved")
+                    assert(!!find(widgets,"widgetVariants"),"variant search opens family")
+                    assert(!find(widgets,"widgetCard.frame") && !find(widgets,"legacy.frame-opacity") && !find(widgets,"legacy.attach"),"fixed frame is not a widget")
                     assert(!find(widgets,"legacy.visualizer-mode"),"inactive context unloaded")
                     assert(!config.savePending,"writes settle")
                     console.info("SETTINGS_WIDGETS_OK pointer keyboard contexts responsive persistence")

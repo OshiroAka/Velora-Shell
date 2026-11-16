@@ -2,6 +2,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import "TopBarOrder.js" as TopBarOrder
+import "WidgetCatalog.js" as WidgetCatalog
 
 Scope {
     id: root
@@ -347,14 +348,14 @@ Scope {
         if (widgets !== null && !Array.isArray(widgets))
             return source + ": lockPreview.sharedWidgets.items must be an array"
         if (Array.isArray(widgets)) {
-            if (widgets.length !== 6)
-                return source + ": shared widgets must contain exactly 6 entries"
+            if (widgets.length < 6 || widgets.length > 7)
+                return source + ": shared widgets must contain 6 or 7 entries"
             const widgetIds = ({})
             for (let widgetIndex = 0; widgetIndex < widgets.length; widgetIndex += 1) {
                 const widget = widgets[widgetIndex]
                 if (!isObject(widget) || !String(widget.id || "")
                         || !["clock", "calendar", "weather", "media", "gallery",
-                            "system",
+                            "system", "battery",
                             "galleryPhoto"].includes(String(widget.kind || "")))
                     return source + ": invalid shared widget at " + widgetIndex
                 if (widgetIds[String(widget.id)])
@@ -687,7 +688,7 @@ Scope {
             character: [560, 945], image: [320, 240], clock: [282, 120],
             calendar: [282, 260], weather: [282, 128], profileHeader: [169, 58],
             greeting: [180, 52], verticalLabel: [28, 210], gallery: [302, 294],
-            media: [294, 76], mediaPlayer: [294, 76], system: [302, 194],
+            battery: [270, 150], media: [294, 76], mediaPlayer: [294, 76], system: [302, 194],
             photoGrid: [360, 360], text: [320, 96]
         }
         return sizes[type] || [240, 120]
@@ -865,7 +866,7 @@ Scope {
     }
 
     function widgetKinds() {
-        return ["clock", "calendar", "weather", "media", "gallery", "system"]
+        return ["clock", "calendar", "weather", "media", "gallery", "system", "battery"]
     }
 
     function normalizedSharedWidget(value, fallbackOrder) {
@@ -912,18 +913,20 @@ Scope {
     function widgetDisplayName(kind) {
         const names = {
             clock: "Relógio", calendar: "Calendário", weather: "Previsão",
-            media: "Mídia", gallery: "Galeria", system: "Sistema"
+            media: "Mídia", gallery: "Galeria", system: "Sistema", battery: "Bateria"
         }
         return names[String(kind)] || String(kind)
     }
 
     function logicalWidgetSetComplete(values) {
-        if (!Array.isArray(values) || values.length !== widgetKinds().length)
+        // Six-entry saved layouts predate the optional battery widget. Keep
+        // their coordinates authoritative instead of rebuilding the template.
+        if (!Array.isArray(values) || values.length < 6 || values.length > 7)
             return false
         const found = ({})
         for (let index = 0; index < values.length; index += 1)
             found[String(values[index] && values[index].kind || "")] = true
-        return widgetKinds().every(function(kind) { return Boolean(found[kind]) })
+        return widgetKinds().filter(kind => kind !== "battery").every(function(kind) { return Boolean(found[kind]) })
     }
 
     function normalizedSharedWidgets(values) {
@@ -1214,6 +1217,19 @@ Scope {
         recompute()
         saveTimer.restart()
         return true
+    }
+
+    function setWidgetVariant(kind, variant) {
+        const choices = WidgetCatalog.variants(String(kind))
+        const choice = choices.find(entry => entry.id === String(variant))
+        const next = clone(sharedWidgets)
+        const item = next.find(entry => entry.kind === String(kind))
+        if (!choice || !item) return false
+        if (item.variantId === choice.id) return true
+        item.variantId = choice.id
+        item.desktopSize = {width: choice.width, height: choice.height}
+        // Lock transforms and custom typography are independent preferences.
+        return setSharedWidgets(next, true)
     }
 
     function setWidgetSurfaceMode(mode) {

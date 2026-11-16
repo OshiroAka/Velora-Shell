@@ -171,14 +171,14 @@
             "items": {
               "type": "array",
               "minItems": 6,
-              "maxItems": 6,
+              "maxItems": 7,
               "items": {
                 "type": "object",
                 "additionalProperties": false,
                 "required": ["id", "kind", "name", "desktopEnabled", "lockEnabled", "locked", "stagger", "baseWidth", "baseHeight", "desktop", "lock"],
                 "properties": {
                   "id": {"type": "string", "minLength": 1},
-                  "kind": {"enum": ["clock", "calendar", "weather", "media", "gallery", "system"]},
+                  "kind": {"enum": ["clock", "calendar", "weather", "media", "gallery", "system", "battery"]},
                   "name": {"type": "string", "maxLength": 80},
                   "desktopEnabled": {"type": "boolean"},
                   "lockEnabled": {"type": "boolean"},

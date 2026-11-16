@@ -1,97 +1,81 @@
 import QtQuick
 
-GlassPanel {
+WidgetSurface {
     id: root
-
-    required property var theme
     required property var clock
-    property var itemStyle: ({})
-    property string variantId: "classic"
-    readonly property bool editorial: variantId === "editorial"
+    readonly property bool analog: variantId === "analog"
+    readonly property bool dotted: variantId === "dots"
     readonly property bool minimal: variantId === "minimal"
-    readonly property string contentFont: customFont.name.length
-        ? customFont.name : String(itemStyle.fontFamily || root.theme.bodyFont)
     readonly property string displayFont: String(itemStyle.displayFontFamily || "").length
-        ? String(itemStyle.displayFontFamily) : orbitronVariable.name
-    readonly property real fontScale: Number(itemStyle.fontScale || 1)
-    readonly property color contentColor: String(itemStyle.textColor || "").length
-        ? itemStyle.textColor : root.theme.moduleInk
+        ? itemStyle.displayFontFamily : orbitron.name
+    FontLoader { id: orbitron; source: "../../assets/fonts/Orbitron-Variable.ttf" }
+    width: 350; height: 140
 
-    FontLoader {
-        id: orbitronVariable
-        source: "../../assets/fonts/Orbitron-Variable.ttf"
-    }
-
-    FontLoader { id: customFont; source: String(root.itemStyle.fontAsset || "") }
-
-    width: 282
-    height: 120
-    radius: Number(itemStyle.radius === undefined
-        ? (editorial ? 24 : (minimal ? 14 : 27)) : itemStyle.radius)
-    materialMode: root.theme.resolvedMaterial(itemStyle)
-    solidColor: String(itemStyle.solidColor || "#20222a")
-    materialOpacity: Number(itemStyle.surfaceOpacity === undefined
-        ? 0.82 : itemStyle.surfaceOpacity)
-    surfaceColor: root.theme.moduleSurface
-    flatSurface: Boolean(itemStyle.matchBarSurface)
-    borderColor: root.theme.moduleBorder
-    shadowColor: Qt.rgba(root.theme.shadow.r, root.theme.shadow.g,
-                         root.theme.shadow.b, 0.12)
-
-    Text {
-        anchors.horizontalCenter: parent.horizontalCenter
-        anchors.top: parent.top
-        anchors.topMargin: root.editorial ? Math.max(8, parent.height * 0.08) : 8
-        text: root.clock.timeText
-        visible: !root.editorial
-        color: root.contentColor
-        font.family: root.displayFont
-        font.pixelSize: (root.editorial
-            ? Math.min(parent.width * 0.205, parent.height * 0.50)
-            : (root.minimal ? 52 : 64)) * root.fontScale
-        font.weight: Number(root.itemStyle.fontWeight || Font.Medium)
-        font.letterSpacing: Number(root.itemStyle.letterSpacing === undefined
-            ? 1.5 : root.itemStyle.letterSpacing)
-    }
-
-    Row {
-        anchors.horizontalCenter: parent.horizontalCenter
-        anchors.top: parent.top
-        anchors.topMargin: Math.max(8, parent.height * 0.08)
-        spacing: 0
-        visible: root.editorial
-
-        Text {
-            text: root.clock.timeText.slice(0, 3)
-            color: root.contentColor
-            font.family: root.displayFont
-            font.pixelSize: Math.min(root.width * 0.205,
-                root.height * 0.50) * root.fontScale
-            font.weight: Number(root.itemStyle.fontWeight || Font.Medium)
-            font.letterSpacing: Number(root.itemStyle.letterSpacing === undefined
-                ? 1.5 : root.itemStyle.letterSpacing)
+    Item {
+        id: face
+        visible: root.analog
+        width: Math.min(root.width - 42, root.height - 60); height: width
+        anchors.horizontalCenter: parent.horizontalCenter; y: 18
+        Repeater {
+            model: 60
+            Item {
+                required property int index
+                anchors.centerIn: parent; width: 1; height: face.height
+                rotation: index * 6
+                Rectangle {
+                    anchors.horizontalCenter: parent.horizontalCenter; y: 0
+                    width: parent.index % 5 === 0 ? 3 : 1
+                    height: parent.index % 5 === 0 ? 10 : 4
+                    radius: 1; color: root.contentColor
+                    opacity: parent.index % 5 === 0 ? .8 : .25
+                }
+            }
         }
-        Text {
-            text: root.clock.timeText.slice(3)
-            color: root.theme.accentAlt
-            font.family: root.displayFont
-            font.pixelSize: Math.min(root.width * 0.205,
-                root.height * 0.50) * root.fontScale
-            font.weight: Number(root.itemStyle.fontWeight || Font.Medium)
-            font.letterSpacing: Number(root.itemStyle.letterSpacing === undefined
-                ? 1.5 : root.itemStyle.letterSpacing)
+        Repeater {
+            model: [{length: .25, thickness: 5, angle: (root.clock.now.getHours() % 12 + root.clock.now.getMinutes() / 60) * 30},
+                {length: .36, thickness: 3, angle: root.clock.now.getMinutes() * 6}]
+            Item {
+                required property var modelData
+                anchors.centerIn: parent; width: 1; height: 1
+                rotation: modelData.angle
+                Rectangle {
+                    x: -parent.modelData.thickness / 2
+                    y: -face.height * parent.modelData.length
+                    width: parent.modelData.thickness; height: face.height * parent.modelData.length + 9
+                    radius: width / 2; color: root.contentColor
+                }
+            }
         }
+        Rectangle { anchors.centerIn: parent; width: 9; height: 9; radius: 5; color: root.contentColor }
     }
-
     Text {
-        anchors.horizontalCenter: parent.horizontalCenter
-        anchors.top: parent.top
-        anchors.topMargin: root.editorial ? parent.height * 0.68 : 79
-        text: root.clock.dateText
-        color: root.contentColor
-        font.family: root.contentFont
-        font.pixelSize: (root.editorial ? 16 : (root.minimal ? 13 : 15))
-            * root.fontScale
-        font.weight: Number(root.itemStyle.fontWeight || Font.Light)
+        visible: root.dotted; x: 24; y: 17; width: parent.width - 48
+        text: root.clock.locale().toString(root.clock.now, "dddd · dd MMM yyyy").toUpperCase()
+        font.family: root.contentFont; font.pixelSize: 10 * root.fontScale
+        font.letterSpacing: 1; color: root.mutedColor; elide: Text.ElideRight
+    }
+    DotMatrixText {
+        objectName: "clock.dots"; visible: root.dotted
+        x: 24; y: 47; width: parent.width - 48; height: parent.height - 94
+        text: root.clock.timeText; color: root.contentColor
+    }
+    Text {
+        visible: !root.analog && !root.dotted
+        x: 20; y: 12; width: parent.width - 40; height: parent.height * .61
+        text: root.clock.timeText; color: root.contentColor
+        font.family: root.minimal ? root.contentFont : root.displayFont
+        font.pixelSize: Math.min(root.width * .18, root.height * .47) * root.fontScale
+        font.weight: root.minimal ? Font.Light : Font.Medium
+        horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+        fontSizeMode: Text.Fit; minimumPixelSize: 10
+    }
+    Text {
+        x: 18; width: parent.width - 36
+        y: root.analog ? face.y + face.height + 15 : parent.height - (root.dotted ? 33 : 35)
+        text: root.dotted ? "HORA LOCAL" : root.clock.dateText
+        color: root.mutedColor; font.family: root.contentFont
+        font.pixelSize: (root.dotted ? 9 : 11) * root.fontScale
+        font.letterSpacing: root.dotted ? 3 : 0
+        horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight
     }
 }

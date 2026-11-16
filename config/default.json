@@ -399,6 +399,42 @@
             "flipX": false
           },
           "variantId": "inherit"
+        },
+        {
+          "id": "shared-battery",
+          "kind": "battery",
+          "name": "Bateria",
+          "desktopEnabled": false,
+          "lockEnabled": false,
+          "locked": false,
+          "stagger": 6,
+          "baseWidth": 270,
+          "baseHeight": 150,
+          "desktopSize": {
+            "width": 270,
+            "height": 150
+          },
+          "lockSize": {
+            "width": 270,
+            "height": 150
+          },
+          "desktop": {
+            "x": 1190,
+            "y": 530,
+            "scale": 1,
+            "rotation": 0,
+            "opacity": 1,
+            "flipX": false
+          },
+          "lock": {
+            "x": 1190,
+            "y": 530,
+            "scale": 1,
+            "rotation": 0,
+            "opacity": 1,
+            "flipX": false
+          },
+          "variantId": "editorial"
         }
       ]
     },

@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Effects
 import "../../core/SurfaceGeometry.js" as Geometry
+import "../../core/WidgetCatalog.js" as WidgetCatalog
 
 Item {
     id: root
@@ -40,6 +41,7 @@ Item {
     property alias mediaHitItem: sharedMedia
     property alias galleryHitItem: sharedGallery
     property alias systemHitItem: sharedSystem
+    property alias batteryHitItem: sharedBattery
 
     function widget(kind) {
         return config.sharedWidgetByKind(kind)
@@ -140,12 +142,14 @@ Item {
                 matchBarSurface: false
             })
         }
+        readonly property real currentRadius: Number(currentStyle.radius === undefined ? 28 : currentStyle.radius)
         readonly property string currentMaterial: root.theme.resolvedMaterial(
             currentStyle)
         readonly property string configuredVariant: widgetData
             ? String(widgetData.variantId || "inherit") : "inherit"
         readonly property string currentVariant:
-            root.transition.progress < 0.5 ? "editorial" : "classic"
+            root.transition.progress < 0.5
+                ? WidgetCatalog.resolve(kind, configuredVariant).id : "classic"
         readonly property var stateTransform: root.transformFor(widgetData, stagger)
         readonly property var stateSize: root.sizeFor(widgetData, stagger)
         property real configuredX: Number(stateTransform.x || 0)
@@ -249,6 +253,7 @@ Item {
         if (kind === "media") return mediaComponent
         if (kind === "gallery") return galleryComponent
         if (kind === "system") return systemComponent
+        if (kind === "battery") return batteryComponent
         return null
     }
 
@@ -347,6 +352,18 @@ Item {
         }
     }
 
+    Component {
+        id: batteryComponent
+        BatteryCard {
+            anchors.fill: parent
+            status: root.status
+            theme: root.theme
+            itemStyle: parent.itemStyle
+            variantId: parent.itemVariant
+            nativeOptics: true
+        }
+    }
+
     // Desktop composition stays mounted while editing. The independent new
     // lockscreen does not consume these layers or their legacy lock transforms.
     Item {
@@ -394,4 +411,5 @@ Item {
     SharedWidget { id: sharedMedia; kind: "media" }
     SharedWidget { id: sharedGallery; kind: "gallery" }
     SharedWidget { id: sharedSystem; kind: "system" }
+    SharedWidget { id: sharedBattery; kind: "battery" }
 }

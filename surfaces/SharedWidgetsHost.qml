@@ -103,11 +103,12 @@ Variants {
             if (width <= 0 || height <= 0)
                 return
             const shapes = [
-                nativeShape(sharedScene.clockHitItem, 27),
-                nativeShape(sharedScene.weatherHitItem, 28),
-                nativeShape(sharedScene.mediaHitItem, 28),
-                nativeShape(sharedScene.galleryHitItem, 28),
-                nativeShape(sharedScene.systemHitItem, 28)
+                nativeShape(sharedScene.clockHitItem, sharedScene.clockHitItem.currentRadius),
+                nativeShape(sharedScene.weatherHitItem, sharedScene.weatherHitItem.currentRadius),
+                nativeShape(sharedScene.mediaHitItem, sharedScene.mediaHitItem.currentRadius),
+                nativeShape(sharedScene.galleryHitItem, sharedScene.galleryHitItem.currentRadius),
+                nativeShape(sharedScene.systemHitItem, sharedScene.systemHitItem.currentRadius),
+                nativeShape(sharedScene.batteryHitItem, sharedScene.batteryHitItem.currentRadius)
             ]
             const caustics = root.preview.shown
                 && root.config.waterCausticsEnabled
@@ -148,11 +149,12 @@ Variants {
 
         Region {
             id: individualBlurRegion
-            Region { item: sharedScene.translucentWidget(sharedScene.clockHitItem) ? sharedScene.clockHitItem : null; radius: Math.round(27 * sharedScene.clockHitItem.scale); intersection: Intersection.Combine }
-            Region { item: sharedScene.translucentWidget(sharedScene.weatherHitItem) ? sharedScene.weatherHitItem : null; radius: Math.round(28 * sharedScene.weatherHitItem.scale); intersection: Intersection.Combine }
-            Region { item: sharedScene.translucentWidget(sharedScene.mediaHitItem) ? sharedScene.mediaHitItem : null; radius: Math.round(28 * sharedScene.mediaHitItem.scale); intersection: Intersection.Combine }
-            Region { item: sharedScene.translucentWidget(sharedScene.galleryHitItem) ? sharedScene.galleryHitItem : null; radius: Math.round(28 * sharedScene.galleryHitItem.scale); intersection: Intersection.Combine }
-            Region { item: sharedScene.translucentWidget(sharedScene.systemHitItem) ? sharedScene.systemHitItem : null; radius: Math.round(28 * sharedScene.systemHitItem.scale); intersection: Intersection.Combine }
+            Region { item: sharedScene.translucentWidget(sharedScene.clockHitItem) ? sharedScene.clockHitItem : null; radius: Math.round(sharedScene.clockHitItem.currentRadius * sharedScene.clockHitItem.scale); intersection: Intersection.Combine }
+            Region { item: sharedScene.translucentWidget(sharedScene.weatherHitItem) ? sharedScene.weatherHitItem : null; radius: Math.round(sharedScene.weatherHitItem.currentRadius * sharedScene.weatherHitItem.scale); intersection: Intersection.Combine }
+            Region { item: sharedScene.translucentWidget(sharedScene.mediaHitItem) ? sharedScene.mediaHitItem : null; radius: Math.round(sharedScene.mediaHitItem.currentRadius * sharedScene.mediaHitItem.scale); intersection: Intersection.Combine }
+            Region { item: sharedScene.translucentWidget(sharedScene.galleryHitItem) ? sharedScene.galleryHitItem : null; radius: Math.round(sharedScene.galleryHitItem.currentRadius * sharedScene.galleryHitItem.scale); intersection: Intersection.Combine }
+            Region { item: sharedScene.translucentWidget(sharedScene.systemHitItem) ? sharedScene.systemHitItem : null; radius: Math.round(sharedScene.systemHitItem.currentRadius * sharedScene.systemHitItem.scale); intersection: Intersection.Combine }
+            Region { item: sharedScene.translucentWidget(sharedScene.batteryHitItem) ? sharedScene.batteryHitItem : null; radius: Math.round(sharedScene.batteryHitItem.currentRadius * sharedScene.batteryHitItem.scale); intersection: Intersection.Combine }
             Region { item: root.config.sceneLayers.length > 0 ? sharedScene.dynamicBlurItem(0) : null; radius: 28; intersection: Intersection.Combine }
             Region { item: root.config.sceneLayers.length > 1 ? sharedScene.dynamicBlurItem(1) : null; radius: 28; intersection: Intersection.Combine }
             Region { item: root.config.sceneLayers.length > 2 ? sharedScene.dynamicBlurItem(2) : null; radius: 28; intersection: Intersection.Combine }
@@ -179,6 +181,7 @@ Variants {
             Region { item: sharedScene.mediaHitItem; intersection: Intersection.Combine }
             Region { item: sharedScene.galleryHitItem; intersection: Intersection.Combine }
             Region { item: sharedScene.systemHitItem; intersection: Intersection.Combine }
+            Region { item: sharedScene.batteryHitItem; intersection: Intersection.Combine }
         }
 
         // A covered pixel keeps the desktop material host mapped even when
@@ -243,6 +246,7 @@ Variants {
             function onRotationChanged() { widgetWindow.queueNativeShapes() }
             function onOpacityChanged() { widgetWindow.queueNativeShapes() }
             function onVisibleChanged() { widgetWindow.queueNativeShapes() }
+            function onCurrentRadiusChanged() { widgetWindow.queueNativeShapes() }
         }
 
         ShapeConnections { watchedItem: sharedScene.clockHitItem }
@@ -250,6 +254,7 @@ Variants {
         ShapeConnections { watchedItem: sharedScene.mediaHitItem }
         ShapeConnections { watchedItem: sharedScene.galleryHitItem }
         ShapeConnections { watchedItem: sharedScene.systemHitItem }
+        ShapeConnections { watchedItem: sharedScene.batteryHitItem }
 
         Connections {
             target: root.preview

@@ -69,12 +69,12 @@ Item {
             readonly property bool hovered: tileMouse.containsMouse
 
             x: root.editorial ? 12 + slot * ((root.width - 40) / 3 + 8)
-                : (slot === 0 ? 0 : 157)
-            y: root.editorial ? 12 : (slot === 0 ? 0 : (slot === 1 ? 0 : 154))
+                : (slot === 0 ? 0 : root.width * 157 / 302)
+            y: root.editorial ? 12 : (slot === 0 ? 0 : (slot === 1 ? 0 : root.height * 154 / 294))
             width: root.editorial ? (root.width - 40) / 3
-                : (slot === 0 ? 144 : 145)
+                : root.width * (slot === 0 ? 144 : 145) / 302
             height: root.editorial ? root.height - 24
-                : (slot === 0 ? 294 : 140)
+                : root.height * (slot === 0 ? 294 : 140) / 294
             z: hovered ? 10 : (slot === 0 ? 3 : (3 - slot))
             transformOrigin: Item.Center
             scale: root.transitioning && slot !== 0 ? 0.97
