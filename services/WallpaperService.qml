@@ -6,7 +6,8 @@ Scope {
     id: root
 
     readonly property string homeDir: Quickshell.env("HOME") || ""
-    readonly property string statePath: homeDir + "/.cache/velora-shell/current_wallpaper"
+    readonly property string cacheHome: Quickshell.env("XDG_CACHE_HOME") || homeDir + "/.cache"
+    readonly property string statePath: cacheHome + "/velora-shell/current_wallpaper"
     readonly property string helperPath: Quickshell.shellDir + "/scripts/velora-composition-wallpaper-apply"
 
     property bool ready: false
@@ -84,7 +85,7 @@ Scope {
         onExited: function(exitCode) {
             root.running = false
             if (exitCode !== 0) {
-                root.error = "Não foi possível aplicar o wallpaper deste perfil."
+                root.error = "Não foi possível aplicar o wallpaper."
                 root.currentPath = root.appliedPath
             } else {
                 root.appliedPath = root.inFlightPath

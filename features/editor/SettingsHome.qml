@@ -11,8 +11,6 @@ Item {
     required property var controller
     required property var editor
     required property var theme
-    required property var profileService
-    required property var wallpaperStore
     property var motion: defaultMotion
     Core.Motion { id: defaultMotion; config: root.config }
     readonly property bool launcherMode: controller.launcherMode === true
@@ -184,10 +182,10 @@ Item {
     function categoryLabel(id) {
         const labels = {system: "Sistema", appearance: "Aparência", wallpapers: "Wallpaper",
             bar: "Barra e material", desktop: "Editor do desktop",
-            media: "Mídia e áudio", profiles: "Perfis", lock: "Lockscreen"}
+            media: "Mídia e áudio", lock: "Lockscreen"}
         return labels[id] || Catalog.category(id).name
     }
-    readonly property var sideNavigation: ["system", "appearance", "wallpapers", "infiniteDesk", "media", "profiles", "lock", "credits"].map(id => Catalog.category(id))
+    readonly property var sideNavigation: ["system", "appearance", "wallpapers", "infiniteDesk", "media", "lock", "credits"].map(id => Catalog.category(id))
     Item {
         anchors.fill: parent
         clip: true
@@ -362,8 +360,8 @@ Item {
                         sourceComponent: SettingsContent {
                             animatePageEntrance: false
                             config: root.config; controller: root.controller; editor: root.editor
-                            theme: root.theme; motion: root.motion; profileService: root.profileService
-                            wallpaperStore: root.wallpaperStore; page: lifecycle.presentedPage
+                            theme: root.theme; motion: root.motion
+                            page: lifecycle.presentedPage
                             section: root.section; mediaSection: root.section === "main" ? "playback" : root.section
                             onInlineToolOpened: item => {
                                 if (!item || !root.presented) return

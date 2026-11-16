@@ -26,15 +26,6 @@ ShellRoot {
         function applyWallpaper(path) { currentPath=path; return true }
     }
     QtObject {
-        id: profiles
-        signal profileApplied()
-        signal operationFinished(string operation, bool ok, string message)
-        property var wallpaperService: wallpaper
-        property string activeProfileId: ""
-        property var profiles: []
-        property string error: ""
-    }
-    QtObject {
         id: shell
         property bool barOnRight: false
         property int bottomBarHeight: 18
@@ -47,8 +38,7 @@ ShellRoot {
         function importTopWallpaperUrls(urls) { importedUrls = urls; return true }
         function openLyricsMaskEditor() { }
     }
-    QtObject { id: wallpaperStore; property string activeKey: "fixture" }
-    Core.SettingsController { id: controller; config: config; editor: scene; motion: motion; preview: preview; profileService: profiles; shell: shell }
+    Core.SettingsController { id: controller; config: config; editor: scene; motion: motion; preview: preview; wallpaperService: wallpaper; shell: shell }
     QtObject { id: environment; property var screen: Quickshell.screens[0]; property real width: window.width; property var activeToplevel: null }
     Services.ClockService { id: clock }
     QtObject {
@@ -142,7 +132,7 @@ ShellRoot {
         }
         Editor.EditorChrome {
             id: chrome; anchors.fill: parent; config: config; controller: controller; editor: scene
-            theme: theme; motion: motion; profileService: profiles; wallpaperStore: wallpaperStore
+            theme: theme; motion: motion
             presented: controller.shown
         }
     }

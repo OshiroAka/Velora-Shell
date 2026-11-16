@@ -15,8 +15,6 @@ Variants {
     required property var config
     required property var theme
     required property var motion
-    required property var profileService
-    required property var wallpaperStore
     required property var editor
     required property int opticsGeneration
 
@@ -194,8 +192,6 @@ Variants {
                 config: root.config
                 theme: root.theme
                 motion: root.motion
-                profileService: root.profileService
-                wallpaperStore: root.wallpaperStore
                 editor: root.editor
             }
 

@@ -6,7 +6,7 @@ var categories = [
     "id": "wallpapers",
     "name": "Wallpaper",
     "icon": "image",
-    "detail": "Seu fundo, sua composição."
+    "detail": "Seu fundo e seus efeitos."
   },
   {
     "id": "appearance",
@@ -37,12 +37,6 @@ var categories = [
     "name": "Sistema",
     "icon": "settings",
     "detail": "Tela, som, notificações, energia e rede."
-  },
-  {
-    "id": "profiles",
-    "name": "Perfis e configurações salvas",
-    "icon": "person",
-    "detail": "Composições para guardar e compartilhar."
   },
   {
     "id": "credits",
@@ -121,12 +115,6 @@ var entries = [
     {"id": "widget.media.desktop", "name": "Visibilidade Mídia em desktop", "page": "appearance", "section": "main", "group": "widgets", "target": "widget.media.desktop", "label": "", "action": "", "aliases": "lockPreview.sharedWidgets.items[kind=media].desktopEnabled"},
     {"id": "widget.gallery.desktop", "name": "Visibilidade Galeria principal em desktop", "page": "appearance", "section": "main", "group": "widgets", "target": "widget.gallery.desktop", "label": "", "action": "", "aliases": "lockPreview.sharedWidgets.items[kind=gallery].desktopEnabled"},
     {"id": "widget.system.desktop", "name": "Visibilidade Sistema em desktop", "page": "appearance", "section": "main", "group": "widgets", "target": "widget.system.desktop", "label": "", "action": "", "aliases": "lockPreview.sharedWidgets.items[kind=system].desktopEnabled"},
-    {"id": "wallpaper.autosave", "name": "Save/restauração automática por wallpaper", "page": "wallpapers", "section": "main", "target": "wallpaper.autosave", "label": "", "action": "", "aliases": "wallpaper-compositions.json compositions[key]"},
-    {"id": "profile.create", "name": "Novo perfil", "page": "profiles", "section": "main", "target": "profile.create", "label": "Novo perfil", "action": "", "aliases": "createProfile; profiles.json + assets"},
-    {"id": "profile.import", "name": "Importar .helixpack", "page": "profiles", "section": "main", "target": "profile.import", "label": "Importar .helixpack", "action": "", "aliases": "importPackage; profiles.json + assets"},
-    {"id": "profile.apply", "name": "Aplicar perfil", "page": "profiles", "section": "main", "target": "profile.apply", "label": "Aplicar", "action": "", "aliases": "applyProfile; profiles.json + assets", "fallbackLabel": "Novo perfil", "conditionHint": "Crie ou importe um perfil para acessar esta operação."},
-    {"id": "profile.save", "name": "Salvar perfil", "page": "profiles", "section": "main", "target": "profile.save", "label": "Salvar", "action": "", "aliases": "updateProfile; profiles.json + assets", "fallbackLabel": "Novo perfil", "conditionHint": "Crie ou importe um perfil para acessar esta operação."},
-    {"id": "profile.export", "name": "Exportar perfil", "page": "profiles", "section": "main", "target": "profile.export", "label": "Exportar", "action": "", "aliases": "exportPackage; profiles.json + assets", "fallbackLabel": "Novo perfil", "conditionHint": "Crie ou importe um perfil para acessar esta operação."},
     {"id": "bar.icon-size", "name": "Tamanho dos ícones", "page": "appearance", "section": "main", "group": "bar", "target": "bar.icon-size", "label": "", "action": "", "aliases": "VeloraTheme.barIconSize", "subgroup": "icons"},
     {"id": "bar.icon-opacity", "name": "Opacidade dos ícones", "page": "appearance", "section": "main", "group": "bar", "target": "bar.icon-opacity", "label": "", "action": "", "aliases": "VeloraTheme.barIconOpacity", "subgroup": "icons"},
     {"id": "bar.icon-gap", "name": "Espaçamento entre ícones", "page": "appearance", "section": "main", "group": "bar", "target": "bar.icon-gap", "label": "", "action": "", "aliases": "VeloraTheme.barIconSpacing", "subgroup": "icons"},

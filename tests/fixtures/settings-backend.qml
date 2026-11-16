@@ -16,21 +16,10 @@ ShellRoot {
         property string currentPath: "/tmp/fixture-wallpaper-a.png"
         function localPath(path) { return String(path).replace("file://", "") }
     }
-    QtObject {
-        id: profiles
-        property var wallpaperService: wallpaper
-        property string activeProfileId: ""
-        signal profileApplying(string profileId)
-        signal profileApplied(string profileId)
-        signal operationFinished(string operation, bool ok, string message)
-    }
     QtObject { id: shell; property var unifiedTheme: historical; property var composition: null }
-    Core.SettingsController { id: controller; motion: motion; config: config; preview: preview; editor: editor; profileService: profiles; shell: shell }
-    Services.WallpaperCompositionService { id: store; config: config; wallpaperService: wallpaper; profileService: profiles }
+    Core.SettingsController { id: controller; motion: motion; config: config; preview: preview; editor: editor; wallpaperService: wallpaper; shell: shell }
     Services.VisualizerDemand { id: demand }
     property int nativeSyncs: 0
-    property int savedScenes: 0
-    property int baselineSaves: 0
     property var sceneSnapshot: null
     function syncNativeAppearance() { nativeSyncs++ }
     function syncLiquidStyle() {}
@@ -42,11 +31,10 @@ ShellRoot {
     function syncWallpaperEffects() {}
     // The test runner inserts the production Connections and debounce timer.
     // APPEARANCE_SYNC
-    Connections { target: store; function onCompositionSaved() { root.savedScenes++ } }
     Timer {
         id: appearanceEdit; interval: 1000
         onTriggered: {
-            root.nativeSyncs=0; root.baselineSaves=root.savedScenes
+            root.nativeSyncs=0
             config.setValue("appearance.reflection",0.21)
         }
     }
@@ -55,7 +43,7 @@ ShellRoot {
     Timer {
         interval: root.step === 0 ? 1200 : root.step === 1 ? 1600 : 400; running: true; repeat: true
         onTriggered: {
-            if (!config.ready || !store.ready) return
+            if (!config.ready) return
             try {
                 if (root.step === 0) {
                     check(config.userData.customAuditKey === "keep", "unknown legacy key preserved")
@@ -83,7 +71,6 @@ ShellRoot {
                     controller.integrations.setHyprlandBlur(false)
                 } else if (root.step === 2) {
                     check(controller.integrations.operationError.indexOf("fixture failure")>=0,"external failure visible")
-                    check(root.savedScenes===root.baselineSaves,"appearance does not save scene-only document")
                     controller.integrations.setHyprlandBlur(true)
                     controller.hide()
                 } else if (root.step === 3) {
@@ -94,12 +81,11 @@ ShellRoot {
                     controller.hide()
                     const id=editor.addText("persisted fixture")
                     editor.setTransform(id,"x",432)
-                    store.saveActive();root.sceneSnapshot=store.document.wallpapers[store.activeKey].composition
-                    check(!root.sceneSnapshot.appearance && !root.sceneSnapshot.topbar,"scene-only contract")
-                    config.setCustomColor("text","#c0ffee");editor.addText("discarded fixture")
-                    store.applyScene(root.sceneSnapshot,"fixture")
-                    check(config.customColors.text==="#c0ffee","wallpaper restore keeps palette")
-                    check(config.sceneLayers.filter(layer=>layer.text==="discarded fixture").length===0,"scene restored")
+                    root.sceneSnapshot=JSON.stringify(config.sceneLayers)
+                    config.setCustomColor("text","#c0ffee")
+                    wallpaper.currentPath="/tmp/fixture-wallpaper-b.png"
+                    check(config.customColors.text==="#c0ffee","wallpaper keeps explicit palette")
+                    check(JSON.stringify(config.sceneLayers)===root.sceneSnapshot,"wallpaper keeps scene")
                 } else if (root.step === 6) {
                     check(!controller.integrations,"no settings backend after writes settle")
                     check(!config.savePending,"configuration flushed")

@@ -16,7 +16,6 @@ Item {
     required property var status
     required property var transition
     required property var editor
-    required property var profileService
     required property var causticsClock
     required property bool lockPresented
     property bool editing: false
@@ -29,8 +28,7 @@ Item {
     readonly property real designOriginX: (width - 1600 * designScale) / 2
     readonly property real designOriginY: (height - 900 * designScale) / 2
     readonly property bool interactionEnabled: !transition.running && !editing
-    readonly property bool layoutMorphing: profileService.transitioning
-        || editor.layoutTransitioning
+    readonly property bool layoutMorphing: editor.layoutTransitioning
     readonly property int layoutMorphDuration: motion.reduced ? 0 : 680
     readonly property bool moduleCaustics: lockPresented
         && config.waterCausticsEnabled && config.waterCausticsLines
@@ -324,8 +322,8 @@ Item {
             config: root.config
             theme: root.theme
             motion: root.motion
-            profileTransitioning: root.profileService.transitioning
-            profileTransitionDuration: root.profileService.transitionDuration
+            profileTransitioning: root.editor.layoutTransitioning
+            profileTransitionDuration: root.layoutMorphDuration
             interactionsEnabled: root.interactionEnabled
             itemStyle: parent.itemStyle
             variantId: parent.itemVariant
@@ -399,8 +397,8 @@ Item {
                 transientTransform: root.editor.editSpace === "desktop"
                     ? root.editor.effectiveTransform(modelData.id,
                         modelData.desktop || ({})) : null
-                profileTransitioning: root.profileService.transitioning
-                profileTransitionDuration: root.profileService.transitionDuration
+                profileTransitioning: root.editor.layoutTransitioning
+                profileTransitionDuration: root.layoutMorphDuration
                 suppressed: !root.config.desktopWidgetsEnabled || !Boolean(modelData.desktopEnabled)
             }
         }

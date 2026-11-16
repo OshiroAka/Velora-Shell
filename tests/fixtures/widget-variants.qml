@@ -89,7 +89,7 @@ ShellRoot {
             id: scene; x: 2000; width: 1600; height: 900
             config: testConfig; theme: testTheme; motion: testMotion; clock: testClock; weather: testWeather
             status: testStatus; media: testMedia; calendarService: null; transition: testTransition
-            editor: testEditor; profileService: profile; causticsClock: caustics; lockPresented: false
+            editor: testEditor; causticsClock: caustics; lockPresented: false
         }
         TestCase { id: input; when: false }
     }

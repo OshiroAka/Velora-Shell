@@ -24,15 +24,6 @@ ShellRoot {
         function applyWallpaper(path) { currentPath=path; return true }
     }
     QtObject {
-        id: profiles
-        signal profileApplied()
-        signal operationFinished(string operation, bool ok, string message)
-        property var wallpaperService: wallpaper
-        property string activeProfileId: ""
-        property var profiles: []
-        property string error: ""
-    }
-    QtObject {
         id: shell
         property bool barOnRight: false
         property int bottomBarHeight: 18
@@ -41,14 +32,13 @@ ShellRoot {
         property var composition: null
         function openLyricsMaskEditor() { }
     }
-    QtObject { id: wallpaperStore; property string activeKey: "fixture" }
-    Core.SettingsController { id: controller; config: config; editor: scene; motion: motion; preview: preview; profileService: profiles; shell: shell }
+    Core.SettingsController { id: controller; config: config; editor: scene; motion: motion; preview: preview; wallpaperService: wallpaper; shell: shell }
     Window {
         id: window
         width: 1440; height: 900; visible: true; color: "#101113"
         Editor.EditorChrome {
             id: chrome; anchors.fill: parent; config: config; controller: controller; editor: scene
-            theme: theme; motion: motion; profileService: profiles; wallpaperStore: wallpaperStore
+            theme: theme; motion: motion
             presented: controller.shown
         }
     }
@@ -139,9 +129,9 @@ ShellRoot {
                     assert(!!find(home,"settingsWallpaperPreview"),"System preview missing")
                     assert(!!find(home,"settingsNav-system") && !find(home,"settingsNav-language") && !find(home,"settingsNav-motion"),"vertical navigation incomplete")
                     poseWidth=home.width;poseHeight=home.height
-                    home.navigate("profiles"); phase=4; return
+                    home.navigate("credits"); phase=4; return
                 }
-                if (phase === 4 && home.page === "profiles" && !home.animating) {
+                if (phase === 4 && home.page === "credits" && !home.animating) {
                     assert(Math.abs(home.width-poseWidth)<1 && Math.abs(home.height-poseHeight)<1,"category switch resizes the side panel")
                     home.searchText="resolução"
                     assert(home.searchResults.some(result=>result.page==="system"),"global settings search missing")

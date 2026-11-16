@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class FirstRunTests(unittest.TestCase):
-    def test_configuration_and_profiles_initialize_with_only_public_assets(self):
+    def test_global_configuration_initializes_without_legacy_profiles(self):
         runtime = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share") / "velora-shell/runtime/quickshell/bin/qs"
         executable = str(runtime) if runtime.is_file() else shutil.which("qs")
         if not executable:
@@ -36,6 +36,5 @@ class FirstRunTests(unittest.TestCase):
             self.assertIn("VELORA_FIRST_RUN_READY", result.stdout + result.stderr)
             self.assertNotIn("TypeError", result.stdout + result.stderr)
             self.assertNotIn("Unable to assign [undefined]", result.stdout + result.stderr)
-            index = json.loads((home / "config/velora-shell/profiles.json").read_text())
-            self.assertEqual(len(index["profiles"]), 1)
-            self.assertEqual(index["profiles"][0]["composition"]["character"]["path"], "")
+            self.assertFalse((home / "config/velora-shell/profiles.json").exists())
+            self.assertFalse((home / "config/velora-shell/wallpaper-compositions.json").exists())

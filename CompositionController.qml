@@ -267,17 +267,6 @@ Scope {
     }
     Services.VisualizerService { id: visualizer; active: visualizerDemand.active }
     Services.WallpaperService { id: wallpaper }
-    Services.CompositionProfileService {
-        id: compositionProfiles
-        config: config
-        wallpaperService: wallpaper
-    }
-    Services.WallpaperCompositionService {
-        id: wallpaperCompositions
-        config: config
-        wallpaperService: wallpaper
-        profileService: compositionProfiles
-    }
     Services.SceneEditorService { id: sceneEditor; config: config }
     Core.SettingsController {
         id: editorController
@@ -285,7 +274,7 @@ Scope {
         motion: motion
         preview: preview
         config: config
-        profileService: compositionProfiles
+        wallpaperService: wallpaper
         editor: sceneEditor
     }
     Services.SystemStatusService {
@@ -371,7 +360,6 @@ Scope {
         status: systemStatus
         transition: widgetTransition
         editor: sceneEditor
-        profileService: compositionProfiles
         causticsClock: causticsClock
     }
 
@@ -382,8 +370,6 @@ Scope {
         config: config
         theme: theme
         motion: motion
-        profileService: compositionProfiles
-        wallpaperStore: wallpaperCompositions
         editor: sceneEditor
     }
 
@@ -399,14 +385,6 @@ Scope {
         if (!entry) return false
         topbarController.show("monitor", entry.item, entry.host, false)
         return true
-    }
-
-    Connections {
-        target: compositionProfiles
-        function onProfileApplied() {
-            sceneEditor.resetHistory()
-            root.syncNativeAppearance()
-        }
     }
 
     Connections {
@@ -532,8 +510,7 @@ Scope {
                 barSurface: String(theme.barSurface),
                 textPrimary: String(theme.textPrimary),
                 wallpaper: wallpaper.currentPath
-            },
-            compositionProfiles: compositionProfiles.status()
+            }
         }
     }
 
@@ -663,12 +640,6 @@ Scope {
                                         lockEnabled: bool): bool {
             return config.setSharedWidgetVisibility(
                 kind, desktopEnabled, lockEnabled)
-        }
-        function profileApply(profileId: string): bool {
-            return compositionProfiles.applyProfile(profileId, true)
-        }
-        function profileUpdate(profileId: string): bool {
-            return compositionProfiles.updateProfile(profileId)
         }
         function status(): string { return JSON.stringify(root.statusSnapshot()) }
     }

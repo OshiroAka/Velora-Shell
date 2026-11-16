@@ -10,8 +10,6 @@ Item {
     required property var config
     required property var theme
     required property var motion
-    required property var profileService
-    required property var wallpaperStore
     required property var editor
 
     property bool catalogOpen: false
@@ -58,8 +56,7 @@ Item {
         motion: root.motion
         z: 40; visible: root.settingsMode && reveal > .001
         config: root.config; controller: root.controller; editor: root.editor
-        theme: root.theme; profileService: root.profileService
-        wallpaperStore: root.wallpaperStore
+        theme: root.theme
         onRequestClose: root.controller.hide()
     }
     readonly property bool desktop: editor.editSpace === "desktop"

@@ -22,7 +22,6 @@ Variants {
     required property var status
     required property var transition
     required property var editor
-    required property var profileService
     required property var causticsClock
     required property int opticsGeneration
     property bool barOnRight: false
@@ -228,7 +227,6 @@ Variants {
             status: root.status
             transition: root.transition
             editor: root.editor
-            profileService: root.profileService
             causticsClock: root.causticsClock
             lockPresented: false
             editing: root.settings.shown

@@ -11,8 +11,6 @@ Item {
     required property var controller
     required property var editor
     required property var theme
-    required property var profileService
-    required property var wallpaperStore
     signal requestClose
     signal revealSetting(string id)
     signal inlineToolOpened(var item)
@@ -235,7 +233,7 @@ Item {
             : root.page === "media" ? mediaPage
             : root.page === "infiniteDesk" ? infiniteDeskPage
             : root.page === "credits" ? creditsPage
-            : root.page === "profiles" ? profilesPage : wallpapersPage
+            : wallpapersPage
     }
     SequentialAnimation {
         id: sectionEntrance
@@ -628,54 +626,6 @@ Item {
         SettingsWallpaper {
             width: parent.width; config: root.config; controller: root.controller
             theme: root.theme; motion: root.motion; backend: root.integrations
-        }
-    }
-    Component { id: profilesPage
-        Column {
-            id: profilesPanel
-            width: parent.width; spacing: 12
-            property string selectedId: root.profileService.activeProfileId
-            readonly property var selectedProfile: root.profileService.profiles.find(item => String(item.id) === selectedId) || null
-            Flow { width: parent.width; spacing: 18
-                ActionButton { label: "Novo perfil"; onTriggered: root.profileService.createProfile("") }
-                ContextLink { label: "Importar .helixpack"; onTriggered: root.controller.importPackage() }
-            }
-            Flow { width: parent.width; spacing: 10
-                Repeater { model: root.profileService.profiles
-                    Rectangle {
-                        id: profileCard
-                        required property var modelData
-                        readonly property bool selected: String(modelData.id) === profilesPanel.selectedId
-                        width: Math.min(280,(profilesPanel.width-10)/2); height: 66; radius: 13
-                        color: Qt.rgba(root.accent.r,root.accent.g,root.accent.b,selected ? .16 : .04)
-                        border.width: 1; border.color: selected || activeFocus ? root.theme.accentSoft : root.theme.borderSubtle
-                        activeFocusOnTab: true
-                        Accessible.role: Accessible.Button; Accessible.name: modelData.name
-                        Accessible.checkable: true; Accessible.checked: selected
-                        function triggered() { profilesPanel.selectedId=String(modelData.id) }
-                        Accessible.onPressAction: triggered()
-                        Keys.onSpacePressed: triggered()
-                        Keys.onReturnPressed: triggered()
-                        Components.VeloraMaterialIcon { x: 14; y: 22; width: 22; height: 22; iconName: "layers"; iconColor: root.mutedInk }
-                        Text { x: 50; y: 13; width: parent.width-62; text: profileCard.modelData.name; elide: Text.ElideRight; color: root.ink; font.family: root.theme.bodyFont; font.pixelSize: 12 }
-                        Text { x: 50; y: 35; text: String(profileCard.modelData.id) === root.profileService.activeProfileId ? "Em uso" : "Salvo"; color: root.mutedInk; font.family: root.theme.bodyFont; font.pixelSize: 10 }
-                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: profileCard.triggered() }
-                    }
-                }
-            }
-            Flow { visible: !!profilesPanel.selectedProfile; width: parent.width; spacing: 18
-                ActionButton { objectName: "profile.apply"; label: "Aplicar"; primary: true; onTriggered: root.profileService.applyProfile(profilesPanel.selectedId,true) }
-                ContextLink { objectName: "profile.save"; label: "Salvar"; enabled: profilesPanel.selectedId === root.profileService.activeProfileId; onTriggered: root.profileService.updateProfile(profilesPanel.selectedId) }
-                ContextLink { objectName: "profile.export"; label: "Exportar"; onTriggered: root.controller.exportPackage(profilesPanel.selectedId) }
-            }
-            ContextLink {
-                label: "O que o perfil guarda?"
-                hint: "Composição, imagens, paleta e organização da barra. Material da barra, opções gerais do desktop e movimento reduzido permanecem como estão. Saves por wallpaper restauram apenas a composição."
-                onTriggered: scopeNote.visible=!scopeNote.visible
-            }
-            Text { id: scopeNote; visible: false; width: parent.width; wrapMode: Text.WordWrap; color: root.mutedInk; font.family: root.theme.bodyFont; font.pixelSize: 11
-                text: "Composição, imagens, paleta e organização da barra. Material da barra, opções gerais do desktop e movimento reduzido permanecem como estão. Saves por wallpaper restauram apenas a composição." }
-            Text { width: parent.width; wrapMode: Text.WordWrap; color: root.theme.danger; font.pixelSize: 12; text: root.profileService.error || ""; visible: text.length > 0 }
         }
     }
     Component { id: systemPage

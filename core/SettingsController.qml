@@ -10,10 +10,9 @@ Scope {
     required property var motion
     required property var preview
     required property var config
-    required property var profileService
+    required property var wallpaperService
     required property var editor
     property var shell: null
-    readonly property var wallpaperService: profileService.wallpaperService || null
     readonly property var integrations: integrationsLoader.item
     property bool launcherMode: false
     property string settingsSection: "main"
@@ -71,9 +70,7 @@ Scope {
     property string pendingImagePath: ""
     property string profileAvatarError: ""
     property string pickerError: ""
-    property bool avatarProfileSavePending: false
     property string pendingKind: "image"
-    property string pendingProfileId: ""
     property string editSpace: "desktop"
     property string mode: "settings"
     property string settingsPage: "system"
@@ -181,8 +178,6 @@ Scope {
     }
 
     function saveSession() {
-        if (root.profileService.activeProfileId.length > 0)
-            root.profileService.updateProfile(root.profileService.activeProfileId)
         sessionSnapshot = root.editor.snapshot()
         sessionDirty = false
         closePrompt = false
@@ -274,29 +269,24 @@ Scope {
     }
 
     function chooseCustomImage() {
-        pendingProfileId = ""
         return beginPicker("customImage")
     }
 
     function choosePhotoGrid(layout) {
-        pendingProfileId = ""
         pendingGridLayout = ["feature", "grid2", "grid3", "grid4"]
             .includes(String(layout)) ? String(layout) : "grid2"
         return beginPicker("photoGrid")
     }
 
     function chooseFont() {
-        pendingProfileId = ""
         return beginPicker("font")
     }
 
     function chooseAvatar() {
-        pendingProfileId = ""
         return beginPicker("avatar")
     }
 
     function chooseBarAvatar() {
-        pendingProfileId = ""
         profileAvatarError = ""
         return beginPicker("barAvatar")
     }
@@ -306,21 +296,6 @@ Scope {
         if (root.shell && root.shell.unifiedTheme)
             root.shell.unifiedTheme.setProfileImagePath("")
         profileAvatarError = ""
-        persistAvatarToProfile()
-    }
-
-    function persistAvatarToProfile() {
-        if (!root.profileService.ready || !root.profileService.activeProfileId.length)
-            return
-        if (root.profileService.busy) {
-            avatarProfileSaveDelay.restart()
-            return
-        }
-        avatarProfileSavePending = true
-        if (!root.profileService.updateProfile(root.profileService.activeProfileId)) {
-            avatarProfileSavePending = false
-            profileAvatarError = root.profileService.error || "Não foi possível salvar o perfil."
-        }
     }
 
     function syncBarAvatar() {
@@ -329,18 +304,6 @@ Scope {
         const path = String(root.config.avatarPath || "")
         if (root.shell.unifiedTheme.profileImagePath !== path)
             root.shell.unifiedTheme.setProfileImagePath(path)
-    }
-
-    function importPackage() {
-        pendingProfileId = ""
-        return beginPicker("packageImport")
-    }
-
-    function exportPackage(profileId) {
-        if (!root.profileService.profileById(profileId))
-            return false
-        pendingProfileId = String(profileId)
-        return beginPicker("packageExport")
     }
 
     function basename(value) {
@@ -353,40 +316,26 @@ Scope {
         // Process launch failure does not emit exited in Quickshell 0.3.
         const command = ["/bin/sh", "-c", 'exec "$@"', "velora-image-picker",
             "zenity", "--file-selection"]
-        if (pendingKind === "packageExport")
-            command.push("--save", "--confirm-overwrite")
         if (pendingKind === "photoGrid")
             command.push("--multiple", "--separator=|")
-        command.push(pendingKind === "wallpaper"
-            ? "--title=Escolha o wallpaper do perfil"
-            : (pendingKind === "packageImport" ? "--title=Importar pacote Velora"
-                : (pendingKind === "packageExport" ? "--title=Exportar pacote Velora"
-                    : ((pendingKind === "avatar" || pendingKind === "barAvatar") ? "--title=Escolha a foto de perfil"
-                        : (pendingKind === "photoGrid" ? "--title=Escolha até 16 fotos"
-                            : (pendingKind === "font" ? "--title=Importar fonte"
-                                : "--title=Escolha uma imagem"))))))
-        command.push(pendingKind === "wallpaper"
-            ? "--filename=" + config.homeDir + "/Pictures/Wallpapers/"
-            : (pendingKind === "packageExport"
-                ? "--filename=" + config.homeDir + "/Downloads/composicao.helixpack"
-                : (pendingKind === "packageImport"
-                    ? "--filename=" + config.homeDir + "/Downloads/"
-                    : (pendingKind === "font"
-                        ? "--filename=" + config.homeDir + "/.local/share/fonts/"
-                        : "--filename=" + config.homeDir + "/Pictures/"))))
-        command.push(pendingKind === "wallpaper"
-            ? "--file-filter=Wallpapers | *.png *.jpg *.jpeg *.webp *.gif *.mp4 *.webm *.mkv *.mov"
-            : (pendingKind === "packageImport" || pendingKind === "packageExport"
-                ? "--file-filter=Pacote Velora Shell | *.helixpack"
-                : (pendingKind === "font"
-                    ? "--file-filter=Fontes | *.ttf *.otf *.woff *.woff2"
-                    : (pendingKind === "avatar" || pendingKind === "barAvatar"
-                    ? "--file-filter=Foto de perfil | *.png *.jpg *.jpeg"
-                    : (pendingKind === "customImage" || pendingKind === "photoGrid"
-                    ? "--file-filter=Imagens estáticas ou animadas | *.png *.jpg *.jpeg *.webp *.gif *.apng"
-                    : (pendingTarget === 0
-                        ? "--file-filter=Personagem transparente ou animada | *.png *.webp *.gif *.apng *.mng *.mp4 *.webm *.mkv *.mov"
-                        : "--file-filter=Imagens | *.png *.jpg *.jpeg *.webp"))))))
+        const avatar = pendingKind === "avatar" || pendingKind === "barAvatar"
+        const title = pendingKind === "wallpaper" ? "Escolha o wallpaper"
+            : avatar ? "Escolha a foto de perfil"
+            : pendingKind === "photoGrid" ? "Escolha até 16 fotos"
+            : pendingKind === "font" ? "Importar fonte" : "Escolha uma imagem"
+        const folder = pendingKind === "wallpaper" ? "/Pictures/Wallpapers/"
+            : pendingKind === "font" ? "/.local/share/fonts/" : "/Pictures/"
+        const filter = pendingKind === "wallpaper"
+            ? "Wallpapers | *.png *.jpg *.jpeg *.webp *.gif *.mp4 *.webm *.mkv *.mov"
+            : pendingKind === "font" ? "Fontes | *.ttf *.otf *.woff *.woff2"
+            : avatar ? "Foto de perfil | *.png *.jpg *.jpeg"
+            : pendingKind === "customImage" || pendingKind === "photoGrid"
+                ? "Imagens estáticas ou animadas | *.png *.jpg *.jpeg *.webp *.gif *.apng"
+            : pendingTarget === 0
+                ? "Personagem transparente ou animada | *.png *.webp *.gif *.apng *.mng *.mp4 *.webm *.mkv *.mov"
+                : "Imagens | *.png *.jpg *.jpeg *.webp"
+        command.push("--title=" + title, "--filename=" + config.homeDir + folder,
+            "--file-filter=" + filter)
         return command
     }
 
@@ -401,7 +350,7 @@ Scope {
         if (exitCode === 0 && pendingImagePath.length > 0) {
             const selectedUrl = encodeURI("file://" + pendingImagePath)
             if (pendingKind === "wallpaper")
-                root.profileService.setDraftWallpaper(selectedUrl)
+                root.wallpaperService.applyWallpaper(selectedUrl)
             else if (pendingKind === "customImage")
                 root.editor.addImage(selectedUrl, basename(pendingImagePath))
             else if (pendingKind === "photoGrid") {
@@ -424,10 +373,6 @@ Scope {
                 avatarImport.running = true
                 return
             }
-            else if (pendingKind === "packageImport")
-                root.profileService.importPackage(pendingImagePath)
-            else if (pendingKind === "packageExport")
-                root.profileService.exportPackage(pendingProfileId, pendingImagePath)
             else if (pendingTarget === 0)
                 root.config.setCharacterValue("path", selectedUrl)
             else
@@ -532,7 +477,6 @@ Scope {
                 if (root.shell && root.shell.unifiedTheme)
                     root.shell.unifiedTheme.setProfileImagePath(url)
                 root.profileAvatarError = ""
-                root.persistAvatarToProfile()
             } else {
                 root.profileAvatarError = avatarImportError.text.trim()
                     || "Não foi possível salvar a foto de perfil."
@@ -545,25 +489,6 @@ Scope {
         target: root.config
         function onAvatarPathChanged() { root.syncBarAvatar() }
         function onReadyChanged() { if (root.config.ready) root.syncBarAvatar() }
-    }
-
-    Connections {
-        target: root.profileService
-        function onProfileApplied() { root.syncBarAvatar() }
-        function onOperationFinished(operation, ok, message) {
-            if (operation !== "update" || !root.avatarProfileSavePending)
-                return
-            root.avatarProfileSavePending = false
-            if (!ok)
-                root.profileAvatarError = message || "Não foi possível salvar o perfil."
-        }
-    }
-
-    Timer {
-        id: avatarProfileSaveDelay
-        interval: 250
-        repeat: false
-        onTriggered: root.persistAvatarToProfile()
     }
 
     Timer {

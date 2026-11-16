@@ -15,8 +15,6 @@ Item {
     Core.ConfigStore { id: configuration }
     Core.Theme { id: palette; config: configuration; palette: null }
     Services.SceneEditorService { id: editor; config: configuration }
-    QtObject { id: profiles; property var profiles: []; property string activeProfileId: "" }
-    QtObject { id: wallpaperStore; property string activeKey: "" }
     QtObject {
         id: settingsController
         property string mode: "editing"
@@ -52,8 +50,8 @@ Item {
         id: chrome
         anchors.fill: parent
         controller: settingsController; config: configuration
-        theme: palette; editor: editor; profileService: profiles
-        wallpaperStore: wallpaperStore; motion: motion; presented: true
+        theme: palette; editor: editor
+        motion: motion; presented: true
     }
     Item {
         id: validation
