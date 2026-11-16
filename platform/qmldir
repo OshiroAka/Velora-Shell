@@ -1,2 +1,3 @@
 CompositorService 1.0 CompositorService.qml
+InfiniteDesktopCamera 1.0 InfiniteDesktopCamera.qml
 singleton NativeBlur 1.0 NativeBlur.qml

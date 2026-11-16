@@ -22,6 +22,7 @@
 #undef HANDLE
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QJsonArray>
 #pragma pop_macro("HANDLE")
 #include <unistd.h>
 
@@ -110,6 +111,46 @@ inline void damage(View& view) {
         monitor->m_blurFBDirty = true;
         g_pHyprRenderer->damageMonitor(monitor);
     }
+}
+
+inline std::unordered_map<std::string, std::string> widgetCameraPublished;
+inline std::string widgetCameraPose(PHLMONITOR monitor) {
+    const auto view = viewFor(monitor);
+    QJsonObject pose{{"monitor", QString::fromStdString(monitor->m_name)}, {"active", bool(view)}};
+    if (view) {
+        pose.insert("workspace", qint64(view->workspace->numberedID().value_or(0)));
+        pose.insert("zoom", view->camera.zoom);
+        pose.insert("center", QJsonArray{view->camera.center.x, view->camera.center.y});
+        pose.insert("origin", QJsonArray{monitor->m_position.x, monitor->m_position.y});
+        pose.insert("viewport", QJsonArray{view->camera.viewport.x, view->camera.viewport.y});
+    }
+    return QJsonDocument(pose).toJson(QJsonDocument::Compact).toStdString();
+}
+inline void publishWidgetCamera(PHLMONITOR monitor) {
+    if (!monitor) return;
+    const auto payload = widgetCameraPose(monitor);
+    auto& previous = widgetCameraPublished[monitor->m_name];
+    if (payload == previous) return;
+#if __has_include(<hyprland/src/ipc/s2/S2.hpp>)
+    if (!IPC::Socket2::sock()) return;
+    IPC::Socket2::sock()->postEvent({"velora-infinite-camera", payload});
+#else
+    if (!g_pEventManager) return;
+    g_pEventManager->postEvent({"velora-infinite-camera", payload});
+#endif
+    previous = payload;
+}
+inline void publishWidgetCameras() {
+    for (const auto& monitor : State::monitorState()->monitors()) publishWidgetCamera(monitor);
+}
+inline std::string widgetCameraSnapshot() {
+    std::string result = "[";
+    for (const auto& monitor : State::monitorState()->monitors()) {
+        if (!monitor) continue;
+        if (result.size() > 1) result += ',';
+        result += widgetCameraPose(monitor);
+    }
+    return result + "]";
 }
 inline Render::SRenderModifData modifiers(const View& view) {
     auto monitor = view.monitor.lock();
@@ -511,7 +552,7 @@ inline SDispatchResult dispatch(std::string arguments) {
         if (input >> extra) return {.success = false, .error = "Unexpected camera argument"};
         enabled = false; drag.reset();
         for (auto& [_, view] : views) { view.animating = false; damage(view); }
-        views.clear(); return {};
+        views.clear(); publishWidgetCameras(); return {};
     }
     if (!monitor || !monitor->m_activeWorkspace) return {.success = false, .error = "No active camera output"};
     if (action != "enable" && action != "zoom" && action != "pan" && action != "center" && action != "reset" && action != "restore")
@@ -599,7 +640,7 @@ inline std::string status(VeloraCompat::OutputFormat, std::string) {
             view.monitor->m_activeWorkspace == view.workspace ? "true" : "false", view.pan.inputs, view.pan.frames,
             view.panIntervalTotal > 0 ? view.panIntervals / view.panIntervalTotal : 0., view.panIntervalMax * 1000., view.inertia.active ? "true" : "false", view.focus.returnTo ? "true" : "false");
     }
-    return result + "]}";
+    return result + "],\"widgetViews\":" + widgetCameraSnapshot() + "}";
 }
 
 inline CFunctionHook* installHook(const std::string& name, const std::string& signature, const void* function) {
@@ -631,7 +672,12 @@ inline void init(HANDLE plugin) {
     relativeMotionHook = installHook("onMouseMoved", "CInputManager::onMouseMoved(", reinterpret_cast<const void*>(&relativeMotion));
     panButtonListener = Event::bus()->m_events.input.mouse.button.listen(panButton);
     panMotionListener = Event::bus()->m_events.input.mouse.move.listen(panMotion);
-    panFrameListener = Event::bus()->m_events.render.pre.listen(panFrame);
+    panFrameListener = Event::bus()->m_events.render.pre.listen([](PHLMONITOR monitor) {
+        panFrame(monitor);
+        // Publish the actual pose after this output consumed its input batch.
+        // Deduplication leaves idle outputs silent; no QML per-frame subprocess.
+        publishWidgetCamera(monitor);
+    });
     infiniteDesktopNativeScroll = scroll;
     enabled = hasMarker("enabled");
     animationTimer = makeShared<CEventLoopTimer>(std::nullopt, [](SP<CEventLoopTimer>, void*) { animate(); }, nullptr);
@@ -648,6 +694,8 @@ inline void init(HANDLE plugin) {
 inline void exit() {
     if (drag && dragEndHook) endDrag(drag->controller);
     enabled = false; unloading = true; drag.reset();
+    publishWidgetCameras();
+    widgetCameraPublished.clear();
     dragWorkspace.reset(); readingDragCoords = false;
     openListener.reset(); panButtonListener.reset(); panMotionListener.reset(); panFrameListener.reset();
     infiniteDesktopNativeScroll = nullptr;

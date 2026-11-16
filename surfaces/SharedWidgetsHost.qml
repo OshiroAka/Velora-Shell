@@ -25,6 +25,8 @@ Variants {
     required property var causticsClock
     required property int opticsGeneration
     property bool barOnRight: false
+    property var cameraViews: ({})
+    property bool infiniteDesktopEnabled: false
     property bool nativeBarMaterial: false
     property bool visualizerSuppressed: false
     property real visualizerDockProgress: 0
@@ -175,6 +177,22 @@ Variants {
         Region { id: noWidgetBlur }
 
         mask: Region {
+            Region { item: root.config.sceneLayers.length > 0 ? sharedScene.dynamicHitItem(0) : null; intersection: Intersection.Combine }
+            Region { item: root.config.sceneLayers.length > 1 ? sharedScene.dynamicHitItem(1) : null; intersection: Intersection.Combine }
+            Region { item: root.config.sceneLayers.length > 2 ? sharedScene.dynamicHitItem(2) : null; intersection: Intersection.Combine }
+            Region { item: root.config.sceneLayers.length > 3 ? sharedScene.dynamicHitItem(3) : null; intersection: Intersection.Combine }
+            Region { item: root.config.sceneLayers.length > 4 ? sharedScene.dynamicHitItem(4) : null; intersection: Intersection.Combine }
+            Region { item: root.config.sceneLayers.length > 5 ? sharedScene.dynamicHitItem(5) : null; intersection: Intersection.Combine }
+            Region { item: root.config.sceneLayers.length > 6 ? sharedScene.dynamicHitItem(6) : null; intersection: Intersection.Combine }
+            Region { item: root.config.sceneLayers.length > 7 ? sharedScene.dynamicHitItem(7) : null; intersection: Intersection.Combine }
+            Region { item: root.config.sceneLayers.length > 8 ? sharedScene.dynamicHitItem(8) : null; intersection: Intersection.Combine }
+            Region { item: root.config.sceneLayers.length > 9 ? sharedScene.dynamicHitItem(9) : null; intersection: Intersection.Combine }
+            Region { item: root.config.sceneLayers.length > 10 ? sharedScene.dynamicHitItem(10) : null; intersection: Intersection.Combine }
+            Region { item: root.config.sceneLayers.length > 11 ? sharedScene.dynamicHitItem(11) : null; intersection: Intersection.Combine }
+            Region { item: root.config.sceneLayers.length > 12 ? sharedScene.dynamicHitItem(12) : null; intersection: Intersection.Combine }
+            Region { item: root.config.sceneLayers.length > 13 ? sharedScene.dynamicHitItem(13) : null; intersection: Intersection.Combine }
+            Region { item: root.config.sceneLayers.length > 14 ? sharedScene.dynamicHitItem(14) : null; intersection: Intersection.Combine }
+            Region { item: root.config.sceneLayers.length > 15 ? sharedScene.dynamicHitItem(15) : null; intersection: Intersection.Combine }
             Region { item: sharedScene.clockHitItem; intersection: Intersection.Combine }
             Region { item: sharedScene.weatherHitItem; intersection: Intersection.Combine }
             Region { item: sharedScene.mediaHitItem; intersection: Intersection.Combine }
@@ -214,6 +232,8 @@ Variants {
 
         Widgets.SharedWidgetsScene {
             id: sharedScene
+            camera: root.cameraViews[String(widgetWindow.modelData.name || "")] || null
+            infiniteDesktopEnabled: root.infiniteDesktopEnabled
             visible: !root.preview.occluding
             barOnRight: root.barOnRight
             anchors.fill: parent

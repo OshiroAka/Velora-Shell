@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Effects
+import "../../core" as Core
 import "../../core/SurfaceGeometry.js" as Geometry
 import "../../core/WidgetCatalog.js" as WidgetCatalog
 
@@ -20,6 +21,20 @@ Item {
     required property bool lockPresented
     property bool editing: false
     property bool barOnRight: false
+    property var camera: null
+    property bool infiniteDesktopEnabled: false
+    readonly property real parallaxX: parallax.x
+    readonly property real parallaxY: parallax.y
+    readonly property real parallaxScale: parallax.scale
+    Core.WidgetParallax {
+        id: parallax
+        camera: root.camera
+        active: root.infiniteDesktopEnabled && !root.motion.reduced
+            && !root.editing && !root.lockPresented && !root.transition.running
+            && root.transition.progress <= .001
+        viewportWidth: root.width
+        viewportHeight: root.height
+    }
     readonly property var sceneBounds: Geometry.designBounds(width, height,
         lockPresented || !config.topbarEnabled ? 0 : 64, barOnRight,
         lockPresented || !config.topbarEnabled ? 0 : 40, lockPresented ? 0 : 18)
@@ -46,11 +61,16 @@ Item {
     }
 
     function dynamicBlurItem(index) {
-        const item = desktopLayerRepeater.itemAt(index)
-        if (!item || !item.visible || item.opacity <= 0.001
+        const item = dynamicHitItem(index)
+        if (!item
                 || !["liquid", "liquid-glass"].includes(item.materialMode))
             return null
         return item
+    }
+
+    function dynamicHitItem(index) {
+        const item = desktopLayerRepeater.itemAt(index)
+        return item && item.visible && item.opacity > 0.001 ? item : null
     }
 
     function translucentWidget(item) {
@@ -164,8 +184,8 @@ Item {
 
         readonly property var displayPose: Geometry.pose({x: configuredX, y: configuredY,
             scale: configuredScale * (1 + hoverLift * 0.014), rotation: configuredRotation}, configuredWidth, configuredHeight, root.sceneBounds)
-        x: root.designOriginX + displayPose.x * root.designScale
-        y: root.designOriginY + displayPose.y * root.designScale
+        x: root.parallaxX + (root.designOriginX + displayPose.x * root.designScale) * root.parallaxScale
+        y: root.parallaxY + (root.designOriginY + displayPose.y * root.designScale) * root.parallaxScale
         // Keep the card and all of its fixed design-space children in the
         // same 1600x900 coordinate system, then scale the whole module once.
         // Scaling only the host rectangle enlarged the glass background while
@@ -173,7 +193,7 @@ Item {
         // below every module on 1920x1200 displays.
         width: configuredWidth
         height: configuredHeight
-        scale: displayPose.scale * root.designScale
+        scale: displayPose.scale * root.designScale * root.parallaxScale
         rotation: configuredRotation
         opacity: configuredOpacity
         visible: Boolean(widgetData) && opacity > 0.001
@@ -366,11 +386,11 @@ Item {
     // lockscreen does not consume these layers or their legacy lock transforms.
     Item {
         id: desktopScene
-        x: root.designOriginX
-        y: root.designOriginY
+        x: root.parallaxX + root.designOriginX * root.parallaxScale
+        y: root.parallaxY + root.designOriginY * root.parallaxScale
         width: 1600
         height: 900
-        scale: root.designScale
+        scale: root.designScale * root.parallaxScale
         transformOrigin: Item.TopLeft
         opacity: 1 - root.transition.progress
         visible: opacity > 0.001

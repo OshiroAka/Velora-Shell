@@ -335,6 +335,8 @@ Scope {
     }
 
     Surfaces.SharedWidgetsHost {
+        cameraViews: widgetCamera.views
+        infiniteDesktopEnabled: !!root.shell && root.shell.infiniteDesktopCanvasEnabled
         visualizerSuppressed: root.desktopVisualizerSuppressed
         visualizerDockProgress: root.visualizerDockProgress
         nativeBarMaterial: root.nativeBarMaterial
@@ -362,6 +364,8 @@ Scope {
         editor: sceneEditor
         causticsClock: causticsClock
     }
+
+    Platform.InfiniteDesktopCamera { id: widgetCamera }
 
     Surfaces.EditorHost {
         opticsGeneration: root.opticsGeneration

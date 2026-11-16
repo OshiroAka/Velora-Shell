@@ -4,6 +4,9 @@
 #include <iostream>
 #include <memory>
 #include <unordered_map>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonArray>
 using namespace Velora::InfiniteDesk;
 template<class T> using SP = std::shared_ptr<T>;
 template<class T> struct Ref {
@@ -29,6 +32,8 @@ template<class T> struct Animated {
 };
 namespace Workspace {
 struct CHLWorkspace {
+    unsigned id = 1;
+    std::optional<unsigned> numberedID() const { return id; }
     PHLMONITORREF m_monitor;
     bool shown = true, m_forceRendering = false, fullscreen = false;
     SP<Animated<Vector2D>> m_renderOffset = std::make_shared<Animated<Vector2D>>();
@@ -37,6 +42,7 @@ struct CHLWorkspace {
 };
 }
 struct Monitor {
+    std::string m_name = "DP-1";
     Vector2D m_position, m_size{1920,1080};
     PHLWORKSPACE m_activeWorkspace, m_activeSpecialWorkspace;
 };
@@ -60,6 +66,25 @@ static std::unordered_map<const Workspace::CHLWorkspace*,View> views;
 static bool enabled = true, unloading = false;
 #include "camera-workspaces.inc"
 #include "camera-active-monitor.inc"
+
+namespace State {
+struct MonitorState {
+    std::vector<PHLMONITOR> outputs;
+    const auto& monitors() { return outputs; }
+};
+inline auto state = std::make_shared<MonitorState>();
+auto monitorState() { return state; }
+}
+namespace IPC::Socket2 {
+struct Server {
+    struct Message { std::string name, payload; };
+    std::vector<Message> sent;
+    void postEvent(Message value) { sent.push_back(value); }
+};
+inline auto server = std::make_shared<Server>();
+auto sock() { return server; }
+}
+#include "camera-widget-publish.inc"
 
 int main() {
     auto monitor = std::make_shared<Monitor>();
@@ -101,5 +126,37 @@ int main() {
     monitor->m_activeSpecialWorkspace = first; assert(!viewFor(monitor));
     assert(viewFor(outgoing) == a); // Regular workspace keeps its camera behind the overlay.
     enabled = false; assert(!viewFor(outgoing) && !activeMonitor(monitor));
+    // Exercise the actual event serializer/publisher: idle deduplication,
+    // fractional/negative output origins, inactive desktops and lifecycle reset.
+    State::state->outputs = {monitor};
+    monitor->m_position = {-1920., 24.5}; monitor->m_name = "DP-1\"test";
+    monitor->m_activeSpecialWorkspace.reset(); monitor->m_activeWorkspace = first;
+    auto eventPose = [&]() { return QJsonDocument::fromJson(QByteArray::fromStdString(IPC::Socket2::server->sent.back().payload)).object(); };
+    publishWidgetCameras();
+    assert(IPC::Socket2::server->sent.size() == 1 && !eventPose()["active"].toBool());
+    for (int i=0;i<100;i++) publishWidgetCameras();
+    assert(IPC::Socket2::server->sent.size() == 1);
+    enabled = true; publishWidgetCameras();
+    assert(eventPose()["active"].toBool() && eventPose()["monitor"].toString().toStdString() == monitor->m_name);
+    assert(eventPose()["origin"].toArray()[0].toDouble() == -1920.);
+    assert(eventPose()["origin"].toArray()[1].toDouble() == 24.5);
+    a->camera.center.x += .125; publishWidgetCameras();
+    assert(eventPose()["center"].toArray()[0].toDouble() == a->camera.center.x);
+    auto secondOutput = std::make_shared<Monitor>(); secondOutput->m_name = "DP-2";
+    State::state->outputs.push_back(secondOutput);
+    publishWidgetCameras(); assert(!eventPose()["active"].toBool());
+    assert(eventPose()["monitor"].toString() == "DP-2");
+    const auto snapshot = QJsonDocument::fromJson(QByteArray::fromStdString(widgetCameraSnapshot())).array();
+    assert(snapshot.size() == 2 && snapshot[0].toObject()["active"].toBool());
+    first->fullscreen = true; publishWidgetCamera(monitor); assert(!eventPose()["active"].toBool());
+    first->fullscreen = false; publishWidgetCamera(monitor); assert(eventPose()["active"].toBool());
+    monitor->m_activeWorkspace = second; publishWidgetCamera(monitor);
+    assert(eventPose()["center"].toArray()[0].toDouble() == b->camera.center.x);
+    monitor->m_activeSpecialWorkspace = first; publishWidgetCamera(monitor); assert(!eventPose()["active"].toBool());
+    monitor->m_activeSpecialWorkspace.reset(); g_pSessionLockManager->locked = true;
+    publishWidgetCamera(monitor); assert(!eventPose()["active"].toBool());
+    g_pSessionLockManager->locked = false; publishWidgetCamera(monitor); assert(eventPose()["active"].toBool());
+    unloading = true; publishWidgetCameras();
+    assert(!QJsonDocument::fromJson(QByteArray::fromStdString(widgetCameraSnapshot())).array()[0].toObject()["active"].toBool());
     std::cout << "INFINITE_CAMERA_WORKSPACES_OK\n";
 }

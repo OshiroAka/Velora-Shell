@@ -13,7 +13,8 @@ inline bool infiniteDesktopGestureFocused(const PHLMONITOR& monitor) {
     if (!focus) return false;
     for (const auto& ref : monitor->m_layerSurfaceLayers[1]) {
         const auto layer = ref.lock();
-        if (!layer || layer->m_namespace != "velora-infinite-desktop-gesture") continue;
+        if (!layer || (layer->m_namespace != "velora-infinite-desktop-gesture"
+            && layer->m_namespace != "velora-shell-shared-widgets")) continue;
         const auto resource = layer->m_layerSurface.lock();
         if (resource && resource->m_surface.lock() == focus) return true;
     }
@@ -31,7 +32,8 @@ inline void infiniteDesktopAxis(const IPointer::SAxisEvent& event, Event::SCallb
         if (!monitor) continue;
         for (const auto& ref : monitor->m_layerSurfaceLayers[1]) {
             const auto layer = ref.lock();
-            if (!layer || layer->m_namespace != "velora-infinite-desktop-gesture") continue;
+            if (!layer || (layer->m_namespace != "velora-infinite-desktop-gesture"
+                && layer->m_namespace != "velora-shell-shared-widgets")) continue;
             const auto resource = layer->m_layerSurface.lock();
             if (!resource || resource->m_surface.lock() != focus) continue;
             if (!std::isfinite(event.delta)) return;

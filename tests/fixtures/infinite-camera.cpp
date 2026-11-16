@@ -329,6 +329,15 @@ int main() {
     infiniteDesktopAxis(axis,info);
     assert(info.cancelled && nativeAxisCalls == 1 && IPC::Socket2::server->sent == 0);
     assert(near(view.pan.pending,{-4.5,0.}));
+    layer->m_namespace = "velora-shell-shared-widgets";
+    assert(infiniteDesktopGestureFocused(monitor));
+    info = {}; infiniteDesktopAxis(axis,info);
+    assert(info.cancelled && nativeAxisCalls == 2 && IPC::Socket2::server->sent == 0);
+    layer->m_namespace = "settings"; info = {};
+    infiniteDesktopAxis(axis,info); assert(!info.cancelled && nativeAxisCalls == 2);
+    assert(!infiniteDesktopGestureFocused(monitor));
+    layer->m_namespace = "velora-infinite-desktop-gesture";
+    nativeAxisCalls = 1; info = {};
     info = {}; axis.source = WL_POINTER_AXIS_SOURCE_WHEEL; infiniteDesktopAxis(axis,info);
     assert(!info.cancelled && nativeAxisCalls == 1);
     axis.source = WL_POINTER_AXIS_SOURCE_FINGER; g_pInputManager->mods = 68;
