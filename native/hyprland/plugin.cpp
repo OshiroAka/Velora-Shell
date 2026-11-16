@@ -276,6 +276,8 @@ struct STopbarMorph {
     float chargingStrength = 0.F;
     std::array<float, 8> timerPanel{};
     std::array<float, 3> timerLight{}; // normalized anchor, pulse progress, intensity
+    // Optional right-hand catalog while the editor toolbar owns the bottom.
+    std::array<float, 6> catalogPanel{}; // x, y, width, height, radius, join
 };
 
 constexpr size_t TOPBAR_SHAPE_COUNT = 3;
@@ -513,6 +515,8 @@ uniform vec4 timerPanel;
 uniform vec4 timerMetrics;
 uniform vec4 bottomPanel; // center and half-size in framebuffer pixels
 uniform vec2 bottomMetrics; // radius, smooth join
+uniform vec4 editorCatalogPanel;
+uniform vec2 editorCatalogMetrics;
 uniform float settingsOnRight;
 
 layout(location = 0) out vec4 fragColor;
@@ -704,6 +708,10 @@ float frameWithoutSettingsSdf(vec2 pixel) {
 
 float frameBaseSdf(vec2 pixel) {
     float distance = frameWithoutSettingsSdf(pixel);
+    if (editorCatalogPanel.w > 0.0) {
+        float panel = roundedBoxSdf(pixel-editorCatalogPanel.xy,editorCatalogPanel.zw,editorCatalogMetrics.x);
+        distance = smoothUnion(distance,panel,max(.01,editorCatalogMetrics.y));
+    }
     if (settingsOnRight > .5 && bottomPanel.w > 0.0) {
         float panel = roundedBoxSdf(pixel-bottomPanel.xy,bottomPanel.zw,bottomMetrics.x);
         distance = smoothUnion(distance,panel,max(.01,bottomMetrics.y));
@@ -1098,6 +1106,8 @@ void main() {
             // Both passes evaluate the same field before choosing ownership.
             float settingsDistance = roundedBoxSdf(pixel - bottomPanel.xy, bottomPanel.zw, bottomMetrics.x);
             bool settingsOwns = bottomPanel.w > 0.0 && settingsDistance <= bottomMetrics.y + 1.25;
+            float catalogDistance = roundedBoxSdf(pixel-editorCatalogPanel.xy,editorCatalogPanel.zw,editorCatalogMetrics.x);
+            settingsOwns = settingsOwns || (editorCatalogPanel.w > 0.0 && catalogDistance <= editorCatalogMetrics.y + 1.25);
             if (desktopPass != settingsOwns) discard;
         }
         if (!desktopPass && frameTopPanel.w > .005 && pixel.y >= frameInterior.y) {
@@ -2144,6 +2154,14 @@ bool renderLiquidBackdrop(VeloraCompat::RenderContext& ctx, WP<CTexPassElement> 
             surfaceBox.y + panel.y * surfaceBox.height - 2.0,
             panel.width * surfaceBox.width + 2.0 * join,
             (1.0 - panel.y) * surfaceBox.height + 4.0});
+        const auto& catalog = panel.catalogPanel;
+        if (catalog[2] > 0.F && catalog[3] > 0.F) {
+            const double shoulder = catalog[5] * surfaceBox.width + 2.0;
+            liquidDamage.add(CBox{surfaceBox.x + catalog[0] * surfaceBox.width - shoulder,
+                surfaceBox.y + catalog[1] * surfaceBox.height - shoulder,
+                (1.0 - catalog[0]) * surfaceBox.width + 2.0 * shoulder,
+                catalog[3] * surfaceBox.height + 2.0 * shoulder});
+        }
     }
     if (hasDial)
         liquidDamage.add(dialBox);
@@ -2300,6 +2318,20 @@ bool renderLiquidBackdrop(VeloraCompat::RenderContext& ctx, WP<CTexPassElement> 
     } else {
         glUniform4f(glGetUniformLocation(shader->program(), "bottomPanel"), 0, 0, 0, 0);
         glUniform2f(glGetUniformLocation(shader->program(), "bottomMetrics"), 0, 0);
+    }
+    const auto editorFrame = g_bottomSettings.find(monitorName);
+    if (sharedMaterial && editorFrame != g_bottomSettings.end() && editorFrame->second.catalogPanel[2] > 0.F) {
+        const auto& catalog = editorFrame->second.catalogPanel;
+        const float radius = catalog[4] * textureWidth;
+        const float left = catalog[0] * textureWidth;
+        const float right = textureWidth + radius;
+        glUniform4f(glGetUniformLocation(shader->program(), "editorCatalogPanel"),
+            (left+right)*.5F,(catalog[1]+catalog[3]*.5F)*textureHeight,
+            (right-left)*.5F,catalog[3]*textureHeight*.5F);
+        glUniform2f(glGetUniformLocation(shader->program(), "editorCatalogMetrics"), radius,catalog[5]*textureWidth);
+    } else {
+        glUniform4f(glGetUniformLocation(shader->program(), "editorCatalogPanel"), 0,0,0,0);
+        glUniform2f(glGetUniformLocation(shader->program(), "editorCatalogMetrics"), 0,0);
     }
     if (sharedMaterial) {
         glUniform4fv(glGetUniformLocation(shader->program(), "barTint"), 1, material->second.tint.data());
@@ -2690,7 +2722,7 @@ bool renderSharedWidgetsBackdrop(VeloraCompat::RenderContext& ctx, WP<CTexPassEl
         glUniform1f(glGetUniformLocation(shader->program(), "opticalScale"),outputScale);
         glUniform1f(glGetUniformLocation(shader->program(), "barBrightness"),g_barBrightness);
         glUniform1f(glGetUniformLocation(shader->program(), "barRefractionStrength"),barRefractionStrength());
-        for (const auto name : {"frameInterior","frameTopPanel","oppositePanel","oppositeLabel",
+        for (const auto name : {"frameInterior","frameTopPanel","oppositePanel","oppositeLabel","editorCatalogPanel",
                 "chargingLight","timerLight","musicLights[0]","musicLights[1]"})
             glUniform4f(glGetUniformLocation(shader->program(),name),0,0,0,0);
     }
@@ -2901,6 +2933,15 @@ void damageTopbarMorph(const STopbarMorph& previous,
     for (const auto& monitor : State::monitorState()->monitors()) {
         if (!monitor || (!monitorName.empty() && monitor->m_name != monitorName))
             continue;
+        for (const auto& shape : {previous, current}) {
+            const auto& catalog = shape.catalogPanel;
+            if (!shape.active || catalog[2] <= 0.F || catalog[3] <= 0.F) continue;
+            const double padding = std::max(catalog[4], catalog[5]) * monitor->m_size.x + 2.0;
+            g_pHyprRenderer->damageBox(CBox{monitor->m_position.x + catalog[0] * monitor->m_size.x - padding,
+                monitor->m_position.y + catalog[1] * monitor->m_size.y - padding,
+                catalog[2] * monitor->m_size.x + 2.0 * padding,
+                catalog[3] * monitor->m_size.y + 2.0 * padding});
+        }
         if (previous.bottomHeight > 0.F || current.bottomHeight > 0.F) {
             for (const auto& shape : {previous, current}) {
                 if (!shape.active) continue;
@@ -3416,8 +3457,16 @@ SDispatchResult settingsConnectedDispatcher(std::string arguments) {
         next.active = true;
         std::string edge;
         if (input >> edge) {
-            if (edge != "right")
-                return {.success = false, .error = "expected optional right attachment"};
+            if (edge == "catalog") {
+                for (float& value : next.catalogPanel)
+                    if (!(input >> value) || !std::isfinite(value) || value < 0.F || value > 1.F)
+                        return {.success = false, .error = "expected normalized catalog x y width height radius join"};
+                if (next.catalogPanel[2] <= 0.F || next.catalogPanel[3] <= 0.F)
+                    return {.success = false, .error = "catalog dimensions must be positive"};
+            } else if (edge != "right")
+                return {.success = false, .error = "expected optional right attachment or catalog"};
+            std::string trailing;
+            if (input >> trailing) return {.success = false, .error = "unexpected connected shape arguments"};
         }
         g_bottomSettings[monitor] = next;
         g_settingsOnRight[monitor] = edge == "right";
@@ -4552,7 +4601,7 @@ std::string status(VeloraCompat::OutputFormat format, std::string) {
 
     if (format == VeloraCompat::JSON_FORMAT)
         return std::format(
-            R"({{"active":true,"abi":"{}","materials":{},"capabilities":[{}"alpha-mask","infinite-top-frame-continuous","compact-topbar","infinite-desktop-dock","infinite-desktop-dock-compact","desktop-bar-material","transition","dial","caustics","topbar-connected","bar-blur","widget-blur","liquid-style","wallpaper","topbar-shape","unified-bar-shape","topbar-settle","right-menu-shape","settings-shape","settings-connected","settings-side-connected","editor-shape","appearance","lock-layout","shared-widgets-shape","wallpaper-transition","terminal-glass","terminal-glass-control","terminal-bar-match","bar-refraction","terminal-follow-bar","terminal-brightness","bar-brightness","lyrics-beat","lyrics-beat-palette","optical-glass","bar-bubble-liquid"{}],"parallax":{{"enabled":{},"frames":{},"moving":{}}},"opticalDamage":{{"frames":{},"blurExpansions":{},"padding":{},"staleBackdropRefreshes":{}}},"terminalGlass":{{"enabled":{},"strength":{:.3f},"draws":{},"sharpDraws":{},"desktopCopies":{},"shaderFailed":{},"source":"live-framebuffer-and-hyprland-blur","barMatch":{},"barMatchDraws":{},"followsBar":{},"followBarDraws":{},"brightness":{:.3f}}},"wallpaperBlur":{:.3f},"barRefraction":{:.3f},"barBrightness":{:.3f},"lyricsBeatCount":{},"liquidStyle":"{}","backdrop":"sharp-framebuffer","hyprlandBlur":{},"barBlur":{{"enabled":{},"source":"hyprland","topbarDraws":{},"sidebarDraws":{},"waveDraws":{}}},"appearance":{{"blur":{:.3f},"contrast":{:.3f},"reflection":{:.3f},"preview":{}}},"desktop":{{"size":{},"passes":{},"draws":{},"noise":{:.3f},"contrast":{:.3f},"brightness":{:.3f},"vibrancy":{:.3f},"vibrancyDarkness":{:.3f}}},"panel":{{"size":{},"passes":{},"draws":{},"refractionDraws":{},"noise":{:.3f},"contrast":{:.3f},"brightness":{:.3f},"vibrancy":{:.3f},"vibrancyDarkness":{:.3f},"refraction":{:.3f},"edgeWidth":{:.3f},"dispersion":{:.3f},"tint":{:.3f}}},"topbar":{{"size":{},"passes":{},"shapes":{},"draws":{},"refractionDraws":{},"noise":{:.3f},"contrast":{:.3f},"brightness":{:.3f},"vibrancy":{:.3f},"vibrancyDarkness":{:.3f}}},"rightMenu":{{"draws":{},"refractionDraws":{}}},"settings":{{"draws":{},"refractionDraws":{}}},"editor":{{"shapes":{},"draws":{},"refractionDraws":{},"connectedSettings":{}}},"sharedWidgets":{{"blurEnabled":{},"blurDraws":{},"active":{},"shapes":{},"draws":{},"refractionDraws":{},"caustics":{}}},"transition":{{"progress":{:.3f},"animating":{}}},"caustics":{{"enabled":{},"intensity":{:.3f},"lines":{},"animating":{},"frames":{}}}}})",
+            R"({{"active":true,"abi":"{}","materials":{},"capabilities":[{}"alpha-mask","infinite-top-frame-continuous","compact-topbar","infinite-desktop-dock","infinite-desktop-dock-compact","desktop-bar-material","transition","dial","caustics","topbar-connected","bar-blur","widget-blur","liquid-style","wallpaper","topbar-shape","unified-bar-shape","topbar-settle","right-menu-shape","settings-shape","settings-connected","settings-side-connected","editor-catalog-connected","editor-shape","appearance","lock-layout","shared-widgets-shape","wallpaper-transition","terminal-glass","terminal-glass-control","terminal-bar-match","bar-refraction","terminal-follow-bar","terminal-brightness","bar-brightness","lyrics-beat","lyrics-beat-palette","optical-glass","bar-bubble-liquid"{}],"parallax":{{"enabled":{},"frames":{},"moving":{}}},"opticalDamage":{{"frames":{},"blurExpansions":{},"padding":{},"staleBackdropRefreshes":{}}},"terminalGlass":{{"enabled":{},"strength":{:.3f},"draws":{},"sharpDraws":{},"desktopCopies":{},"shaderFailed":{},"source":"live-framebuffer-and-hyprland-blur","barMatch":{},"barMatchDraws":{},"followsBar":{},"followBarDraws":{},"brightness":{:.3f}}},"wallpaperBlur":{:.3f},"barRefraction":{:.3f},"barBrightness":{:.3f},"lyricsBeatCount":{},"liquidStyle":"{}","backdrop":"sharp-framebuffer","hyprlandBlur":{},"barBlur":{{"enabled":{},"source":"hyprland","topbarDraws":{},"sidebarDraws":{},"waveDraws":{}}},"appearance":{{"blur":{:.3f},"contrast":{:.3f},"reflection":{:.3f},"preview":{}}},"desktop":{{"size":{},"passes":{},"draws":{},"noise":{:.3f},"contrast":{:.3f},"brightness":{:.3f},"vibrancy":{:.3f},"vibrancyDarkness":{:.3f}}},"panel":{{"size":{},"passes":{},"draws":{},"refractionDraws":{},"noise":{:.3f},"contrast":{:.3f},"brightness":{:.3f},"vibrancy":{:.3f},"vibrancyDarkness":{:.3f},"refraction":{:.3f},"edgeWidth":{:.3f},"dispersion":{:.3f},"tint":{:.3f}}},"topbar":{{"size":{},"passes":{},"shapes":{},"draws":{},"refractionDraws":{},"noise":{:.3f},"contrast":{:.3f},"brightness":{:.3f},"vibrancy":{:.3f},"vibrancyDarkness":{:.3f}}},"rightMenu":{{"draws":{},"refractionDraws":{}}},"settings":{{"draws":{},"refractionDraws":{}}},"editor":{{"shapes":{},"draws":{},"refractionDraws":{},"connectedSettings":{}}},"sharedWidgets":{{"blurEnabled":{},"blurDraws":{},"active":{},"shapes":{},"draws":{},"refractionDraws":{},"caustics":{}}},"transition":{{"progress":{:.3f},"animating":{}}},"caustics":{{"enabled":{},"intensity":{:.3f},"lines":{},"animating":{},"frames":{}}}}})",
             __hyprland_api_get_client_hash(), materials, g_luaDispatch ? "\"lua-dispatch\"," : "", cameraCapability,
             lightParallaxEnabled(), g_lightParallaxFrames, lightParallaxEnabled() && std::any_of(g_lightParallax.begin(), g_lightParallax.end(), [](const auto& item) { return item.second.moving(); }),
             g_opticalDamageFrames, g_opticalBlurExpansions, g_opticalDamagePadding, g_staleBackdropRefreshes,

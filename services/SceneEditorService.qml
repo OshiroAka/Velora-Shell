@@ -1,5 +1,6 @@
 import QtQuick
 import Quickshell
+import "../core/WidgetCatalog.js" as WidgetCatalog
 
 Scope {
     id: root
@@ -19,13 +20,6 @@ Scope {
     readonly property bool canUndo: undoStack.length > 0
     readonly property bool canRedo: redoStack.length > 0
     readonly property var editableLayers: buildEditableLayers()
-    readonly property var builtInCatalog: [
-        { kind: "clock", name: "Relógio", singleton: true },
-        { kind: "weather", name: "Previsão", singleton: true },
-        { kind: "media", name: "Mídia", singleton: true },
-        { kind: "gallery", name: "Galeria principal", singleton: true },
-        { kind: "system", name: "Sistema", singleton: true }
-    ]
 
     signal selectionChanged(string layerId)
     signal historyChanged
@@ -482,6 +476,21 @@ Scope {
     function setPhotoItems(identifier, items) {
         return updateLayer(identifier, { items: Array.isArray(items)
             ? clone(items).slice(0, 16) : [] })
+    }
+
+    function addWidgetVariant(kind, variantId) {
+        const choice = WidgetCatalog.variants(String(kind)).find(item => item.id === String(variantId))
+        const widget = config.sharedWidgetByKind(String(kind))
+        if (!choice || !widget) return false
+        if ((editSpace === "desktop" ? widget.desktopEnabled : widget.lockEnabled)
+                && WidgetCatalog.resolve(String(kind), widget.variantId).id === choice.id) {
+            select(widget.id)
+            return true
+        }
+        const ok = updateLayer(widget.id, {visible: true, variantId: choice.id,
+            baseWidth: choice.width, baseHeight: choice.height})
+        if (ok) select(widget.id)
+        return ok
     }
 
     function setBuiltInVisible(kind, visible) {

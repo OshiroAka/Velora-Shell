@@ -25,7 +25,7 @@ Item {
         property string profileAvatarError: ""
         property bool closePrompt: false
         property bool shown: true
-        property var shell: ({barOnRight: rail.rightSide})
+        property var shell: ({barOnRight: rail.rightSide, bottomBarHeight: 16, sidebarVisualWidth: 64})
         function setSettingsPage(page) { settingsPage = page }
         function hide() {}
     }
@@ -87,12 +87,17 @@ Item {
             // scrollable viewport instead of losing fixed-size controls.
             verify(rail.contentMinimumWidth >= rail.targetWidth - 48)
             verify(rail.contentMinimumHeight >= rail.targetHeight - 48)
-            for (const item of [chrome.toolBarItem, chrome.inspectorItem, chrome.catalogItem]) {
+            for (const item of [chrome.toolBarItem]) {
                 if (!item.visible) continue
                 const bounds = chrome.surfaceArea
                 verify(item.x >= bounds.x - .01 && item.x + item.width <= bounds.x + bounds.width + .01, "horizontal " + JSON.stringify({x:item.x,width:item.width,bounds:bounds}))
-                verify(item.y >= bounds.y - .01 && item.y + item.height <= bounds.y + bounds.height + .01, "vertical " + JSON.stringify({y:item.y,height:item.height,bounds:bounds}))
+                verify(item.y >= 0 && Math.abs(item.y + item.height - (fixture.height-16)) < .01, "editor toolbar must meet the bottom frame")
             }
+            chrome.catalogOpen = true
+            const catalog = chrome.catalogItem
+            verify(catalog.x >= 0 && Math.abs(catalog.x + catalog.bodyWidth - fixture.width) < .01, "catalog must meet the right wall")
+            verify(catalog.y === 40 && catalog.height <= fixture.height-40, "catalog must fill the right edge")
+            chrome.catalogOpen = false
             const home = chrome.settingsItem
             if (home.visible) {
                 // Settings extend to the physical right wall. The editor's

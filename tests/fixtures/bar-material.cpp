@@ -583,6 +583,23 @@ int main(int argc, char** argv) {
         four("barMaterial",1,1,1,0);
         draw();
         check(alpha(200,290)==0 && alpha(200,200)==0,"Upper host duplicates connected Settings");
+        // The editor keeps its bottom toolbar while the catalog fills the
+        // right edge. Both bodies belong to one frame/material pass.
+        four("editorCatalogPanel",350,150,60,150);
+        two("editorCatalogMetrics",20,24);
+        for (float fold : {0.F,1.F}) {
+            two("frameFold",fold,0);
+            for (float pass : {1.F,2.F}) {
+                four("barMaterial",pass,1,1,0);
+                draw();
+                check((alpha(350,150)>250)==(pass==2.F),"Catalog is missing or has two material owners");
+                check((alpha(200,225)>250)==(pass==2.F),"Opening the catalog removes the bottom editor toolbar");
+                check(alpha(260,100)==0,"Catalog material escapes into the desktop");
+            }
+        }
+        two("frameFold",0,0);
+        four("editorCatalogPanel",0,0,0,0);
+        two("editorCatalogMetrics",0,0);
         four("barMaterial",2,1,1,0);
         four("bottomPanel",0,0,0,0);
         draw();

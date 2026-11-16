@@ -1,6 +1,4 @@
 import QtQuick
-import QtQuick.Controls
-import "../../components" as Components
 import "../widgets" as Widgets
 import "../../core/SurfaceGeometry.js" as Geometry
 
@@ -17,9 +15,9 @@ Item {
     required property var editor
 
     property bool catalogOpen: false
-    property bool advancedOpen: false
     readonly property bool settingsMode: controller.mode === "settings"
     readonly property bool editingMode: controller.mode === "editing"
+    onEditingModeChanged: if (!editingMode) catalogOpen = false
     readonly property bool railOnRight: controller.shell ? controller.shell.barOnRight : false
     readonly property var surfaceArea: Geometry.area(width, height, config.topbarEnabled ? 64 : 0,
         railOnRight, config.topbarEnabled ? 40 : 0, 0, 18)
@@ -66,12 +64,7 @@ Item {
     }
     readonly property bool desktop: editor.editSpace === "desktop"
     readonly property var selectedLayer: editor.layerById(editor.selectedLayerId)
-    readonly property var selectedTransform: selectedLayer
-        ? selectedLayer.transform : ({})
-    readonly property var selectedStyle: selectedLayer
-        ? (selectedLayer.style || ({})) : ({})
     property alias toolBarItem: toolBar
-    property alias inspectorItem: inspector
     property alias catalogItem: catalog
     property alias settingsItem: settingsHome
 
@@ -79,18 +72,6 @@ Item {
     visible: opacity > 0.001
     Behavior on opacity {
         NumberAnimation { duration: root.settingsMode ? 0 : root.motion.selection; easing.type: Easing.OutCubic }
-    }
-
-    function builtInEnabled(kind) {
-        const widget = config.sharedWidgetByKind(kind)
-        if (!widget)
-            return false
-        return desktop ? Boolean(widget.desktopEnabled) : Boolean(widget.lockEnabled)
-    }
-
-    function numeric(value, fallback) {
-        const parsed = Number(value)
-        return isFinite(parsed) ? parsed : fallback
     }
 
     component ToolButton: Rectangle {
@@ -133,78 +114,6 @@ Item {
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
             onClicked: button.triggered()
-        }
-    }
-
-    component EasySlider: Column {
-        property string title: ""
-        property real value: 100
-        property real from: 0
-        property real to: 100
-        signal committed(real value)
-        width: inspectorFlow.width
-        spacing: 4
-        Text { text: title + " · " + Math.round(control.pressed ? control.value : value) + "%"
-            color: "#edf2ff"; font.pixelSize: 13 }
-        Slider {
-            id: control
-            width: parent.width; from: parent.from; to: parent.to
-            value: parent.value; stepSize: 1
-            onPressedChanged: if (!pressed) parent.committed(value)
-            onMoved: if (!pressed) parent.committed(value)
-        }
-    }
-
-    component MiniField: Item {
-        id: field
-        property string title: ""
-        property string value: ""
-        property string suffix: ""
-        property real fieldWidth: 92
-        signal accepted(string value)
-        width: fieldWidth
-        height: 48
-
-        Text {
-            x: 2; y: 0
-            text: field.title
-            color: Qt.rgba(1, 1, 1, 0.70)
-            font.family: root.theme.bodyFont
-            font.pixelSize: 9
-            font.weight: Font.DemiBold
-        }
-
-        Rectangle {
-            x: 0; y: 16
-            width: parent.width; height: 30; radius: 11
-            color: Qt.rgba(1, 1, 1, input.activeFocus ? 0.18 : 0.08)
-            border.width: 1
-            border.color: input.activeFocus
-                ? root.theme.accentSoft : Qt.rgba(1, 1, 1, 0.16)
-
-            TextInput {
-                id: input
-                anchors.fill: parent
-                anchors.leftMargin: 9
-                anchors.rightMargin: suffixLabel.implicitWidth + 8
-                verticalAlignment: TextInput.AlignVCenter
-                text: field.value
-                color: "white"
-                selectByMouse: true
-                font.family: root.theme.bodyFont
-                font.pixelSize: 11
-                onEditingFinished: field.accepted(text)
-            }
-
-            Text {
-                id: suffixLabel
-                anchors.right: parent.right
-                anchors.rightMargin: 7
-                anchors.verticalCenter: parent.verticalCenter
-                text: field.suffix
-                color: Qt.rgba(1, 1, 1, 0.48)
-                font.pixelSize: 9
-            }
         }
     }
 
@@ -304,309 +213,16 @@ Item {
 
 
 
-    Widgets.GlassPanel {
+    EditorWidgetCatalog {
         id: catalog
-        visible: root.editingMode && root.catalogOpen
-        opacity: visible ? 1 : 0
-        width: Math.min(300, root.surfaceArea.width)
-        height: Math.min(436, Math.max(0, root.surfaceArea.height - toolBar.height - 12))
-        x: Math.max(root.surfaceArea.x, Math.min(root.surfaceArea.x + root.surfaceArea.width - width,
-            toolBar.x + 8))
-        y: Geometry.clamp(root.desktop ? toolBar.y - height - 12 : toolBar.y + toolBar.height + 12, root.surfaceArea.y, root.surfaceArea.y + root.surfaceArea.height - height)
-        z: 32
-        radius: 28
-        nativeOptics: false
-        materialMode: "solid"
-        solidColor: "#202634"
-        materialOpacity: 0.98
-        surfaceColor: root.theme.glass
-        borderColor: root.theme.border
-        shadowColor: root.theme.shadow
-
-        Flickable {
-            anchors.fill: parent; anchors.margins: 16
-            contentWidth: width; contentHeight: catalogContents.implicitHeight
-            clip: true; boundsBehavior: Flickable.StopAtBounds
-        Column {
-            id: catalogContents
-            width: parent.width
-            spacing: 8
-
-            Text {
-                text: "Adicionar ao " + (root.desktop ? "Desktop" : "Lock")
-                color: "white"
-                font.family: root.theme.bodyFont
-                font.pixelSize: 15
-                font.weight: Font.Bold
-            }
-
-            Repeater {
-                model: root.editor.builtInCatalog
-                ToolButton {
-                    required property var modelData
-                    width: 268
-                    caption: (root.builtInEnabled(modelData.kind) ? "✓  " : "+  ")
-                        + modelData.name
-                    activeState: root.builtInEnabled(modelData.kind)
-                    onTriggered: root.editor.setBuiltInVisible(modelData.kind,
-                        !root.builtInEnabled(modelData.kind))
-                }
-            }
-
-            Rectangle { width: parent.width; height: 1; color: Qt.rgba(1, 1, 1, 0.16) }
-
-            Flow {
-                width: parent.width
-                spacing: 7
-                ToolButton { caption: "Imagem"; onTriggered: root.controller.chooseCustomImage() }
-                ToolButton { caption: "Galeria 2×2"; onTriggered: root.controller.choosePhotoGrid("grid2") }
-                ToolButton { caption: "3×3"; onTriggered: root.controller.choosePhotoGrid("grid3") }
-                ToolButton { caption: "4×4"; onTriggered: root.controller.choosePhotoGrid("grid4") }
-                ToolButton { caption: "Destaque"; onTriggered: root.controller.choosePhotoGrid("feature") }
-            }
-        }
-        }
-    }
-
-
-
-    Widgets.GlassPanel {
-        id: inspector
-        visible: root.editingMode && Boolean(root.selectedLayer)
-        x: Geometry.clamp(root.numeric(root.selectedTransform.x, 0) < 800
-            ? parent.width - width - 20 : 20, root.surfaceArea.x, root.surfaceArea.x + root.surfaceArea.width - width)
-        y: 78
-        width: Math.min(360, parent.width * 0.40)
-        height: Math.max(0, parent.height - 174)
-        z: 29
-        radius: 28
-        nativeOptics: false
-        materialMode: "solid"
-        solidColor: "#202634"
-        materialOpacity: 0.98
-        surfaceColor: root.theme.glass
-        borderColor: root.theme.border
-        shadowColor: root.theme.shadow
-
-        Flickable {
-            id: inspectorScroll
-            anchors.fill: parent
-            anchors.margins: 14
-            clip: true
-            contentWidth: width
-            contentHeight: inspectorFlow.height
-            boundsBehavior: Flickable.StopAtBounds
-
-            Flow {
-                id: inspectorFlow
-                width: inspectorScroll.width
-                height: childrenRect.height
-                spacing: 8
-
-                Text {
-                    width: inspectorFlow.width
-                    height: 42
-                    text: root.selectedLayer ? root.selectedLayer.name : ""
-                    color: "white"
-                    font.family: root.theme.bodyFont
-                    font.pixelSize: 15
-                    font.weight: Font.Bold
-                    verticalAlignment: Text.AlignVCenter
-                    elide: Text.ElideRight
-                }
-
-
-                Text {
-                    width: inspectorFlow.width
-                    text: "Arraste na cena para mover. Use os cantos para redimensionar."
-                    wrapMode: Text.WordWrap
-                    color: "#c5cddd"; font.pixelSize: 12
-                }
-                EasySlider {
-                    title: "Tamanho"; from: 10; to: 300
-                    value: Number(root.selectedTransform.scale || 1) * 100
-                    onCommitted: function(v) { root.editor.setTransform(root.editor.selectedLayerId, "scale", v / 100) }
-                }
-                EasySlider {
-                    title: "Opacidade do fundo"
-                    value: Number(root.selectedStyle.surfaceOpacity === undefined ? 0.88 : root.selectedStyle.surfaceOpacity) * 100
-                    onCommitted: function(v) {
-                        root.editor.setItemStyle(root.editor.selectedLayerId, "surfaceOpacity", v / 100)
-                    }
-                }
-                EasySlider {
-                    title: "Opacidade do elemento"
-                    value: Number(root.selectedTransform.opacity === undefined ? 1 : root.selectedTransform.opacity) * 100
-                    onCommitted: function(v) { root.editor.setTransform(root.editor.selectedLayerId, "opacity", v / 100) }
-                }
-                Text {
-                    width: inspectorFlow.width
-                    text: "Conteúdo e aparência dos widgets do desktop."
-                    wrapMode: Text.WordWrap; color: "#aab5c8"; font.pixelSize: 11
-                }
-                ToolButton {
-                    caption: "Trocar personagem"
-                    visible: root.selectedLayer && root.selectedLayer.type === "character"
-                    onTriggered: root.controller.chooseImage(0)
-                }
-                ToolButton {
-                    caption: "Trocar avatar"
-                    visible: root.selectedLayer && root.selectedLayer.type === "profile"
-                    onTriggered: root.controller.chooseAvatar()
-                }
-                ToolButton {
-                    caption: root.advancedOpen ? "Ocultar avançado" : "Avançado"
-                    onTriggered: root.advancedOpen = !root.advancedOpen
-                }
-                ToolButton {
-                    caption: "Liquid"
-                    activeState: String(root.selectedStyle.material || "liquid") === "liquid"
-                    onTriggered: root.editor.setItemStyle(root.editor.selectedLayerId,
-                        "material", "liquid")
-                }
-                ToolButton {
-                    caption: "Sólido"
-                    activeState: String(root.selectedStyle.material || "") === "solid"
-                    onTriggered: root.editor.setItemStyle(root.editor.selectedLayerId,
-                        "material", "solid")
-                }
-                ToolButton {
-                    caption: "Sem fundo"
-                    activeState: String(root.selectedStyle.material || "") === "none"
-                    onTriggered: root.editor.setItemStyle(root.editor.selectedLayerId,
-                        "material", "none")
-                }
-
-                MiniField {
-                    visible: root.advancedOpen
-                    title: "Cor sólida"; fieldWidth: 104
-                    value: String(root.selectedStyle.solidColor || "#20222a")
-                    onAccepted: function(value) { root.editor.setItemStyle(
-                        root.editor.selectedLayerId, "solidColor", value) }
-                }
-                MiniField {
-                    visible: root.advancedOpen
-                    title: "Fonte"; fieldWidth: root.desktop ? 186 : 142
-                    value: String(root.selectedStyle.fontFamily || "Poppins")
-                    onAccepted: function(value) { root.editor.setItemStyle(
-                        root.editor.selectedLayerId, "fontFamily", value) }
-                }
-                ToolButton { caption: "Importar fonte"; onTriggered: root.controller.chooseFont() }
-
-                MiniField {
-                    visible: root.advancedOpen
-                    title: "X"; suffix: "px"
-                    value: Math.round(Number(root.selectedTransform.x || 0)).toString()
-                    onAccepted: function(value) { root.editor.setTransform(
-                        root.editor.selectedLayerId, "x", root.numeric(value, 0)) }
-                }
-                MiniField {
-                    visible: root.advancedOpen
-                    title: "Y"; suffix: "px"
-                    value: Math.round(Number(root.selectedTransform.y || 0)).toString()
-                    onAccepted: function(value) { root.editor.setTransform(
-                        root.editor.selectedLayerId, "y", root.numeric(value, 0)) }
-                }
-                MiniField {
-                    visible: root.advancedOpen
-                    title: "Largura"; suffix: "px"
-                    value: Math.round(Number(root.selectedLayer ? root.selectedLayer.baseWidth : 0)).toString()
-                    onAccepted: function(value) { root.editor.updateLayer(
-                        root.editor.selectedLayerId, { baseWidth: root.numeric(value, 8) }) }
-                }
-                MiniField {
-                    visible: root.advancedOpen
-                    title: "Altura"; suffix: "px"
-                    value: Math.round(Number(root.selectedLayer ? root.selectedLayer.baseHeight : 0)).toString()
-                    onAccepted: function(value) { root.editor.updateLayer(
-                        root.editor.selectedLayerId, { baseHeight: root.numeric(value, 8) }) }
-                }
-                MiniField {
-                    visible: root.advancedOpen
-                    title: "Escala"; suffix: "×"
-                    value: Number(root.selectedTransform.scale || 1).toFixed(2)
-                    onAccepted: function(value) { root.editor.setTransform(
-                        root.editor.selectedLayerId, "scale",
-                        Math.max(0.02, Math.min(32, root.numeric(value, 1)))) }
-                }
-                MiniField {
-                    visible: root.advancedOpen
-                    title: "Rotação"; suffix: "°"
-                    value: Math.round(Number(root.selectedTransform.rotation || 0)).toString()
-                    onAccepted: function(value) { root.editor.setTransform(
-                        root.editor.selectedLayerId, "rotation", root.numeric(value, 0)) }
-                }
-                MiniField {
-                    title: "Opacidade"; suffix: "%"
-                    value: Math.round(Number(root.selectedTransform.opacity === undefined
-                        ? 1 : root.selectedTransform.opacity) * 100).toString()
-                    onAccepted: function(value) { root.editor.setTransform(
-                        root.editor.selectedLayerId, "opacity",
-                        Math.max(0, Math.min(1, root.numeric(value, 100) / 100))) }
-                }
-
-                MiniField {
-                    visible: root.advancedOpen
-                    title: "Tamanho fonte"; suffix: "×"
-                    value: Number(root.selectedStyle.fontScale || 1).toFixed(2)
-                    onAccepted: function(value) { root.editor.setItemStyle(
-                        root.editor.selectedLayerId, "fontScale",
-                        Math.max(0.25, Math.min(4, root.numeric(value, 1)))) }
-                }
-                MiniField {
-                    visible: root.advancedOpen
-                    title: "Cor do texto"; fieldWidth: 104
-                    value: String(root.selectedStyle.textColor || "")
-                    onAccepted: function(value) { root.editor.setItemStyle(
-                        root.editor.selectedLayerId, "textColor", value) }
-                }
-
-                ToolButton {
-                    visible: root.selectedLayer && root.selectedLayer.type === "photoGrid"
-                    caption: "2×2"; onTriggered: root.editor.setItemStyle(
-                        root.editor.selectedLayerId, "galleryLayout", "grid2")
-                }
-                ToolButton {
-                    visible: root.selectedLayer && root.selectedLayer.type === "photoGrid"
-                    caption: "3×3"; onTriggered: root.editor.setItemStyle(
-                        root.editor.selectedLayerId, "galleryLayout", "grid3")
-                }
-                ToolButton {
-                    visible: root.selectedLayer && root.selectedLayer.type === "photoGrid"
-                    caption: "4×4"; onTriggered: root.editor.setItemStyle(
-                        root.editor.selectedLayerId, "galleryLayout", "grid4")
-                }
-                ToolButton {
-                    visible: root.selectedLayer && root.selectedLayer.type === "photoGrid"
-                    caption: "Destaque"; onTriggered: root.editor.setItemStyle(
-                        root.editor.selectedLayerId, "galleryLayout", "feature")
-                }
-
-                ToolButton {
-                    caption: root.selectedLayer && root.selectedLayer.locked
-                        ? "Desbloquear" : "Bloquear"
-                    onTriggered: root.editor.updateLayer(root.editor.selectedLayerId,
-                        { locked: !root.selectedLayer.locked })
-                }
-                ToolButton {
-                    caption: "Duplicar"; enabled: root.selectedLayer && !root.selectedLayer.sharedWidget
-                    onTriggered: root.editor.duplicateSelected()
-                }
-                ToolButton {
-                    caption: "Para frente"; enabled: root.selectedLayer && !root.selectedLayer.sharedWidget
-                    onTriggered: root.editor.moveSelected(1)
-                }
-                ToolButton {
-                    caption: "Para trás"; enabled: root.selectedLayer && !root.selectedLayer.sharedWidget
-                    onTriggered: root.editor.moveSelected(-1)
-                }
-                ConfirmationMorph {
-                    theme: root.theme
-                    motion: root.motion
-                    onConfirmed: root.editor.removeSelected()
-                }
-            }
-        }
+        presented: root.editingMode && root.catalogOpen
+        config: root.config
+        editor: root.editor
+        controller: root.controller
+        theme: root.theme
+        motion: root.motion
+        surfaceTint: settingsHome.surfaceTint
+        onCloseRequested: root.catalogOpen = false
     }
 
     Widgets.GlassPanel {

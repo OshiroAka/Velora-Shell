@@ -39,6 +39,8 @@ Variants {
             && chrome.settingsItem.liquidMaterial && Platform.NativeBlur.supports("editor-shape")
         readonly property bool toolbarConnected: editingDesktop && settingsConnected
             && Platform.NativeBlur.supports("settings-connected")
+        readonly property bool catalogConnected: toolbarConnected && Platform.NativeBlur.supports("editor-catalog-connected")
+        onCatalogConnectedChanged: queueShape()
         onSettingsConnectedChanged: queueShape()
         onSettingsNativeLiquidChanged: queueShape()
         onToolbarConnectedChanged: queueShape()
@@ -59,8 +61,7 @@ Variants {
         BackgroundEffect.blurRegion: Region {
             Region { item: !editorWindow.settingsConnected && !editorWindow.settingsNativeLiquid && chrome.settingsItem.blurMaterial && chrome.settingsItem.visible ? chrome.settingsItem.materialItem : null; radius: 24 }
             Region { item: !editorWindow.toolbarConnected && !Platform.NativeBlur.supports("editor-shape") && chrome.toolBarItem.visible ? chrome.toolBarItem : null; radius: 25 }
-            Region { item: !Platform.NativeBlur.supports("editor-shape") && chrome.inspectorItem.visible ? chrome.inspectorItem : null; radius: 28; intersection: Intersection.Combine }
-            Region { item: !Platform.NativeBlur.supports("editor-shape") && chrome.catalogItem.visible ? chrome.catalogItem : null; radius: 28; intersection: Intersection.Combine }
+            Region { item: !editorWindow.catalogConnected && chrome.catalogItem.visible && chrome.settingsItem.blurMaterial ? chrome.catalogItem.materialItem : null; intersection: Intersection.Combine }
         }
 
         Item { id: topbarInputGap; width: editorWindow.width; height: 40 }
@@ -79,6 +80,7 @@ Variants {
 
         Binding { target: chrome.settingsItem; property: "nativeConnected"; value: editorWindow.settingsConnected }
         Binding { target: chrome.toolBarItem; property: "nativeConnected"; value: editorWindow.toolbarConnected }
+        Binding { target: chrome.catalogItem; property: "nativeConnected"; value: editorWindow.catalogConnected }
         // Keep the layer mapped during geometry-first opening, before controls
         // have alpha. This pixel is covered by the connected bottom material.
         Rectangle { x: 1; y: parent.height - 1; width: 1; height: 1; color: "#01000000"; visible: editorWindow.settingsConnected || editorWindow.toolbarConnected }
@@ -88,6 +90,7 @@ Variants {
         function shapeFields(item) {
             const topLeft = item.mapToItem(inputScope, 0, 0)
             const radius = Math.min(item === chrome.toolBarItem ? item.radius
+                : item === chrome.catalogItem.materialItem ? chrome.catalogItem.radius
                 : item === chrome.settingsItem.materialItem ? 24 : 28, item.width * 0.5, item.height * 0.5)
             return [topLeft.x / width, topLeft.y / height,
                     item.width / width, item.height / height,
@@ -103,15 +106,17 @@ Variants {
             const toolbar = toolbarConnected && chrome.toolBarItem.visible
             const body = toolbar ? chrome.toolBarItem : home.materialItem
             const attached = (toolbar || (settingsConnected && home.visible)) && body.width > 1 && body.height > 1
+            const catalog = chrome.catalogItem
             const connected = "velora-blur:settings-connected " + modelData.name + " "
                 + (attached ? "1 " + shapeFields(body) + " " + ((toolbar ? body.join : home.join) / width).toFixed(6)
-                    + (toolbar || home.launcherMode ? "" : " right") : "0")
+                    + (toolbar || home.launcherMode ? "" : " right")
+                    + (toolbar && catalogConnected && catalog.visible && catalog.bodyWidth > 1
+                        ? " catalog " + shapeFields(catalog.materialItem) + " " + (catalog.join / width).toFixed(6) : "") : "0")
             if (connected !== lastConnectedShape) {
                 Platform.NativeBlur.dispatch(connected)
                 lastConnectedShape = connected
             }
             const candidates = [!editingDesktop ? chrome.toolBarItem : null,
-                chrome.inspectorItem, chrome.catalogItem,
                 editorWindow.settingsNativeLiquid && chrome.settingsItem.visible ? chrome.settingsItem.materialItem : null]
             const shapes = []
             for (let index = 0; index < candidates.length; index += 1) {
@@ -138,7 +143,9 @@ Variants {
             focus: root.controller.shown
 
             Keys.onEscapePressed: {
-                if (root.editor.toolMode === "crop")
+                if (chrome.catalogOpen)
+                    chrome.catalogOpen = false
+                else if (root.editor.toolMode === "crop")
                     root.editor.setToolMode("select")
                 else if (root.editor.selectedLayerId.length > 0)
                     root.editor.clearSelection()
@@ -167,6 +174,7 @@ Variants {
 
             Settings.SceneEditorOverlay {
                 barOnRight: root.controller.shell ? root.controller.shell.barOnRight : false
+                rightInset: chrome.catalogItem.visible ? chrome.catalogItem.bodyWidth : 0
                 anchors.fill: parent
                 z: 1
                 active: root.controller.shown
@@ -239,15 +247,7 @@ Variants {
                 function onVisibleChanged() { editorWindow.queueShape() }
             }
             Connections {
-                target: chrome.inspectorItem
-                function onXChanged() { editorWindow.queueShape() }
-                function onYChanged() { editorWindow.queueShape() }
-                function onWidthChanged() { editorWindow.queueShape() }
-                function onHeightChanged() { editorWindow.queueShape() }
-                function onVisibleChanged() { editorWindow.queueShape() }
-            }
-            Connections {
-                target: chrome.catalogItem
+                target: chrome.catalogItem.materialItem
                 function onXChanged() { editorWindow.queueShape() }
                 function onYChanged() { editorWindow.queueShape() }
                 function onWidthChanged() { editorWindow.queueShape() }

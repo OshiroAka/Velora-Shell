@@ -1,4 +1,5 @@
 import QtQuick
+import "../editor" as Editor
 import "../../core/SurfaceGeometry.js" as Geometry
 
 Item {
@@ -10,12 +11,17 @@ Item {
     required property var theme
     required property var motion
     property bool barOnRight: false
+    property real rightInset: 0
+    property real bottomInset: 100
+    property alias selectionControls: selectionControls
     readonly property var sceneBounds: Geometry.designBounds(width, height,
         editor.editSpace === "desktop" && config.topbarEnabled ? 64 : 0, barOnRight,
         editor.editSpace === "desktop" && config.topbarEnabled ? 40 : 0,
         editor.editSpace === "desktop" ? 18 : 0)
     function displayTransform(layer) {
-        return Geometry.pose(layer.transform || ({}), Number(layer.baseWidth || config.moduleSize(layer.type)[0]),
+        const pose = editor.gestureActive && editor.gestureLayerId === layer.id
+            ? Object.assign({}, layer.transform || ({}), editor.gesturePatch) : layer.transform || ({})
+        return Geometry.pose(pose, Number(layer.baseWidth || config.moduleSize(layer.type)[0]),
             Number(layer.baseHeight || config.moduleSize(layer.type)[1]), sceneBounds)
     }
 
@@ -35,6 +41,12 @@ Item {
     readonly property real selectedHeight: selectedLayer
         ? Number(selectedLayer.baseHeight || config.moduleSize(selectedLayer.type)[1])
             * Number(selectedTransform.scale || 1) * designScale : 0
+    readonly property rect selectedBounds: {
+        const angle = Number(selectedTransform.rotation || 0) * Math.PI / 180
+        const w = Math.abs(selectedWidth * Math.cos(angle)) + Math.abs(selectedHeight * Math.sin(angle))
+        const h = Math.abs(selectedHeight * Math.cos(angle)) + Math.abs(selectedWidth * Math.sin(angle))
+        return Qt.rect(selectedX + (selectedWidth-w)/2, selectedY + (selectedHeight-h)/2, w, h)
+    }
 
     property real pressSceneX: 0
     property real pressSceneY: 0
@@ -399,5 +411,28 @@ Item {
             CropHandle { handle: "bottom"; edgeX: 1; edgeY: 2 }
             CropHandle { handle: "right-bottom"; edgeX: 2; edgeY: 2 }
         }
+    }
+
+    Editor.EditorSelectionControls {
+        id: selectionControls
+        readonly property var bounds: Geometry.area(root.width, root.height,
+            root.config.topbarEnabled ? 64 : 0, root.barOnRight,
+            root.config.topbarEnabled ? 40 : 0, root.bottomInset, 8)
+        readonly property real availableRight: Math.min(bounds.x+bounds.width, root.width-root.rightInset-8)
+        width: Math.min(360, Math.max(0, availableRight-bounds.x))
+        desiredX: Geometry.clamp(root.selectedBounds.x+(root.selectedBounds.width-width)/2,
+            bounds.x, availableRight-width)
+        desiredY: {
+            const below = root.selectedBounds.y+root.selectedBounds.height+14
+            const above = root.selectedBounds.y-height-14
+            return Geometry.clamp(below+height<=bounds.y+bounds.height ? below : above,
+                bounds.y, bounds.y+bounds.height-height)
+        }
+        visible: root.active && !!root.selectedLayer && root.selectedLayer.visible && width > 80
+        widgetLayer: root.selectedLayer
+        editor: root.editor
+        theme: root.theme
+        motion: root.motion
+        z: 5
     }
 }

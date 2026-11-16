@@ -146,6 +146,7 @@ ShellRoot {
             presented: controller.shown
         }
     }
+    property int editorEntryWaits: 0
     property bool resized: false
     property int phase: 0
     property bool stepping: false
@@ -245,6 +246,7 @@ ShellRoot {
                 } else if (phase===1) {
                     assert(home.page==="appearance" && !find(home,"settingsNav-desktop"),"editor must live in Appearance")
                     const entry=find(home,"scene.enter-desktop")
+                    if (!entry && editorEntryWaits++ < 12) return
                     assert(!!entry,"editor entry missing")
                     pointer.mouseClick(entry,20,20,Qt.LeftButton)
                 } else if (phase===2) {
