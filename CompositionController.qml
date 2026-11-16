@@ -56,6 +56,9 @@ Scope {
         if (nativeBarMaterialDiagnostic) console.warn("Velora blur: " + nativeBarMaterialDiagnostic)
     }
     readonly property var topbarTools: topbarSystem
+    readonly property string focusedMonitorName: compositor.focusedMonitorName
+    readonly property var profileToolsService: profileTools
+    Services.ProfileToolsService { id: profileTools }
     readonly property var networkStatus: systemStatus
     property bool sidebarNetworkActive: false
     readonly property var fanPlusService: fanPlus
@@ -65,6 +68,7 @@ Scope {
     readonly property var topbarActions: actions
     readonly property string activeTopbarType: topbarController.activeType
     function closeTopbarTool() { topbarController.close() }
+    function toggleTopbarProfile(monitor) { return topbarController.openByType("profile", monitor || compositor.focusedMonitorName) }
     function toggleTopbarWeather() { return topbarController.openByType("weather", compositor.focusedMonitorName) }
     function showTopbarWeather() {
         const entry = topbarController.items.find(entry => entry.type === "weather"

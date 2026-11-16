@@ -27,7 +27,37 @@ Canvas {
         function line(x,y,x2,y2) { c.beginPath();c.moveTo(x,y);c.lineTo(x2,y2);c.stroke() }
         function oval(x,y,rx,ry,fill) { c.beginPath();c.ellipse(x-rx,y-ry,rx*2,ry*2);fill?c.fill():c.stroke() }
         function round(x,y,w,h,r) { c.beginPath();c.roundedRect(x,y,w,h,r,r);c.stroke() }
-        if (name === "wifi") {
+        if (name === "user") {
+            oval(12,8,4,4,false);c.beginPath();c.arc(12,21,7,Math.PI,0);c.stroke()
+        } else if (name === "home") {
+            c.beginPath();c.moveTo(3,11);c.lineTo(12,3);c.lineTo(21,11);c.stroke()
+            c.beginPath();c.moveTo(5,10);c.lineTo(5,21);c.lineTo(19,21);c.lineTo(19,10);c.stroke();round(10,14,4,7,0)
+        } else if (name === "area" || name === "ocr") {
+            for (const p of [[4,9,4,4,9,4],[15,4,20,4,20,9],[20,15,20,20,15,20],[9,20,4,20,4,15]]) {
+                c.beginPath();c.moveTo(p[0],p[1]);c.lineTo(p[2],p[3]);c.lineTo(p[4],p[5]);c.stroke()
+            }
+            if (name === "ocr") { line(8,9,16,9);line(12,9,12,16);line(10,16,14,16) }
+        } else if (name === "music") {
+            line(10,18,10,4);line(10,4,19,2);line(19,2,19,16);oval(7,18,3,2,false);oval(16,16,3,2,false)
+        } else if (name === "play") {
+            c.beginPath();c.moveTo(8,5);c.lineTo(19,12);c.lineTo(8,19);c.closePath();c.fill()
+        } else if (name === "pause") {
+            line(9,6,9,18);line(15,6,15,18)
+        } else if (name === "next" || name === "previous") {
+            if (name === "previous") { c.translate(24,0);c.scale(-1,1) }
+            c.beginPath();c.moveTo(6,5);c.lineTo(16,12);c.lineTo(6,19);c.closePath();c.stroke();line(19,5,19,19)
+        } else if (name === "video") {
+            round(2,5,14,14,3);c.beginPath();c.moveTo(16,10);c.lineTo(22,6);c.lineTo(22,18);c.lineTo(16,14);c.stroke()
+        } else if (name === "stop") {
+            round(6,6,12,12,2)
+        } else if (name === "headphones") {
+            c.beginPath();c.moveTo(4,14);c.lineTo(4,10);c.arc(12,10,8,Math.PI,0);c.lineTo(20,14);c.stroke()
+            round(3,12,5,8,2);round(16,12,5,8,2)
+        } else if (name === "volume" || name === "muted") {
+            c.beginPath();c.moveTo(3,9);c.lineTo(7,9);c.lineTo(12,5);c.lineTo(12,19);c.lineTo(7,15);c.lineTo(3,15);c.closePath();c.stroke()
+            if (name === "muted") { line(16,9,22,15);line(22,9,16,15) }
+            else { c.beginPath();c.arc(12,12,5,-.8,.8);c.stroke();c.beginPath();c.arc(12,12,9,-.8,.8);c.stroke() }
+        } else if (name === "wifi") {
             c.lineWidth = 2.5
             for (let i=0;i<3;i++) {
                 c.globalAlpha = connected && level >= (i+1)/4 ? 1 : 0.25

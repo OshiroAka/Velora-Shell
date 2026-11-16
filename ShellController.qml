@@ -2630,6 +2630,18 @@ Scope {
     }
 
 
+    function toggleProfileMenu(centerY) {
+        if (infiniteDesktopCanvasEnabled && composition.toggleTopbarProfile()) return
+        if (!sideBarLayoutEnabled) return
+        const surfaces = sidebarPanels.instances
+        const name = root.composition ? root.composition.focusedMonitorName : ""
+        const surface = surfaces.find(item => item.modelData.name === name) || surfaces[0]
+        if (surface) {
+            surface.profileMenu.anchorY = Number(centerY) || surface.height - 70
+            surface.profileMenu.toggle()
+        }
+    }
+
     function openAdaptiveBarPopup(type, centerY) {
         if (["time", "agenda", "weatherPanel", "files", "browser", "wallpaperVisibility"].includes(type)) return
 
@@ -3374,7 +3386,7 @@ Scope {
         }
 
         function profile(): void {
-            root.openAdaptiveBarPopup("quickSettings", root.defaultQuickPopupCenterY("quickSettings"))
+            root.toggleProfileMenu(0)
         }
 
         function topbarWorkspaces(): void {
@@ -4689,6 +4701,7 @@ Scope {
             id: panel
             readonly property var bluetoothMenu: bluetoothPopover
             readonly property var notificationMenu: notificationsPopover
+            readonly property var profileMenu: profilePopover
             readonly property var wifiMenu: wifiPopover
             readonly property var levelControls: railControls
             readonly property color desktopIconInk: barRoot.ink
@@ -4718,7 +4731,7 @@ Scope {
             readonly property int weatherTopCornerRadius: 24
             property var activeRailSystemPopover: null
             readonly property var desktopEdgePanel: infiniteControlMenu.mounted ? infiniteControlMenu : edgePopover
-            readonly property bool wantsDrawerKeyboard: infiniteControlMenu.mounted || railControls.mounted || (edgePopover.mounted && !edgePopover.keepOpenOutside) || coffeePopover.mounted || notesPopover.mounted || bluetoothPopover.mounted || notificationsPopover.mounted || wifiPopover.mounted || root.focusMode || root.quickPopupType === "search" || root.quickPopupType === "agenda" || root.quickPopupType === "weatherPanel" || root.settingsPanelOpen || root.wallpaperSelectorOpen || (!root.topBarLayout && root.weatherTopKeyboardFocus) || root.leftMenuInteractiveFocus
+            readonly property bool wantsDrawerKeyboard: profilePopover.mounted || infiniteControlMenu.mounted || railControls.mounted || (edgePopover.mounted && !edgePopover.keepOpenOutside) || coffeePopover.mounted || notesPopover.mounted || bluetoothPopover.mounted || notificationsPopover.mounted || wifiPopover.mounted || root.focusMode || root.quickPopupType === "search" || root.quickPopupType === "agenda" || root.quickPopupType === "weatherPanel" || root.settingsPanelOpen || root.wallpaperSelectorOpen || (!root.topBarLayout && root.weatherTopKeyboardFocus) || root.leftMenuInteractiveFocus
             readonly property bool whatsappKeyboard: edgePopover.mounted && edgePopover.keepOpenOutside
 
             screen: modelData
@@ -4878,6 +4891,7 @@ Scope {
                 Region { item: railControls.volumeMask }
                 Region { item: railControls.brightnessMask }
                 Region { item: railControls.batteryMask }
+                Region { item: profilePopover.maskItem }
                 Region { item: coffeePopover.maskItem }
                 Region { item: notesPopover.maskItem }
                 Region { item: bluetoothPopover.maskItem }
@@ -6713,6 +6727,7 @@ Scope {
 
                 theme: veloraTheme
                 mediaService: root.composition ? root.composition.mediaService : null
+                profileMenuEnabled: true
                 mediaEnabled: root.sidebarMediaEnabled
                 audioVisualizer: root.composition ? root.composition.audioVisualizer : null
                 toolsService: root.composition ? root.composition.topbarTools : null
@@ -6809,13 +6824,20 @@ Scope {
                     root.cycleBarLayout()
                 }
                 onQuickPopupRequested: function(type, centerY) {
-                    root.openAdaptiveBarPopup(type, barRoot.y + centerY)
+                    if (type === "quickSettings") {
+                        profilePopover.anchorY = barRoot.y + centerY
+                        profilePopover.toggle()
+                    } else root.openAdaptiveBarPopup(type, barRoot.y + centerY)
                 }
                 onQuickPopupHovered: function(type, centerY) {
-                    root.previewAdaptiveBarPopup(type, barRoot.y + centerY)
+                    if (type === "quickSettings") {
+                        profilePopover.anchorY = barRoot.y + centerY
+                        profilePopover.triggerHovered = true
+                    } else root.previewAdaptiveBarPopup(type, barRoot.y + centerY)
                 }
                 onQuickPopupHoverEnded: function(type) {
-                    root.endAdaptiveBarPopupHover(type)
+                    if (type === "quickSettings") profilePopover.triggerHovered = false
+                    else root.endAdaptiveBarPopupHover(type)
                 }
                 anchors {
                     top: parent.top
@@ -6830,7 +6852,7 @@ Scope {
                 externalBrightnessActive: root.infiniteDesktopCanvasEnabled && root.composition.activeTopbarType === "brightness"
                 motion: root.composition.motionTokens
                 handoffSource: panel.activeRailSystemPopover
-                onLevelOpening: popover => panel.activeRailSystemPopover = popover
+                onLevelOpening: popover => { profilePopover.close(); panel.activeRailSystemPopover = popover }
                 onLevelClosed: type => { if (root.activeRailControl === type) root.activeRailControl = "" }
                 anchors.fill: parent
                 z: 11
@@ -6845,7 +6867,7 @@ Scope {
                 brightnessOpen: root.brightnessControlOpen
                 refreshSerial: root.railFeedbackSerial
                 batteryOpen: root.batteryControlOpen
-                extraPanel: wifiPopover.opened ? wifiPopover.outline : notificationsPopover.opened ? notificationsPopover.outline : bluetoothPopover.opened ? bluetoothPopover.outline : notesPopover.opened ? notesPopover.outline : coffeePopover.opened ? coffeePopover.outline : wifiPopover.mounted ? wifiPopover.outline : notificationsPopover.mounted ? notificationsPopover.outline : bluetoothPopover.mounted ? bluetoothPopover.outline : notesPopover.mounted ? notesPopover.outline : coffeePopover.outline
+                extraPanel: profilePopover.opened ? profilePopover.outline : wifiPopover.opened ? wifiPopover.outline : notificationsPopover.opened ? notificationsPopover.outline : bluetoothPopover.opened ? bluetoothPopover.outline : notesPopover.opened ? notesPopover.outline : coffeePopover.opened ? coffeePopover.outline : profilePopover.mounted ? profilePopover.outline : wifiPopover.mounted ? wifiPopover.outline : notificationsPopover.mounted ? notificationsPopover.outline : bluetoothPopover.mounted ? bluetoothPopover.outline : notesPopover.mounted ? notesPopover.outline : coffeePopover.outline
                 onPanelHoverChanged: hovered => {
                     root.railControlPanelHovered = hovered
                     if (hovered) railControlCloseTimer.stop()
@@ -6904,7 +6926,7 @@ Scope {
                 anchorY: height - panel.modelData.height / 2
                 triggerHovered: edgeHover.hovered
                 onOpening: {
-                    infiniteControlMenu.close(); coffeePopover.close(); notesPopover.close(); bluetoothPopover.close()
+                    profilePopover.close(); infiniteControlMenu.close(); coffeePopover.close(); notesPopover.close(); bluetoothPopover.close()
                     notificationsPopover.close(); wifiPopover.close()
                     root.activeRailControl = ""
                     root.closeQuickPopup()
@@ -6929,6 +6951,33 @@ Scope {
                 }
             }
 
+            VeloraRailProfile {
+                id: profilePopover
+                anchors.fill: parent
+                z: 13
+                enabled: root.sideBarLayoutEnabled && !!root.composition
+                theme: root.composition ? root.composition.topbarTheme : veloraTheme
+                system: root.composition ? root.composition.topbarTools : null
+                media: root.composition ? root.composition.mediaService : null
+                status: root.composition ? root.composition.networkStatus : null
+                tools: root.composition ? root.composition.profileToolsService : null
+                avatarSource: barRoot.profileImageSource()
+                profileName: root.composition ? root.composition.configStore.profileName : "Seu perfil"
+                motion: root.composition.motionTokens
+                rightSide: root.barOnRight
+                railWidth: root.sidebarVisualWidth
+                handoffSource: panel.activeRailSystemPopover
+                onOpening: {
+                    panel.activeRailSystemPopover = profilePopover
+                    coffeePopover.close(); notesPopover.close(); bluetoothPopover.close()
+                    notificationsPopover.close(); wifiPopover.close(); infiniteControlMenu.close()
+                    if (!edgePopover.keepOpenOutside) edgePopover.close()
+                    root.activeRailControl = ""; root.closeQuickPopup()
+                    root.composition.closeTopbarTool()
+                }
+                onShapeChanged: Qt.callLater(unifiedFrameCanvas.requestPaint)
+            }
+
             VeloraRailCoffee {
                 id: coffeePopover
                 motion: root.composition.motionTokens
@@ -6940,7 +6989,7 @@ Scope {
                 rightSide: root.barOnRight
                 railWidth: root.sidebarVisualWidth
                 handoffSource: panel.activeRailSystemPopover
-                onOpening: { panel.activeRailSystemPopover = coffeePopover; bluetoothPopover.close(); notesPopover.close(); notificationsPopover.close(); wifiPopover.close(); root.activeRailControl = ""; root.closeQuickPopup(); if (root.composition) root.composition.closeTopbarTool() }
+                onOpening: { profilePopover.close(); panel.activeRailSystemPopover = coffeePopover; bluetoothPopover.close(); notesPopover.close(); notificationsPopover.close(); wifiPopover.close(); root.activeRailControl = ""; root.closeQuickPopup(); if (root.composition) root.composition.closeTopbarTool() }
                 onShapeChanged: Qt.callLater(unifiedFrameCanvas.requestPaint)
             }
             VeloraRailNotes {
@@ -6954,7 +7003,7 @@ Scope {
                 rightSide: root.barOnRight
                 railWidth: root.sidebarVisualWidth
                 handoffSource: panel.activeRailSystemPopover
-                onOpening: { panel.activeRailSystemPopover = notesPopover; bluetoothPopover.close(); coffeePopover.close(); notificationsPopover.close(); wifiPopover.close(); root.activeRailControl = ""; root.closeQuickPopup(); if (root.composition) root.composition.closeTopbarTool() }
+                onOpening: { profilePopover.close(); panel.activeRailSystemPopover = notesPopover; bluetoothPopover.close(); coffeePopover.close(); notificationsPopover.close(); wifiPopover.close(); root.activeRailControl = ""; root.closeQuickPopup(); if (root.composition) root.composition.closeTopbarTool() }
                 onShapeChanged: Qt.callLater(unifiedFrameCanvas.requestPaint)
             }
             VeloraRailBluetooth {
@@ -6970,7 +7019,7 @@ Scope {
                 accent: barRoot.pink
                 uiFont: barRoot.uiFont
                 handoffSource: panel.activeRailSystemPopover
-                onOpening: { panel.activeRailSystemPopover = bluetoothPopover; coffeePopover.close(); notesPopover.close(); notificationsPopover.close(); wifiPopover.close(); root.activeRailControl = ""; root.closeQuickPopup(); if (root.composition) root.composition.closeTopbarTool() }
+                onOpening: { profilePopover.close(); panel.activeRailSystemPopover = bluetoothPopover; coffeePopover.close(); notesPopover.close(); notificationsPopover.close(); wifiPopover.close(); root.activeRailControl = ""; root.closeQuickPopup(); if (root.composition) root.composition.closeTopbarTool() }
                 onShapeChanged: Qt.callLater(unifiedFrameCanvas.requestPaint)
             }
             VeloraRailNotifications {
@@ -6991,7 +7040,7 @@ Scope {
                 onDismissRequested: id => root.dismissNotificationHistory(id)
                 onActivateRequested: id => { if (root.activateNotificationHistory(id)) notificationsPopover.close() }
                 onClearRequested: root.clearTrackedNotificationHistory()
-                onOpening: { panel.activeRailSystemPopover = notificationsPopover; coffeePopover.close(); notesPopover.close(); bluetoothPopover.close(); wifiPopover.close(); root.activeRailControl = ""; root.closeQuickPopup() }
+                onOpening: { profilePopover.close(); panel.activeRailSystemPopover = notificationsPopover; coffeePopover.close(); notesPopover.close(); bluetoothPopover.close(); wifiPopover.close(); root.activeRailControl = ""; root.closeQuickPopup() }
                 onShapeChanged: Qt.callLater(unifiedFrameCanvas.requestPaint)
             }
             VeloraRailWifi {
@@ -7008,7 +7057,7 @@ Scope {
                 ink: barRoot.ink
                 uiFont: barRoot.uiFont
                 handoffSource: panel.activeRailSystemPopover
-                onOpening: { panel.activeRailSystemPopover = wifiPopover; coffeePopover.close(); notesPopover.close(); bluetoothPopover.close(); notificationsPopover.close(); root.activeRailControl = ""; root.closeQuickPopup() }
+                onOpening: { profilePopover.close(); panel.activeRailSystemPopover = wifiPopover; coffeePopover.close(); notesPopover.close(); bluetoothPopover.close(); notificationsPopover.close(); root.activeRailControl = ""; root.closeQuickPopup() }
                 onShapeChanged: Qt.callLater(unifiedFrameCanvas.requestPaint)
             }
             Connections {
@@ -7044,27 +7093,27 @@ Scope {
                 id: railToolOutsideInput
                 z: 9
                 width: panel.width
-                height: infiniteControlMenu.mounted || railControls.mounted || (edgePopover.mounted && !edgePopover.keepOpenOutside) || coffeePopover.mounted || notesPopover.mounted || bluetoothPopover.mounted || notificationsPopover.mounted || wifiPopover.mounted ? panel.height : 0
+                height: profilePopover.mounted || infiniteControlMenu.mounted || railControls.mounted || (edgePopover.mounted && !edgePopover.keepOpenOutside) || coffeePopover.mounted || notesPopover.mounted || bluetoothPopover.mounted || notificationsPopover.mounted || wifiPopover.mounted ? panel.height : 0
                 acceptedButtons: Qt.AllButtons
-                onPressed: { infiniteControlMenu.close(); root.activeRailControl = ""; if (!edgePopover.keepOpenOutside) edgePopover.close(); coffeePopover.close(); notesPopover.close(); bluetoothPopover.close(); notificationsPopover.close(); wifiPopover.close() }
+                onPressed: { profilePopover.close(); infiniteControlMenu.close(); root.activeRailControl = ""; if (!edgePopover.keepOpenOutside) edgePopover.close(); coffeePopover.close(); notesPopover.close(); bluetoothPopover.close(); notificationsPopover.close(); wifiPopover.close() }
             }
             Connections {
                 target: root
                 function onActiveRailControlChanged() {
                     if (!root.activeRailControl) return
                     if (!edgePopover.keepOpenForControl(root.activeRailControl)) edgePopover.close()
-                    coffeePopover.close(); notesPopover.close(); bluetoothPopover.close()
+                    profilePopover.close(); coffeePopover.close(); notesPopover.close(); bluetoothPopover.close()
                     notificationsPopover.close(); wifiPopover.close()
                 }
                 function onInfiniteDesktopFrameFoldProgressChanged() { unifiedShapePublisher.dirty = true }
                 function onInfiniteDesktopCanvasEnabledChanged() {
-                    infiniteControlMenu.closeInstant(); edgePopover.close(); coffeePopover.closeInstant(); notesPopover.closeInstant()
+                    profilePopover.closeInstant(); infiniteControlMenu.closeInstant(); edgePopover.close(); coffeePopover.closeInstant(); notesPopover.closeInstant()
                     bluetoothPopover.closeInstant(); notificationsPopover.closeInstant(); wifiPopover.closeInstant()
                 }
                 function onQuickPopupTypeChanged() {
                     if (!root.quickPopupType) return
                     if (!edgePopover.keepOpenForControl(root.quickPopupType)) edgePopover.close()
-                    coffeePopover.close(); notesPopover.close(); bluetoothPopover.close()
+                    profilePopover.close(); coffeePopover.close(); notesPopover.close(); bluetoothPopover.close()
                     notificationsPopover.close(); wifiPopover.close()
                 }
             }

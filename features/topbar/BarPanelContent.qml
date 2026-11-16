@@ -22,11 +22,25 @@ Loader {
     property bool presented: true
     property var motionTokens: null
     property string screenName: ""
+    signal profileToolRequested(string action)
     readonly property bool interactionHeld: item ? item.interactionHeld === true : false
     sourceComponent: ({ weather: weatherPanel, battery: batteryPanel, clock: clockPanel, calendar: clockPanel, timer: timerPanel,
         monitor: monitorPanel, paint: paintPanel, wifi: wifiPanel, caffeine: toolsPanel, cat: toolsPanel, usb: toolsPanel,
         thing: toolsPanel, notes: toolsPanel,
-        volume: levelPanel, brightness: levelPanel, bluetooth: bluetoothPanel, notifications: notificationsPanel })[type] || null
+        profile: profilePanel, volume: levelPanel, brightness: levelPanel, bluetooth: bluetoothPanel, notifications: notificationsPanel })[type] || null
+
+    Component {
+        id: profilePanel
+        Components.ProfileMenuContent {
+            theme: root.theme; media: root.media; status: root.systemStatus
+            tools: root.shell.composition.profileToolsService
+            profileName: root.shell.composition.configStore.profileName
+            avatarSource: root.shell.infiniteDesktopPanels[root.screenName]?.desktopAvatarSource || ""
+            reducedMotion: !!root.motionTokens && root.motionTokens.reduced
+            Component.onCompleted: tools.refresh()
+            onToolRequested: action => root.profileToolRequested(action)
+        }
+    }
 
 
     Component {

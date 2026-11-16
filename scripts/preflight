@@ -45,7 +45,9 @@ MODULES = {'Qt6Core': 'qt6-base', 'Qt6Gui': 'qt6-base', 'Qt6Qml': 'qt6-declarati
            'Qt6Multimedia': 'qt6-multimedia', 'Qt6ShaderTools': 'qt6-shadertools',
            'Qt6Core5Compat': 'qt6-5compat', 'Qt6WaylandClient': 'qt6-wayland',
            'Qt6Svg': 'qt6-svg', 'libpulse-simple': 'libpulse', 'fftw3f': 'fftw'}
-OPTIONAL = {'playerctl': 'playerctl', 'bluetoothctl': 'bluez-utils', 'powerprofilesctl': 'power-profiles-daemon',
+OPTIONAL = {'tesseract': 'tesseract + tesseract-data-por (Texto)',
+            'hyprpicker': 'hyprpicker (Pipeta)', 'wf-recorder': 'wf-recorder (Gravar tela)',
+            'playerctl': 'playerctl', 'bluetoothctl': 'bluez-utils', 'powerprofilesctl': 'power-profiles-daemon',
             'xdg-open': 'xdg-utils', 'notify-send': 'libnotify', 'ffmpeg': 'ffmpeg',
             'magick': 'imagemagick', 'cava': 'cava', 'cmatrix': 'cmatrix',
             'linux-wallpaperengine': 'linux-wallpaperengine (AUR, projetos Wallpaper Engine)',

@@ -30,7 +30,7 @@ Item {
     function label(type) {
         return ({ volume: "Volume", brightness: "Brilho", notifications: "Notificações",
             bluetooth: "Bluetooth", wifi: "Wi-Fi", media: "Spotify",
-            whatsapp: "WhatsApp", avatar: "Configurações" })[type]
+            whatsapp: "WhatsApp", avatar: "Perfil" })[type]
     }
     Flickable {
         anchors.fill: parent
@@ -61,7 +61,8 @@ Item {
                     id: tool
                     required property string modelData
                     readonly property string type: modelData
-                    readonly property bool popoverTool: !["media", "whatsapp", "avatar"].includes(type)
+                    readonly property string popoverType: type === "avatar" ? "profile" : type
+                    readonly property bool popoverTool: !["media", "whatsapp"].includes(type)
                     width: 32
                     height: root.height
                     theme: root.theme
@@ -73,7 +74,7 @@ Item {
                     scrollable: type === "volume" || type === "brightness"
                     onScrolled: delta => type === "volume" ? root.status.adjustVolume(delta) : root.status.adjustBrightness(delta)
                     onActivated: {
-                        if (popoverTool) root.controller.toggle(type, tool, root.host)
+                        if (popoverTool) root.controller.toggle(popoverType, tool, root.host)
                         else {
                             root.controller.close()
                             if (type === "media") root.shell.railMediaRequested()
@@ -84,10 +85,10 @@ Item {
                     onSecondaryActivated: activated()
                     onHoveredChanged: {
                         if (!popoverTool || !interactive) return
-                        if (hovered) root.controller.enter(type, tool, root.host)
+                        if (hovered) root.controller.enter(popoverType, tool, root.host)
                         else root.controller.leave(tool)
                     }
-                    Component.onCompleted: if (popoverTool) root.controller.registerItem(type, tool, root.host)
+                    Component.onCompleted: if (popoverTool) root.controller.registerItem(popoverType, tool, root.host)
                     Component.onDestruction: if (popoverTool) root.controller.unregisterItem(tool)
                     Components.VeloraIconMotion {
                         id: iconMotion
@@ -97,7 +98,7 @@ Item {
                     Components.VeloraSidebarIcon {
                         anchors.centerIn: parent
                         width: root.glyphSize; height: width
-                        visible: tool.popoverTool
+                        visible: tool.popoverTool && tool.type !== "avatar"
                         iconName: ({ volume: root.status.muted ? "volume-muted" : "volume",
                             brightness: "sun", notifications: "bell", bluetooth: "bluetooth", wifi: "wifi" })[tool.type] || ""
                         level: root.status.volume

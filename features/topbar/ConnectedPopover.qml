@@ -23,6 +23,14 @@ FocusScope {
     readonly property string desiredType: !inhibited && controller.owner === host ? controller.activeType : ""
     required property var motionTokens
     readonly property bool motionMounted: motion.mounted
+    property string pendingProfileTool: ""
+    onMountedChanged: {
+        if (!mounted && pendingProfileTool) {
+            const action = pendingProfileTool
+            pendingProfileTool = ""
+            root.shell.composition.profileToolsService.run(action)
+        }
+    }
     readonly property real neckHalfWidth: motion.neckHalfWidth
     readonly property real anchorX: motion.anchorX
     readonly property bool mounted: motion.mounted
@@ -66,6 +74,10 @@ FocusScope {
             screenName: root.host.screen.name
             controller: root.controller; actions: root.actions
             onInteractionHeldChanged: root.syncPresence()
+            onProfileToolRequested: action => {
+                root.pendingProfileTool = action
+                root.controller.close()
+            }
         }
     }
 }
