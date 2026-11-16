@@ -157,7 +157,15 @@ const reference=bar.sections(1920,548,330,620,0,20);
 assert.equal(reference.left.x,0); assert.equal(reference.left.width,548);
 assert.equal(reference.center.x,795); assert.equal(reference.right.x,1280);
 const packed=bar.sections(1920,548,330,620,0,0,true);
-assert.equal(packed.center.x,548); assert.equal(packed.right.x,878);
+assert.equal(packed.center.x,795); assert.equal(packed.right.x,1300);
+for (const w of [320,480,640,800,1008,1280,1920,2560]) {
+ for (const wanted of [[240,72,400],[0,72,400],[240,0,400],[240,72,0]]) {
+  const b=bar.sections(w,...wanted,52,12,true);
+  assert(b.left.x+b.left.width<=b.center.x+1e-6);
+  assert(b.center.x+b.center.width<=b.right.x+1e-6);
+  assert(b.right.x+b.right.width<=w-12+1e-6);
+ }
+}
 const original={x:120,y:120,scale:1,rotation:0,opacity:1};
 assert.deepEqual(surface.pose(original,302,294,surface.designBounds(1920,1200,64,false,40,18)),original);
 console.log(JSON.stringify({cases:count,outputs:matrix.length,scales:4,sides:2}));

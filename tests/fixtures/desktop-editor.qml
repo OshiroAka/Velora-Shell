@@ -93,7 +93,10 @@ ShellRoot {
         function leave(item) { }
         function registerItem(type,item,host) { }
         function unregisterItem(item) { }
-        function toggle(type,item,host) { throw new Error("popup opened during editing") }
+        function toggle(type,item,host) {
+            if (!test.allowPanelActions) throw new Error("popup opened during editing")
+            activeType=type;owner=host
+        }
     }
     QtObject {
         id: actions
@@ -137,6 +140,7 @@ ShellRoot {
         }
     }
     property int editorEntryWaits: 0
+    property bool allowPanelActions: false
     property bool resized: false
     property int phase: 0
     property bool stepping: false
@@ -201,8 +205,29 @@ ShellRoot {
                     pointer.wait(25)
                     assert(bar.width < window.width && bar.x > 0,"topbar must detach from both screen edges")
                     assert(Math.abs(bar.x+bar.width/2-window.width/2)<1,"the entire topbar must stay centred")
-                    assert(bar.sectionBounds.center.x===bar.sectionBounds.left.x+bar.sectionBounds.left.width,"sections must stay adjacent")
-                    assert(bar.sectionBounds.right.x===bar.sectionBounds.center.x+bar.sectionBounds.center.width,"right tools must follow the other items")
+                    assert(bar.sectionBounds.center.x>=bar.sectionBounds.left.x+bar.sectionBounds.left.width+16,"context and information need breathing room")
+                    assert(bar.sectionBounds.right.x>=bar.sectionBounds.center.x+bar.sectionBounds.center.width+16,"system group must stay separate from information")
+                    const profileGroup=find(bar,"topbarProfileGroup"),systemGroup=find(bar,"topbarSystemGroup")
+                    assert(profileGroup.x+profileGroup.width<=bar.sectionBounds.left.x,"profile belongs before the active window")
+                    assert(systemGroup.x===bar.sectionBounds.right.x && systemGroup.width>0,"system controls belong on the right")
+                    assert(find(bar,"topbarRightToolsViewport").x>=systemGroup.x+systemGroup.width,"clock and tools overlap system controls")
+                    bar.desktopTargetReveal=1
+                    test.allowPanelActions=true
+                    for (const size of [640,1008,1440]) {
+                        window.width=size;pointer.wait(25)
+                        const viewport=find(bar,"topbarRightToolsViewport")
+                        const clockSlot=find(bar,"topbarTool-clock")
+                        assert(viewport.contentWidth<=viewport.width+1,"clock is clipped at "+size)
+                        assert(viewport.x+viewport.width<=bar.width-12+1,"right group leaves the bar at "+size)
+                        assert(clockSlot.visible && textLabel(clockSlot),"clock disappeared at "+size)
+                        const volume=find(systemGroup,"infiniteDesktopTool-volume")
+                        pointer.mouseClick(volume,volume.width/2,volume.height/2)
+                        assert(panels.activeType==="volume","moved system control no longer opens its menu")
+                        const avatar=find(profileGroup,"infiniteDesktopTool-avatar")
+                        pointer.mouseClick(avatar,avatar.width/2,avatar.height/2)
+                        assert(panels.activeType==="profile" && avatar.selected,"profile lost its menu or selected state")
+                    }
+                    test.allowPanelActions=false;panels.activeType="";panels.owner=null
                     for (const type of ["clock"]) {
                         const slot=find(bar,"topbarTool-"+type)
                         const label=textLabel(slot)
@@ -218,6 +243,7 @@ ShellRoot {
                     assert(config.infiniteTopbarToolsOrder[config.infiniteTopbarToolsOrder.length-1]==="thing","Infinite Desk reorder failed")
                     assert(JSON.stringify(config.topbarLayout)===standardLayout && JSON.stringify(config.topbarToolsOrder)===standardOrder,"Infinite Desk editing changed the standard bar")
                     bar.desktopMorphProgress=0
+                    bar.desktopTargetReveal=0
                     pointer.wait(25)
                     assert(JSON.stringify(bar.sectionBounds)===standardBounds && bar.width===window.width,"leaving Infinite Desk did not restore the standard bar")
                     const weatherTrigger=find(bar,"topbarWeatherTrigger")

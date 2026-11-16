@@ -16,12 +16,13 @@ Item {
     property real progress: 0
     property real reveal: 0
     property bool rightSide: false
-    readonly property var tools: rightSide ? ["media", "whatsapp"]
+    property var tools: rightSide ? ["media", "whatsapp"]
         : ["volume", "brightness", "notifications", "bluetooth", "wifi", "avatar"]
     readonly property var sidebar: shell.infiniteDesktopPanels[host.screen.name] || null
     readonly property color ink: sidebar ? sidebar.desktopIconInk : theme.textPrimary
     readonly property real glyphSize: sidebar ? sidebar.desktopIconSize : 22
-    readonly property real targetWidth: tools.length * 32
+    property real itemWidth: 32
+    readonly property real targetWidth: tools.length * itemWidth
     width: targetWidth * progress
     height: 40
     opacity: reveal
@@ -48,8 +49,8 @@ Item {
             solid: root.config.barItemBubblesSolid
             liquid: root.config.barItemBubblesEnabled && root.config.barItemBubblesLiquid
             x: 0; y: 6; height: 28
-            width: (root.rightSide ? root.tools.length : root.tools.length - 1) * 32
-            shown: root.config.barItemBubblesEnabled
+            width: root.tools.filter(type => type !== "avatar").length * root.itemWidth
+            shown: root.config.barItemBubblesEnabled && width > 0
         }
         Row {
             id: toolsRow
@@ -63,14 +64,14 @@ Item {
                     readonly property string type: modelData
                     readonly property string popoverType: type === "avatar" ? "profile" : type
                     readonly property bool popoverTool: !["media", "whatsapp"].includes(type)
-                    width: 32
+                    width: root.itemWidth
                     height: root.height
                     theme: root.theme
                     reducedMotion: root.config.reducedMotion
                     interactive: root.reveal > .999 && !root.shell.infiniteDesktopMorphing
                     objectName: "infiniteDesktopTool-" + type
                     label: root.label(type)
-                    selected: popoverTool && root.controller.owner === root.host && root.controller.activeType === type
+                    selected: popoverTool && root.controller.owner === root.host && root.controller.activeType === popoverType
                     scrollable: type === "volume" || type === "brightness"
                     onScrolled: delta => type === "volume" ? root.status.adjustVolume(delta) : root.status.adjustBrightness(delta)
                     onActivated: {

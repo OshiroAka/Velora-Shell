@@ -26,14 +26,19 @@ Item {
     readonly property bool packed: desktopMorphProgress >= .5
     property int opticsGeneration: 0
     property alias barSurfaceItem: background
-    property real leftInset: 0
-    property real rightInset: packed ? 0 : 20
+    property real leftInset: packed ? 12 : 0
+    property real rightInset: packed ? 12 : 20
+    readonly property real profileWidth: shell ? 40 : 0
+    readonly property real systemToolsWidth: shell ? (availableWidth < 760 ? 156 : 176) : 0
     // Measure the destination independently of the currently displayed model.
     // Switching the item set halfway must never resize the moving surface.
-    readonly property real packedWidth: (shell ? 192 : 0)
-        + config.infiniteTopbarLayout.filter(item => item.enabled && item.type !== "workspaces")
+    // Reserve 24px outside, two 16px section gaps and 48px of flexible space.
+    readonly property real packedWidth: profileWidth + systemToolsWidth + 104
+        + config.infiniteTopbarLayout.filter(item => item.enabled && item.type !== "workspaces"
+            && ["left", "center"].includes(item.section))
             .reduce((sum, item) => sum + legacyItemWidth(item.type, true), 0)
         + toolsForMode(true).reduce((sum, type) => sum + toolWidth(type, true), 0)
+        + Math.max(0, toolsForMode(true).length - 1) * 4
     readonly property real availableWidth: host.width > 0 ? host.width : host.screen.width
     readonly property real morphWidth: availableWidth
         + (Math.min(availableWidth, packedWidth) - availableWidth) * desktopMorphProgress
@@ -44,7 +49,8 @@ Item {
     }
     function layoutItemWidth(type) { return type === "workspaces" ? legacyItemWidth(type) * (1 - desktopMorphProgress) : legacyItemWidth(type) }
     readonly property var sectionBounds: BarGeometry.sections(width,
-        sectionWidth("left"), sectionWidth("center"), toolRow.width, leftInset + leftDesktopTools.width, rightInset + rightDesktopTools.width, packed)
+        sectionWidth("left"), sectionWidth("center"), toolRow.width + (packed ? systemToolsWidth : 0),
+        leftInset + leftDesktopTools.width, rightInset, packed)
     onSectionBoundsChanged: geometryChanged()
     readonly property var hyprMonitor: Hyprland.monitorFor(host.screen)
     readonly property var workspaceIds: {
@@ -58,13 +64,14 @@ Item {
     readonly property var barTheme: shell ? shell.unifiedTheme : null
     readonly property real unit: barTheme ? Math.max(.67, Math.min(1.17, barTheme.barIconSize / 48)) : 1
     readonly property real iconOpacity: barTheme ? barTheme.barIconOpacity : 1
-    readonly property real itemGap: packed ? 0 : barTheme ? barTheme.barIconSpacing / 4 : 1
+    readonly property real itemGap: packed ? 4 : barTheme ? barTheme.barIconSpacing / 4 : 1
     readonly property bool compact: availableWidth < 1280
     readonly property real density: availableWidth < 760 ? 0.8 : 1
     TextMetrics {
         id: dateMetrics
         font.family: root.theme.bodyFont; font.pixelSize: 12
-        text: root.clock.locale().toString(root.clock.now, "ddd d MMM  HH:mm").replace(/\./g, "")
+        text: root.clock.locale().toString(root.clock.now,
+            root.availableWidth < 760 ? "HH:mm" : "ddd d MMM  HH:mm").replace(/\./g, "")
     }
     TextMetrics { id: timerMetrics; font.family: root.theme.bodyFont; font.pixelSize: 14; text: root.timerService.barText || root.timerService.timerText }
     TextMetrics { id: messageMetrics; font.family: root.theme.bodyFont; font.pixelSize: 12; text: root.system.oneThing || "What is the one thing?" }
@@ -75,6 +82,7 @@ Item {
     function toolsForMode(infinite) { return (infinite ? config.infiniteTopbarToolsOrder : config.topbarToolsOrder).filter(type =>
         (type !== "thing" || config.topbarOneThingEnabled)
         && (type !== "notes" || config.topbarNotesEnabled)
+        && (!infinite || availableWidth >= 760 || type !== "thing")
         && (!infinite || !["battery", "paint", "monitor", "controls", "timer"].includes(type))) }
     function controlBubbleRuns() {
         const runs = []
@@ -219,10 +227,10 @@ Item {
                 search: 48, weather: 124, brand: 90 }
             return (widths[type] || 48) * unit
         }
-        const widths = { workspaces: 176, context: compact ? 130 : 200,
+        const widths = { workspaces: 176, context: availableWidth < 760 ? 128 : compact ? 200 : 260,
             clock: dateMetrics.width + 4, media: 100,
             wifi: 30, volume: 30, battery: 38, settings: 30, avatar: 32,
-            search: 30, weather: 72, brand: 60 }
+            search: 30, weather: availableWidth < 760 ? 64 : 72, brand: 60 }
         return (widths[type] || 32) * unit
     }
     function toolWidth(type, infinite) {
@@ -260,21 +268,36 @@ Item {
     Item { id: background; anchors.fill: parent }
     Loader {
         id: leftDesktopTools
+        objectName: "topbarProfileGroup"
         active: !!root.shell
         visible: root.packed && root.desktopTargetReveal > .001
-        width: root.packed ? 192 : 0
+        x: root.leftInset
+        width: root.packed ? root.profileWidth : 0
         height: root.height
         z: 5
         sourceComponent: InfiniteDesktopTools {
+            tools: ["avatar"]
             shell: root.shell; theme: root.theme; config: root.config
             controller: root.controller; host: root.host; actions: root.actions; status: root.status
             progress: root.desktopMorphProgress; reveal: root.desktopTargetReveal
         }
     }
-    Item {
+    Loader {
         id: rightDesktopTools
-        width: 0
+        objectName: "topbarSystemGroup"
+        active: !!root.shell && root.packed
+        visible: root.packed && root.desktopTargetReveal > .001
+        x: root.sectionBounds.right.x
+        width: root.packed ? Math.min(root.systemToolsWidth, root.sectionBounds.right.width) : 0
         height: root.height
+        z: 5
+        sourceComponent: InfiniteDesktopTools {
+            tools: ["volume", "brightness", "notifications", "bluetooth", "wifi"]
+            itemWidth: root.availableWidth < 760 ? 28 : 32
+            shell: root.shell; theme: root.theme; config: root.config
+            controller: root.controller; host: root.host; actions: root.actions; status: root.status
+            progress: root.desktopMorphProgress; reveal: root.desktopTargetReveal
+        }
     }
     component Section: Row {
         id: section
@@ -334,8 +357,8 @@ Item {
                     liquid: root.config.barItemBubblesEnabled && root.config.barItemBubblesLiquid
                     objectName: "barItemBubble"
                     anchors.fill: parent; anchors.topMargin: 6; anchors.bottomMargin: 6
-                    anchors.leftMargin: root.packed ? 0 : 6; anchors.rightMargin: root.packed ? 0 : 6
-                    shown: root.config.barItemBubblesEnabled
+                    anchors.leftMargin: root.packed ? 4 : 6; anchors.rightMargin: root.packed ? 4 : 6
+                    shown: root.config.barItemBubblesEnabled && entry.type !== "avatar"
                 }
                 Rectangle {
                     anchors.fill: parent
@@ -514,6 +537,7 @@ Item {
         }
     }
     Flickable {
+        objectName: "topbarLeftViewport"
         x: root.sectionBounds.left.x; width: root.sectionBounds.left.width; height: root.height
         contentWidth: leftSection.width; contentHeight: height
         clip: !root.layoutDragId; z: root.layoutDragId && root.layoutDragSourceSection === "left" ? 10 : 0
@@ -523,6 +547,7 @@ Item {
         Section { id: leftSection; sectionName: "left" }
     }
     Flickable {
+        objectName: "topbarCenterViewport"
         x: root.sectionBounds.center.x; width: root.sectionBounds.center.width; height: root.height
         contentWidth: centerSection.width; contentHeight: height
         clip: !root.layoutDragId; z: root.layoutDragId && root.layoutDragSourceSection === "center" ? 10 : 0
@@ -537,7 +562,8 @@ Item {
     Flickable {
         id: rightTools
         objectName: "topbarRightToolsViewport"
-        x: root.sectionBounds.right.x; width: root.sectionBounds.right.width; height: root.height
+        x: root.sectionBounds.right.x + rightDesktopTools.width
+        width: Math.max(0, root.sectionBounds.right.width - rightDesktopTools.width); height: root.height
         contentWidth: toolRow.width; contentHeight: height
         clip: true; boundsBehavior: Flickable.StopAtBounds
         interactive: contentWidth > width
@@ -735,7 +761,8 @@ Item {
                     anchors.centerIn: parent
                     visible: item.type === "clock"
                     opacity: root.iconOpacity
-                    text: root.clock.locale().toString(root.clock.now, "ddd d MMM  HH:mm").replace(/\./g, "")
+                    text: root.packed ? dateMetrics.text
+                        : root.clock.locale().toString(root.clock.now, "ddd d MMM  HH:mm").replace(/\./g, "")
                     transitionKey: "clock"
                     color: root.theme.textPrimary
                     family: root.theme.bodyFont; pixelSize: 12
