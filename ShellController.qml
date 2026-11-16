@@ -145,6 +145,7 @@ Scope {
     property string notificationToastIconKey: "bell"
     property string notificationToastId: ""
     property string notificationToastImage: ""
+    property bool notificationToastImageOnly: false
     property int notificationToastSerial: 0
     property var trackedNotificationObjects: ({})
     property var notificationDismissQueue: []
@@ -1163,6 +1164,7 @@ Scope {
         notificationToastIconKey = item.iconKey
         notificationToastId = item.id
         notificationToastImage = item.imageSource
+        notificationToastImageOnly = item.openUrl.length > 0
         notificationToastSerial += 1
         notificationToastUnmountTimer.stop()
         notificationToastMounted = true
@@ -6515,7 +6517,8 @@ Scope {
                     : root.desktopFrameMargin
 
                 width: attachedToWeather ? inlineWeatherTopFrame.width : Math.round(Math.min(safeWidth, Math.max(330, panelWidth * 0.18)))
-                readonly property real headerHeight: attachedToWeather ? 76 : 48
+                readonly property bool imageOnly: root.notificationToastImageOnly && inlineNotificationPreview.status !== Image.Error
+                readonly property real headerHeight: imageOnly ? 8 : attachedToWeather ? 76 : 48
                 height: headerHeight + (inlineNotificationPreview.visible ? inlineNotificationPreview.height + 12 : 0)
                 x: attachedToWeather ? inlineWeatherTopFrame.x : Math.round((panelWidth - width) / 2)
                 y: root.notificationToastVisible || attachedToWeather ? openY : -height - 18
@@ -6573,6 +6576,7 @@ Scope {
                 Item {
                     id: inlineNotificationToastIcon
 
+                    visible: !inlineNotificationToastStage.imageOnly
                     width: 32
                     height: 32
                     x: inlineNotificationToastStage.attachedToWeather ? 24 : 10
@@ -6668,6 +6672,7 @@ Scope {
 
                 Text {
                     x: inlineNotificationToastIcon.x + inlineNotificationToastIcon.width + 13
+                    visible: !inlineNotificationToastStage.imageOnly
                     y: Math.round((inlineNotificationToastStage.headerHeight - height) / 2) - 1
                     width: parent.width - x - (inlineNotificationToastStage.attachedToWeather ? 28 : 16)
                     text: root.notificationToastTitle

@@ -351,7 +351,8 @@ Variants {
                 label: root.notificationSource.notificationToastTitle, detail: "", progress: -1,
                 iconKey: root.notificationSource.notificationToastIconKey,
                 notificationId: root.notificationSource.notificationToastId,
-                imageSource: root.notificationSource.notificationToastImage
+                imageSource: root.notificationSource.notificationToastImage,
+                imageOnly: root.notificationSource.notificationToastImageOnly
             }) : root.executionStatus.current
         }
         TopBarFeature.ExecutionIndicator {

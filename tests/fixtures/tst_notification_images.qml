@@ -63,7 +63,7 @@ Window {
         }
         function notification(id, source) {
             return {phase: "notification", agent: "Velora screenshot", label: "Captura de tela", detail: "",
-                progress: -1, notificationId: id, imageSource: source, iconKey: "velora"}
+                progress: -1, notificationId: id, imageSource: source, imageOnly: !!source, iconKey: "velora"}
         }
         function showToast(id, source) {
             status.current = notification(id, source)
@@ -84,9 +84,11 @@ Window {
             showToast("capture-1", Qt.resolvedUrl("notification-preview.svg").toString())
             const image = findChild(toast, "notificationImage")
             tryCompare(image, "status", Image.Ready)
-            verify(image.y >= 39, "Preview is below the notification text")
+            compare(image.y, 0, "Screenshot preview uses the space left by the removed headings")
+            for (const child of image.parent.children)
+                if (child.text !== undefined) verify(!child.visible, "Screenshot headings are hidden")
             verify(image.paintedWidth <= image.width && image.paintedHeight <= image.height)
-            verify(toast.height > 200 && image.mapToItem(toast, 0, image.height).y <= toast.height)
+            verify(toast.height < 190 && image.mapToItem(toast, 0, image.height).y <= toast.height)
             mouseClick(toast, toast.width / 2, toast.height - 30)
             compare(toastClicks.count, 1)
             compare(toastClicks.signalArguments[0][0], "capture-1")

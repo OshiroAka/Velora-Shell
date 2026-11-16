@@ -15,12 +15,14 @@ Item {
     readonly property var incoming: service.current
     readonly property bool desiredOpen: service.shown
     readonly property bool notificationMode: presented.phase === "notification"
+    readonly property bool imageOnly: notificationMode && presented.imageOnly === true
+        && String(presented.imageSource || "").length > 0 && preview.status !== Image.Error
     signal notificationClicked(string notificationId, int button)
     readonly property real pace: notificationMode ? 2.8 : 1
     readonly property color activityColor: presented.phase === "failed" ? theme.danger
         : presented.phase === "completed" ? theme.success : theme.accentSoft
     property real targetWidth: Math.min(Math.max(notificationMode ? 330 : 192, labelMetrics.width + 78), 340, Math.max(80, availableWidth))
-    property real targetHeight: (presented.progress >= 0 ? 58 : 52)
+    property real targetHeight: imageOnly ? preview.height + 14 : (presented.progress >= 0 ? 58 : 52)
         + (preview.visible && notificationMode ? preview.height + 8 : 0)
     width: 60 + (targetWidth - 60) * reveal
     height: targetHeight * reveal
@@ -90,6 +92,7 @@ Item {
         opacity: root.contentReveal
         clip: true
         Text {
+            visible: !root.imageOnly
             width: parent.width; height: 16
             text: root.presented.agent + (root.presented.detail ? " · " + root.presented.detail : "")
             textFormat: Text.PlainText; elide: Text.ElideRight
@@ -117,12 +120,13 @@ Item {
         }
         Components.VeloraMaterialIcon {
             x: 0; y: 17; width: 20; height: 20
-            visible: root.notificationMode
+            visible: root.notificationMode && !root.imageOnly
             iconName: root.presented.iconKey === "whatsapp" ? "chat"
                 : root.presented.iconKey === "velora" ? "bell" : root.presented.iconKey || "bell"
             iconColor: root.theme.textPrimary
         }
         Text {
+            visible: !root.imageOnly
             x: 24; y: 17; width: Math.max(0, parent.width - x); height: 22
             text: root.presented.label
             textFormat: Text.PlainText; elide: Text.ElideRight
@@ -131,7 +135,7 @@ Item {
         }
         Components.NotificationImage {
             id: preview
-            x: 0; y: 46
+            x: 0; y: root.imageOnly ? 0 : 46
             width: parent.width
             source: root.notificationMode ? String(root.presented.imageSource || "") : ""
         }
