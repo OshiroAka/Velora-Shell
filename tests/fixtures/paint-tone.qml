@@ -16,7 +16,8 @@ ShellRoot {
         TopBar.BarPanelContent {
             id: panel
             x: 20; y: 20
-            width: Geometry.size("paint")[0]-32; height: Geometry.size("paint")[1]-32
+            width: Geometry.size("paint")[0]-2*Geometry.padding("paint")
+            height: Geometry.size("paint")[1]-2*Geometry.padding("paint")
             type: "paint"; theme: theme; system: system
             systemStatus: null; fanPlus: null; timerService: null; clock: null; calendar: null
             media: null; weather: null; controller: null; actions: null

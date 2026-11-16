@@ -40,8 +40,9 @@ FocusScope {
     readonly property bool geometryMoving: handoffMotion.running
     readonly property bool pointerInside: presence.hovered
     readonly property bool pointerHeld: dragPresence.active || contentViewport.dragging || contentViewport.flicking
-    readonly property real contentWidth: Math.max(0, PanelSizes.size(presentedType === "calendar" ? "clock" : presentedType)[0] - 32)
-    readonly property real contentHeight: Math.max(0, PanelSizes.size(presentedType === "calendar" ? "clock" : presentedType)[1] - 32)
+    readonly property real contentPadding: PanelSizes.padding(presentedType)
+    readonly property real contentWidth: Math.max(0, PanelSizes.size(presentedType === "calendar" ? "clock" : presentedType)[0] - 2 * contentPadding)
+    readonly property real contentHeight: Math.max(0, PanelSizes.size(presentedType === "calendar" ? "clock" : presentedType)[1] - 2 * contentPadding)
     visible: mounted
 
     function currentPose() { return [anchorX, anchorWidth, bodyWidth, bodyHeight, cornerAttachment] }
@@ -170,7 +171,7 @@ FocusScope {
         Flickable {
             id: contentViewport
             anchors.fill: parent
-            anchors.margins: 12
+            anchors.margins: root.contentPadding - 4
             contentWidth: root.contentWidth
             contentHeight: root.contentHeight
             boundsBehavior: Flickable.StopAtBounds

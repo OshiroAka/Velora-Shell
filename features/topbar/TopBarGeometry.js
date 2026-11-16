@@ -15,9 +15,13 @@ function panel(width, height, barHeight, anchor, wantedWidth, wantedHeight, prog
         anchor: origin, targetWidth: targetWidth, targetHeight: targetHeight }
 }
 
+function padding(type) {
+    return type === "battery" || type === "paint" ? 8 : 16
+}
+
 function size(type) {
-    const sizes = { battery: [300, 164], clock: [344, 368], timer: [300, 154],
-        monitor: [320, 272], weather: [368, 354], paint: [260, 192], wifi: [344, 330], caffeine: [300, 290], cat: [280, 164], usb: [416, 330],
+    const sizes = { battery: [268, 148], clock: [344, 368], timer: [300, 154],
+        monitor: [320, 272], weather: [368, 354], paint: [220, 162], wifi: [344, 330], caffeine: [300, 290], cat: [280, 164], usb: [416, 330],
         thing: [300, 68], notes: [352, 368] }
     Object.assign(sizes, {volume: [300, 114], brightness: [300, 114], bluetooth: [360, 380], notifications: [350, 410]})
     return sizes[type] || [304, 180]

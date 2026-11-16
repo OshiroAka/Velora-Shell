@@ -73,7 +73,8 @@ ShellRoot {
             radius: 16; color: "#2c4143"
             Topbar.BarPanelContent {
                 id: batteryPanel
-                x: 16; y: 16; width: parent.width - 32; height: parent.height - 32
+                x: Geometry.padding("battery"); y: x
+                width: parent.width - 2 * x; height: parent.height - 2 * y
                 type: "battery"; theme: theme; systemStatus: status; system: system; fanPlus: fan
                 timerService: ({}); clock: ({}); calendar: ({}); media: ({}); weather: ({})
                 controller: ({}); actions: ({})
