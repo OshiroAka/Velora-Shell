@@ -86,6 +86,9 @@ Loader {
             accent: root.theme.accent
             uiFont: root.theme.bodyFont
             onDismissRequested: id => { if (root.shell) root.shell.dismissNotificationHistory(id) }
+            onActivateRequested: id => {
+                if (root.shell && root.shell.activateNotificationHistory(id)) root.controller.close()
+            }
             onClearRequested: { if (root.shell) root.shell.clearTrackedNotificationHistory() }
             readonly property bool interactionHeld: panelHeld
         }

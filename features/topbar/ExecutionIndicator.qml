@@ -15,11 +15,13 @@ Item {
     readonly property var incoming: service.current
     readonly property bool desiredOpen: service.shown
     readonly property bool notificationMode: presented.phase === "notification"
+    signal notificationClicked(string notificationId, int button)
     readonly property real pace: notificationMode ? 2.8 : 1
     readonly property color activityColor: presented.phase === "failed" ? theme.danger
         : presented.phase === "completed" ? theme.success : theme.accentSoft
     property real targetWidth: Math.min(Math.max(notificationMode ? 330 : 192, labelMetrics.width + 78), 340, Math.max(80, availableWidth))
-    property real targetHeight: presented.progress >= 0 ? 58 : 52
+    property real targetHeight: (presented.progress >= 0 ? 58 : 52)
+        + (preview.visible && notificationMode ? preview.height + 8 : 0)
     width: 60 + (targetWidth - 60) * reveal
     height: targetHeight * reveal
     visible: mounted
@@ -33,9 +35,17 @@ Item {
     Behavior on connectionDepth { NumberAnimation { duration: 420; easing.type: Easing.InOutCubic } }
     Behavior on cornerRadius { NumberAnimation { duration: 420; easing.type: Easing.InOutCubic } }
     Behavior on joinRadius { NumberAnimation { duration: 420; easing.type: Easing.InOutCubic } }
-    // This status is informational and never takes keyboard or pointer focus.
-    Accessible.role: Accessible.StaticText
+    activeFocusOnTab: notificationMode && mounted
+    Accessible.role: notificationMode ? Accessible.Button : Accessible.StaticText
     Accessible.name: presented.agent + ": " + presented.label
+    Accessible.onPressAction: triggerNotification(Qt.LeftButton)
+    Keys.onReturnPressed: triggerNotification(Qt.LeftButton)
+    Keys.onEnterPressed: triggerNotification(Qt.LeftButton)
+    Keys.onSpacePressed: triggerNotification(Qt.LeftButton)
+    function triggerNotification(button) {
+        if (notificationMode && mounted && contentReveal > 0.5)
+            notificationClicked(String(presented.notificationId || ""), button)
+    }
     TextMetrics { id: labelMetrics; font.family: root.theme.bodyFont; font.pixelSize: 13; text: root.presented.label }
     Behavior on targetWidth { enabled: root.mounted; NumberAnimation { duration: Math.round(220 * root.pace); easing.type: Easing.InOutCubic } }
     Behavior on targetHeight { enabled: root.mounted; NumberAnimation { duration: Math.round(220 * root.pace); easing.type: Easing.InOutCubic } }
@@ -119,6 +129,12 @@ Item {
             color: root.theme.textPrimary
             font.family: root.theme.bodyFont; font.pixelSize: 13
         }
+        Components.NotificationImage {
+            id: preview
+            x: 0; y: 46
+            width: parent.width
+            source: root.notificationMode ? String(root.presented.imageSource || "") : ""
+        }
     }
     Rectangle {
         x: 26; y: root.height - 6; width: Math.max(0, root.width - 52); height: 2
@@ -130,5 +146,12 @@ Item {
             color: root.activityColor
             Behavior on width { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
         }
+    }
+    MouseArea {
+        anchors.fill: parent
+        enabled: root.notificationMode && root.mounted
+        acceptedButtons: Qt.LeftButton | Qt.RightButton
+        cursorShape: Qt.PointingHandCursor
+        onClicked: mouse => root.triggerNotification(mouse.button)
     }
 }

@@ -13,6 +13,7 @@ VeloraRailPopover {
     property color accent: "#e4c6c0"
     property string uiFont: "sans-serif"
     signal dismissRequested(string notificationId)
+    signal activateRequested(string notificationId)
     signal clearRequested()
     readonly property int count: notificationsModel ? notificationsModel.count : 0
     property bool clearing: false
@@ -90,21 +91,39 @@ VeloraRailPopover {
                 boundsBehavior: Flickable.StopAtBounds
                 delegate: Rectangle {
                     id: card
+                    objectName: "notificationCard-" + id
                     required property string id
                     required property string summary
                     required property string body
                     required property string app
                     required property string timeText
+                    required property var model
+                    readonly property string imageSource: String(model.imageSource || "")
+                    readonly property bool actionable: !!model.actionable
                     width: history.width
-                    height: 76
+                    height: 76 + (preview.visible ? preview.height + 11 : 0)
                     radius: 11
                     color: root.alpha(root.ink, 0.06)
                     border.width: 1
                     border.color: root.alpha(root.ink, 0.15)
+                    MouseArea {
+                        anchors.fill: parent
+                        enabled: card.actionable
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.activateRequested(card.id)
+                    }
+                    activeFocusOnTab: actionable
+                    Accessible.role: actionable ? Accessible.Button : Accessible.StaticText
+                    Accessible.name: summary + (body ? ". " + body : "")
+                    Accessible.onPressAction: if (actionable) root.activateRequested(card.id)
+                    Keys.onReturnPressed: if (actionable) root.activateRequested(card.id)
+                    Keys.onEnterPressed: if (actionable) root.activateRequested(card.id)
+                    Keys.onSpacePressed: if (actionable) root.activateRequested(card.id)
                     Text {
                         anchors { left: parent.left; right: remove.left; top: parent.top; margins: 11 }
                         height: 19
                         text: card.summary || card.app
+                        textFormat: Text.PlainText
                         color: root.ink; font.family: root.uiFont; font.pixelSize: 12; font.weight: Font.DemiBold
                         elide: Text.ElideRight
                     }
@@ -112,16 +131,24 @@ VeloraRailPopover {
                         anchors { left: parent.left; right: remove.left; top: parent.top; topMargin: 32; leftMargin: 11; rightMargin: 5 }
                         height: 16
                         text: card.body || card.app
+                        textFormat: Text.PlainText
                         color: root.alpha(root.ink, 0.73); font.family: root.uiFont; font.pixelSize: 11
                         elide: Text.ElideRight
                     }
                     Text {
-                        anchors { left: parent.left; bottom: parent.bottom; margins: 11 }
+                        anchors { left: parent.left; top: parent.top; topMargin: 52; leftMargin: 11 }
                         height: 14; text: card.timeText
                         color: root.alpha(root.ink, 0.55); font.family: root.uiFont; font.pixelSize: 10
                     }
+                    NotificationImage {
+                        id: preview
+                        x: 11; y: 76
+                        width: parent.width - 22
+                        source: card.imageSource
+                    }
                     Button {
                         id: remove
+                        objectName: "notificationDismiss-" + card.id
                         anchors { right: parent.right; top: parent.top; margins: 9 }
                         width: 26; height: 26
                         Accessible.name: "Dispensar " + (card.summary || card.app)

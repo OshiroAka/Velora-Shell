@@ -2,6 +2,7 @@ import QtQuick
 import "platform" as Platform
 import "core/SurfaceGeometry.js" as SurfaceGeometry
 import "core/InfiniteDockGeometry.js" as InfiniteDockGeometry
+import "core/NotificationMedia.js" as NotificationMedia
 import "core" as Core
 import "services" as Services
 import "surfaces" as Surfaces
@@ -142,6 +143,8 @@ Scope {
     property string notificationToastBody: ""
     property string notificationToastApp: ""
     property string notificationToastIconKey: "bell"
+    property string notificationToastId: ""
+    property string notificationToastImage: ""
     property int notificationToastSerial: 0
     property var trackedNotificationObjects: ({})
     property var notificationDismissQueue: []
@@ -975,6 +978,7 @@ Scope {
     }
 
     function normalizeNotification(notification) {
+        const attachment = NotificationMedia.attachment(notification)
         const summary = notificationField(notification, ["summary", "title"], "")
         const body = notificationField(notification, ["body"], "")
         const appName = notificationField(notification, ["appName", "app", "app_name", "application", "desktopEntry", "desktop_entry", "app-name"], "Sistema")
@@ -994,6 +998,10 @@ Scope {
             iconKey: notificationIconKey(appName, title, body, iconName),
             appIcon: iconName,
             desktopEntry: desktopEntry,
+            imageSource: attachment.imageSource,
+            openUrl: attachment.openUrl,
+            actionable: attachment.openUrl.length > 0 || (notification && notification.actions
+                ? notification.actions.some(action => action.identifier === "default") : false),
             urgency: notification && notification.urgency !== undefined ? Number(notification.urgency) : 1,
             resident: Boolean(notification && notification.resident),
             actionsJson: notificationActionsJson(notification)
@@ -1012,7 +1020,8 @@ Scope {
         for (let i = 0; i < notificationHistoryModel.count; ++i) {
             const current = notificationHistoryModel.get(i)
             if ((item.id.length > 0 && current.id === item.id)
-                    || (current.app === item.app && current.summary === item.summary && current.body === item.body)) {
+                    || (current.app === item.app && current.summary === item.summary && current.body === item.body
+                        && current.openUrl === item.openUrl && current.imageSource === item.imageSource)) {
                 notificationHistoryModel.set(i, item)
                 if (i > 0)
                     notificationHistoryModel.move(i, 0, 1)
@@ -1079,6 +1088,34 @@ Scope {
         removeNotificationHistoryById(id)
     }
 
+    function activateNotificationHistory(notificationId) {
+        const id = String(notificationId || "")
+        for (let i = 0; i < notificationHistoryModel.count; ++i) {
+            const item = notificationHistoryModel.get(i)
+            if (item.id === id && item.openUrl)
+                return Qt.openUrlExternally(item.openUrl)
+        }
+        const notification = trackedNotificationObjects[id]
+        if (notification) {
+            try {
+                for (const action of notification.actions) {
+                    if (action.identifier === "default") {
+                        action.invoke()
+                        return true
+                    }
+                }
+            } catch (error) { console.warn("Velora notification action: " + error) }
+        }
+        return false
+    }
+
+    function clickNotificationToast(notificationId, button) {
+        if (button === Qt.LeftButton)
+            activateNotificationHistory(notificationId)
+        if (String(notificationId) === notificationToastId)
+            hideNotificationToast()
+    }
+
 
     function clearTrackedNotificationHistory() {
         const tracked = trackedNotificationObjects
@@ -1124,6 +1161,8 @@ Scope {
         notificationToastBody = item.body
         notificationToastApp = item.app
         notificationToastIconKey = item.iconKey
+        notificationToastId = item.id
+        notificationToastImage = item.imageSource
         notificationToastSerial += 1
         notificationToastUnmountTimer.stop()
         notificationToastMounted = true
@@ -3318,7 +3357,8 @@ Scope {
         function notificationState(): string {
             return JSON.stringify({ count: root.notificationHistoryCount,
                 toastVisible: root.notificationToastVisible,
-                toastTitle: root.notificationToastTitle, toastBody: root.notificationToastBody })
+                toastTitle: root.notificationToastTitle, toastBody: root.notificationToastBody,
+                toastId: root.notificationToastId, toastImage: root.notificationToastImage })
         }
         function infiniteDesktopState(): string {
             return JSON.stringify({enabled: root.infiniteDesktopCanvasEnabled,
@@ -6475,7 +6515,8 @@ Scope {
                     : root.desktopFrameMargin
 
                 width: attachedToWeather ? inlineWeatherTopFrame.width : Math.round(Math.min(safeWidth, Math.max(330, panelWidth * 0.18)))
-                height: attachedToWeather ? 76 : 48
+                readonly property real headerHeight: attachedToWeather ? 76 : 48
+                height: headerHeight + (inlineNotificationPreview.visible ? inlineNotificationPreview.height + 12 : 0)
                 x: attachedToWeather ? inlineWeatherTopFrame.x : Math.round((panelWidth - width) / 2)
                 y: root.notificationToastVisible || attachedToWeather ? openY : -height - 18
                 z: 140
@@ -6535,7 +6576,7 @@ Scope {
                     width: 32
                     height: 32
                     x: inlineNotificationToastStage.attachedToWeather ? 24 : 10
-                    y: Math.round((parent.height - height) / 2)
+                    y: Math.round((inlineNotificationToastStage.headerHeight - height) / 2)
 
                     Rectangle {
                         anchors.fill: parent
@@ -6627,7 +6668,7 @@ Scope {
 
                 Text {
                     x: inlineNotificationToastIcon.x + inlineNotificationToastIcon.width + 13
-                    y: Math.round((parent.height - height) / 2) - 1
+                    y: Math.round((inlineNotificationToastStage.headerHeight - height) / 2) - 1
                     width: parent.width - x - (inlineNotificationToastStage.attachedToWeather ? 28 : 16)
                     text: root.notificationToastTitle
                     color: veloraTheme.textPrimary
@@ -6640,10 +6681,18 @@ Scope {
                     verticalAlignment: Text.AlignVCenter
                 }
 
+                NotificationImage {
+                    id: inlineNotificationPreview
+                    x: 12; y: inlineNotificationToastStage.headerHeight
+                    width: parent.width - 24
+                    source: root.notificationToastImage
+                }
+
                 MouseArea {
                     anchors.fill: parent
                     acceptedButtons: Qt.LeftButton | Qt.RightButton
-                    onClicked: root.hideNotificationToast()
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: mouse => root.clickNotificationToast(root.notificationToastId, mouse.button)
                 }
             }
 
@@ -6935,6 +6984,7 @@ Scope {
                 uiFont: barRoot.uiFont
                 handoffSource: panel.activeRailSystemPopover
                 onDismissRequested: id => root.dismissNotificationHistory(id)
+                onActivateRequested: id => { if (root.activateNotificationHistory(id)) notificationsPopover.close() }
                 onClearRequested: root.clearTrackedNotificationHistory()
                 onOpening: { panel.activeRailSystemPopover = notificationsPopover; coffeePopover.close(); notesPopover.close(); bluetoothPopover.close(); wifiPopover.close(); root.activeRailControl = ""; root.closeQuickPopup() }
                 onShapeChanged: Qt.callLater(unifiedFrameCanvas.requestPaint)

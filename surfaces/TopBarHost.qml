@@ -349,7 +349,9 @@ Variants {
                 id: "notification-" + root.notificationSource.notificationToastSerial,
                 phase: "notification", agent: root.notificationSource.notificationToastApp || "Notificação",
                 label: root.notificationSource.notificationToastTitle, detail: "", progress: -1,
-                iconKey: root.notificationSource.notificationToastIconKey
+                iconKey: root.notificationSource.notificationToastIconKey,
+                notificationId: root.notificationSource.notificationToastId,
+                imageSource: root.notificationSource.notificationToastImage
             }) : root.executionStatus.current
         }
         TopBarFeature.ExecutionIndicator {
@@ -366,13 +368,7 @@ Variants {
             opacity: enabled ? 1 : 0
             theme: root.theme
             service: centralStatus
-            MouseArea {
-                anchors.fill: parent
-                enabled: executionIndicator.notificationMode && executionIndicator.mounted
-                acceptedButtons: Qt.LeftButton | Qt.RightButton
-                cursorShape: Qt.PointingHandCursor
-                onClicked: root.notificationSource.hideNotificationToast()
-            }
+            onNotificationClicked: (id, button) => root.notificationSource.clickNotificationToast(id, button)
         }
 
         TopBarFeature.TimerAlertMorph {

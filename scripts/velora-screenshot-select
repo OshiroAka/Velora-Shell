@@ -35,10 +35,17 @@ case "$mode" in
     ;;
 esac
 
+notify_capture() {
+  notify-send --app-name "Velora screenshot" \
+    --hint "string:image-path:$out_file" \
+    --hint "string:x-velora-screenshot-path:$out_file" \
+    "Captura de tela" "$1" >/dev/null 2>&1 || true
+}
+
 if ! wl-copy --type image/png < "$out_file"; then
   printf 'Velora screenshot: imagem salva, mas a cópia falhou: %s\n' "$out_file" >&2
-  notify-send "Velora screenshot" "Salvo; falha ao copiar: $out_file" >/dev/null 2>&1 || true
+  notify_capture "Salvo; falha ao copiar para a área de transferência."
   exit 1
 fi
 
-notify-send "Velora screenshot" "Salvo e copiado: $out_file" >/dev/null 2>&1 || true
+notify_capture "Salvo e copiado para a área de transferência."

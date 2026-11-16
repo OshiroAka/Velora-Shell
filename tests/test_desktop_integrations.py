@@ -81,6 +81,35 @@ class ScreenshotClipboardTests(unittest.TestCase):
         self.assertEqual(len(files), 1)
         self.assertEqual(files[0].read_bytes(), (self.home / 'clipboard').read_bytes())
 
+    def test_saved_captures_attach_the_exact_file_in_both_capture_modes(self):
+        self.tool('notify-send', '#!/usr/bin/python3\nimport json, os, pathlib, sys\n'
+            'with (pathlib.Path(os.environ["VELORA_FIXTURE_DIR"])/"notification-args").open("a") as f: '
+            'f.write(json.dumps(sys.argv[1:])+"\\n")\n')
+        self.tool('slurp', '#!/bin/sh\nprintf "10,20 100x80\\n"\n')
+        # Exercise shell quoting and URL encoding with a nontrivial home path.
+        capture_home = self.home / 'Prints com espaço # & <imagem> ç'
+        capture_home.mkdir()
+        self.env['HOME'] = str(capture_home)
+        for mode in ('full', 'select'):
+            with self.subTest(mode=mode):
+                result = self.capture(mode)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                args = json.loads((self.home / 'notification-args').read_text().splitlines()[-1])
+                file = next((capture_home / 'Pictures/Screenshots').glob(f'velora-{mode}-*.png'))
+                self.assertIn('string:image-path:' + str(file), args)
+                self.assertIn('string:x-velora-screenshot-path:' + str(file), args)
+                self.assertEqual(args[-2], 'Captura de tela')
+                self.assertIn('Salvo e copiado', args[-1])
+
+    def test_saved_capture_keeps_its_preview_when_clipboard_fails(self):
+        self.env['VELORA_FIXTURE_COPY_FAIL'] = '1'
+        result = self.capture()
+        self.assertNotEqual(result.returncode, 0)
+        file = next((self.home / 'Pictures/Screenshots').glob('*.png'))
+        notification = (self.home / 'notifications').read_text()
+        self.assertIn('string:image-path:' + str(file), notification)
+        self.assertIn('string:x-velora-screenshot-path:' + str(file), notification)
+
     def test_copy_failure_cannot_announce_success(self):
         self.env['VELORA_FIXTURE_COPY_FAIL'] = '1'
         result = self.capture(); self.assertNotEqual(result.returncode, 0)
