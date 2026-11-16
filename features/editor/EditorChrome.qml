@@ -208,22 +208,48 @@ Item {
         }
     }
 
-    Widgets.GlassPanel {
+    Item {
         id: toolBar
+        property bool nativeConnected: false
+        readonly property real join: Math.min(24, height * .3)
+        readonly property real radius: 25
+        readonly property real bottomInset: root.controller.shell
+            ? root.controller.shell.bottomBarHeight : 18
+        readonly property color surfaceTint: settingsHome.surfaceTint
         visible: root.editingMode
         width: Math.min(root.surfaceArea.width, 560)
         height: 64
         x: Geometry.clamp((parent.width - width) / 2, root.surfaceArea.x, root.surfaceArea.x + root.surfaceArea.width - width)
-        y: Geometry.clamp(root.desktop ? parent.height - height - 18 : 18, root.surfaceArea.y, root.surfaceArea.y + root.surfaceArea.height - height)
+        y: root.desktop ? parent.height - bottomInset - height
+            : Geometry.clamp(18, root.surfaceArea.y, root.surfaceArea.y + root.surfaceArea.height - height)
         z: 30
-        radius: 25
-        nativeOptics: false
-        materialMode: "solid"
-        solidColor: "#202634"
-        materialOpacity: 0.98
-        surfaceColor: root.theme.glass
-        borderColor: root.theme.border
-        shadowColor: root.theme.shadow
+
+        // The desktop toolbar is a body of the bottom frame. Its native pass
+        // owns the shared material; the fallback meets the frame without a rim.
+        SettingsSurface {
+            objectName: "editorToolbarSurface"
+            x: -toolBar.join
+            width: parent.width + 2 * toolBar.join
+            height: parent.height
+            visible: root.desktop && !toolBar.nativeConnected
+            join: toolBar.join
+            corner: toolBar.radius
+            tint: toolBar.surfaceTint
+            rim: "transparent"
+        }
+        Widgets.GlassPanel {
+            anchors.fill: parent
+            visible: !root.desktop
+            radius: toolBar.radius
+            nativeOptics: false
+            materialMode: "solid"
+            solidColor: "#202634"
+            materialOpacity: 0.98
+            surfaceColor: root.theme.glass
+            borderColor: root.theme.border
+            shadowColor: root.theme.shadow
+        }
+        MouseArea { anchors.fill: parent }
 
         Text {
             anchors.horizontalCenter: parent.horizontalCenter

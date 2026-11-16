@@ -37,8 +37,11 @@ Variants {
                     || !Platform.NativeBlur.supports("infinite-top-frame-continuous")))
         readonly property bool settingsNativeLiquid: !settingsConnected && chrome.settingsItem.launcherMode
             && chrome.settingsItem.liquidMaterial && Platform.NativeBlur.supports("editor-shape")
+        readonly property bool toolbarConnected: editingDesktop && settingsConnected
+            && Platform.NativeBlur.supports("settings-connected")
         onSettingsConnectedChanged: queueShape()
         onSettingsNativeLiquidChanged: queueShape()
+        onToolbarConnectedChanged: queueShape()
 
         screen: modelData
         color: "transparent"
@@ -55,7 +58,7 @@ Variants {
 
         BackgroundEffect.blurRegion: Region {
             Region { item: !editorWindow.settingsConnected && !editorWindow.settingsNativeLiquid && chrome.settingsItem.blurMaterial && chrome.settingsItem.visible ? chrome.settingsItem.materialItem : null; radius: 24 }
-            Region { item: !Platform.NativeBlur.supports("editor-shape") && chrome.toolBarItem.visible ? chrome.toolBarItem : null; radius: 25 }
+            Region { item: !editorWindow.toolbarConnected && !Platform.NativeBlur.supports("editor-shape") && chrome.toolBarItem.visible ? chrome.toolBarItem : null; radius: 25 }
             Region { item: !Platform.NativeBlur.supports("editor-shape") && chrome.inspectorItem.visible ? chrome.inspectorItem : null; radius: 28; intersection: Intersection.Combine }
             Region { item: !Platform.NativeBlur.supports("editor-shape") && chrome.catalogItem.visible ? chrome.catalogItem : null; radius: 28; intersection: Intersection.Combine }
         }
@@ -75,15 +78,17 @@ Variants {
         onAppliedOpticsGenerationChanged: { lastConnectedShape = ""; lastEditorShape = ""; queueShape() }
 
         Binding { target: chrome.settingsItem; property: "nativeConnected"; value: editorWindow.settingsConnected }
+        Binding { target: chrome.toolBarItem; property: "nativeConnected"; value: editorWindow.toolbarConnected }
         // Keep the layer mapped during geometry-first opening, before controls
         // have alpha. This pixel is covered by the connected bottom material.
-        Rectangle { x: 1; y: parent.height - 1; width: 1; height: 1; color: "#01000000"; visible: editorWindow.settingsConnected }
+        Rectangle { x: 1; y: parent.height - 1; width: 1; height: 1; color: "#01000000"; visible: editorWindow.settingsConnected || editorWindow.toolbarConnected }
 
         function queueShape() { shapeDirty = true }
 
         function shapeFields(item) {
             const topLeft = item.mapToItem(inputScope, 0, 0)
-            const radius = Math.min(item === chrome.settingsItem.materialItem ? 24 : 28, item.width * 0.5, item.height * 0.5)
+            const radius = Math.min(item === chrome.toolBarItem ? item.radius
+                : item === chrome.settingsItem.materialItem ? 24 : 28, item.width * 0.5, item.height * 0.5)
             return [topLeft.x / width, topLeft.y / height,
                     item.width / width, item.height / height,
                     radius / width].map(function(value) {
@@ -95,16 +100,17 @@ Variants {
             if (width <= 0 || height <= 0)
                 return
             const home = chrome.settingsItem
-            const body = home.materialItem
-            const attached = settingsConnected && home.visible && body.width > 1 && body.height > 1
+            const toolbar = toolbarConnected && chrome.toolBarItem.visible
+            const body = toolbar ? chrome.toolBarItem : home.materialItem
+            const attached = (toolbar || (settingsConnected && home.visible)) && body.width > 1 && body.height > 1
             const connected = "velora-blur:settings-connected " + modelData.name + " "
-                + (attached ? "1 " + shapeFields(body) + " " + (home.join / width).toFixed(6)
-                    + (home.launcherMode ? "" : " right") : "0")
+                + (attached ? "1 " + shapeFields(body) + " " + ((toolbar ? body.join : home.join) / width).toFixed(6)
+                    + (toolbar || home.launcherMode ? "" : " right") : "0")
             if (connected !== lastConnectedShape) {
                 Platform.NativeBlur.dispatch(connected)
                 lastConnectedShape = connected
             }
-            const candidates = [chrome.toolBarItem,
+            const candidates = [!editingDesktop ? chrome.toolBarItem : null,
                 chrome.inspectorItem, chrome.catalogItem,
                 editorWindow.settingsNativeLiquid && chrome.settingsItem.visible ? chrome.settingsItem.materialItem : null]
             const shapes = []

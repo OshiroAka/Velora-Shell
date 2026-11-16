@@ -249,6 +249,25 @@ ShellRoot {
                     pointer.mouseClick(entry,20,20,Qt.LeftButton)
                 } else if (phase===2) {
                     assert(controller.mode==="editing" && bar.editing,"editor entry does not activate actual bar editing")
+                    const toolbar=chrome.toolBarItem
+                    const surface=find(toolbar,"editorToolbarSurface")
+                    assert(toolbar.y+toolbar.height===window.height-shell.bottomBarHeight,
+                        "editor toolbar is detached from the bottom frame")
+                    assert(surface && surface.visible && surface.tint.toString()===home.surfaceTint.toString(),
+                        "editor fallback does not share the bar material")
+                    assert(surface.rim.toString()==="#00000000","editor adds a rim across the frame join")
+                    for (const side of [true,false]) {
+                        shell.barOnRight=side
+                        for (const inset of [4,16,32]) {
+                            shell.bottomBarHeight=inset
+                            assert(toolbar.y+toolbar.height===window.height-inset,
+                                "editor join gained a margin after frame geometry changed")
+                        }
+                    }
+                    shell.bottomBarHeight=18
+                    toolbar.nativeConnected=true
+                    assert(!surface.visible,"editor draws a second surface over the shared native material")
+                    toolbar.nativeConnected=false
                     assert(!find(find(bar,"topbarWeatherTrigger"),"weatherWallpaperDropArea").enabled,
                         "reordering the bar must not import a file")
                     originalX=center(find(bar,"topbarTool-timer"))
