@@ -128,6 +128,41 @@ int main(int argc, char** argv) {
         check(!parseLyricsBeat("eDP-1 .9 .4 .7 1 0 nan 0 1 0")
             && !parseLyricsBeat("eDP-1 .9 .4 .7 1 0 0 0 2 0"),"Invalid album palette accepted");
 
+        // Both hosts must evaluate the seam as the interior of one material.
+        // Compare with the uncut source field, including optical normals: a
+        // horizontal clipping plane creates a transparent row and a false rim.
+        one("thick",4);
+        two("uvSize",0,0);
+        four("topbarStrip",0,0,0,0);
+        for (bool right : {false,true}) {
+            four("frameInterior",right ? 4.F : 40.F,30,356,252);
+            for (float mode : {0.F,1.F,2.F,3.F}) {
+                four("barMaterial",1,mode,1,0);
+                draw();
+                std::vector<unsigned char> uncut(WIDTH*HEIGHT*4);
+                glReadPixels(0,0,WIDTH,HEIGHT,GL_RGBA,GL_UNSIGNED_BYTE,uncut.data());
+                four("topbarStrip",WIDTH*.5F,15,WIDTH*.5F,15);
+                draw();
+                std::vector<unsigned char> joined(uncut.size());
+                glReadPixels(0,0,WIDTH,HEIGHT,GL_RGBA,GL_UNSIGNED_BYTE,joined.data());
+                const int x=right ? WIDTH-21 : 20;
+                for (int y=24;y<=37;++y) {
+                    const auto i=((HEIGHT-y-1)*WIDTH+x)*4;
+                    check(joined[i+3]==255,"Topbar/sidebar seam contains an artificial transparent edge");
+                    for (int channel=0;channel<4;++channel)
+                        check(std::abs(int(joined[i+channel])-int(uncut[i+channel]))<=1,
+                            "Topbar/sidebar seam adds an internal rim or changes the shared material");
+                }
+                four("topbarStrip",0,0,0,0);
+            }
+        }
+        if (std::getenv("VELORA_TEST_TOPBAR_SEAM_ONLY")) {
+            std::cout << "TOPBAR_SEAM_OK\n";
+            return 0;
+        }
+        four("frameInterior",40,30,420,252);
+        one("thick",3);
+        two("uvSize",55,35);
         four("barMaterial",1,1,1,0);
         one("thick",3);
         two("topLeft",0,-135);
@@ -140,6 +175,8 @@ int main(int argc, char** argv) {
         check(alpha(200,32)>250,"Notification connection lost its material");
         check(alpha(200,140)==0,"Top panel paints outside its shape");
         check(alpha(200,220)==0,"Wave was drawn above application windows");
+        // This isolated compact strip has no legacy frame attached.
+        one("frameRadius",0);
         four("topbarStrip",200,15,120,15);
         for (float fold : {0.F,1.F}) {
             two("frameFold",fold,30);
@@ -163,7 +200,7 @@ int main(int argc, char** argv) {
                 check(std::abs(int(alpha(x,y))-int(alpha(WIDTH-x-1,y)))<=1,
                     "Top frame and bar joins are not symmetric");
         one("infiniteDockUnit",0);
-        two("frameFold",0,0);four("topbarStrip",0,0,0,0);
+        two("frameFold",0,0);four("topbarStrip",0,0,0,0);one("frameRadius",20);
         for (const float mode : {0.F, 1.F, 2.F, 3.F}) {
             four("barMaterial",1,mode,1,0);
             one("barBackgroundHidden",1); draw();

@@ -685,10 +685,11 @@ float frameWithoutSettingsSdf(vec2 pixel) {
         distance = mix(distance, infiniteDockSdf(pixel), frameFold.x);
     else if (frameFold.x >= .9999)
         distance = 1e6;
-    if (topbarStrip.z > 0.0) {
-        distance = max(distance, frameInterior.y - pixel.y);
+    // The host raster already separates the topbar and side passes. Clipping
+    // their shared field at the join would add a false cap: reduced coverage
+    // and an optical rim across the interior of the connected material.
+    if (topbarStrip.z > 0.0)
         distance = min(distance, topbarStripSdf(pixel));
-    }
     if (barBackgroundHidden > .5) distance = 1e6;
     if (barMaterial.x > .5 && oppositePanel.z > .01)
         distance = smoothUnion(distance, oppositePanelSdf(pixel), min(24.0, oppositePanel.z));
@@ -4833,7 +4834,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         .name = "velora-blur",
         .description = "Clear live framebuffer refraction for Velora",
         .author = "Velora Shell",
-        .version = "0.17.39",
+        .version = "0.17.40",
     };
 }
 
