@@ -31,6 +31,55 @@ class InfiniteDesktopMorphTests(unittest.TestCase):
             for error in ("INFINITE_MORPH_FAILED","FAIL!","TypeError","ReferenceError","Binding loop"):
                 self.assertNotIn(error,output)
 
+    def test_sidebar_keeps_its_topbar_offset_until_workspaces_have_returned(self):
+        import re
+        source=(ROOT/"ShellController.qml").read_text()
+        reserve=re.search(r"readonly property int barReserveWidth: ([^\n]+)",source)[1]
+        host=source[source.index("exclusiveZone: root.barReserveWidth"):]
+        layer=host.split("WlrLayershell.layer:",1)[1].split("WlrLayershell.namespace:",1)[0].strip()
+        script=r'''
+const assert=require('assert/strict');
+const WlrLayer={Bottom:1,Top:2,Overlay:3};
+const root={};
+const infiniteDesktopTransition={effectiveActive:false};
+function geometry(enabled,progress,drawer=false,whatsapp=false) {
+    root.infiniteDesktopMorphProgress=progress;
+    root.infiniteDesktopBarsActive=enabled;
+    infiniteDesktopTransition.effectiveActive=enabled;
+    const sideBarLayoutEnabled=true,barPanelWidth=63,infiniteDesktopBarsActive=enabled;
+    const wantsDrawerKeyboard=drawer,whatsappKeyboard=whatsapp;
+    const exclusiveZone=RESERVE_EXPRESSION;
+    const sidebarLayer=LAYER_EXPRESSION;
+    const surfaces=[{name:'topbar',layer:WlrLayer.Top,zone:40},
+        {name:'sidebar',layer:sidebarLayer,zone:exclusiveZone}].sort((a,b)=>a.layer-b.layer);
+    // Hyprland arrangeLayerArray: positive reservations are arranged first,
+    // in layer order; zero-zone surfaces then use the remaining usable area.
+    let usableTop=0,sidebarY=-1;
+    for (const exclusive of [true,false]) for (const surface of surfaces) {
+        if ((surface.zone>0)!==exclusive) continue;
+        if (surface.name==='sidebar') sidebarY=usableTop;
+        if (surface.name==='topbar' && surface.zone>0) usableTop+=surface.zone;
+    }
+    return {y:sidebarY,height:1080-sidebarY,zone:exclusiveZone,layer:sidebarLayer};
+}
+for (const drawer of [false,true]) for (const whatsapp of [false,true]) {
+    for (const enabled of [true,false]) {
+        const poses=enabled ? [0,.01,.28,.49,.5,.68,.99,1] : [1,.99,.68,.5,.49,.28,.01,0];
+        for (const progress of poses) {
+            const pose=geometry(enabled,progress,drawer,whatsapp);
+            assert.equal(pose.y,40,`Sidebar occupies the workspace strip while enabled=${enabled} at progress=${progress}`);
+            assert.equal(pose.height,1040,'Sidebar height changes when the workspace strip appears');
+            assert.equal(pose.zone,enabled?0:63,'Reservation must change once with the mode');
+        }
+    }
+}
+// Quick reversals must retain the same geometry before the source icons return.
+for (const [enabled,progress] of [[true,.15],[false,.15],[true,.6],[false,.6]])
+    assert.equal(geometry(enabled,progress).y,40);
+'''.replace("RESERVE_EXPRESSION",reserve).replace("LAYER_EXPRESSION",layer)
+        result=subprocess.run(["node","-e",script],capture_output=True,text=True,timeout=10)
+        self.assertEqual(result.returncode,0,result.stderr)
+
     def test_native_morph_damages_only_its_monitor_and_border_bands(self):
         source=(ROOT/"native/hyprland/plugin.cpp").read_text()
         def function(signature):
@@ -78,6 +127,10 @@ int main() {
   const auto bottom=renderer.boxes[1];
   const double unit=std::min({1.,size.x/1280.,(size.y-40)/720.});
   assert(bottom.y<=80.25+size.y-128*unit);
+  renderer.boxes.clear(); damageInfiniteDesktopMorph("target",182.0);
+  assert(renderer.boxes.size()==2);
+  assert(renderer.boxes[1].height>=std::min(size.y,186.0));
+  assert(renderer.boxes[1].height<size.y); // reveal damage stays on the bottom band
   renderer.boxes.clear(); damageInfiniteDesktopMorph("absent");
   assert(renderer.boxes.empty());
  }

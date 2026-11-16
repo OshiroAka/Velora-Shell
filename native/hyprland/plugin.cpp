@@ -722,7 +722,10 @@ float framePanelSdf(vec2 point) {
 }
 
 float desktopWaveSdf(vec2 pixel) {
-    if (barMaterial.w < 1.0 || frameFold.x > 0.0) return 1e6;
+    // Grow from the existing rim during the last part of the return morph.
+    // The same curve retracts the wave on entry, including quick reversals.
+    float reveal = 1.0 - smoothstep(0.0, .4, frameFold.x);
+    if (barMaterial.w < 1.0 || reveal <= 0.0) return 1e6;
     float base = frameInterior.y + frameInterior.w;
     float left = desktopWaveBounds.x;
     float right = desktopWaveBounds.y;
@@ -743,7 +746,7 @@ float desktopWaveSdf(vec2 pixel) {
     float dock = clamp(waveDockProgress, 0.0, 1.0);
     float remaining = (1.0 - dock) * (1.0 - smoothstep(1.0 - dock,
         1.12 - dock, pixel.x / fullSize.x));
-    remaining *= 1.0 - frameFold.x;
+    remaining *= reveal;
     float fade = max(1.0,desktopWaveBounds.w);
     float enter = clamp((pixel.x-left)/fade,0.0,1.0);
     float leave = clamp((right-pixel.x)/fade,0.0,1.0);
@@ -757,7 +760,10 @@ float desktopWaveSdf(vec2 pixel) {
         + envelopeHeightSlope;
     float wave = (base - level * height - pixel.y)
         / sqrt(1.0 + slope*slope);
-    return wave;
+    // Keep its zero-height base on the same morphing frame, so even silence
+    // cannot introduce a second rim when the original bottom inset changes.
+    return infiniteDockUnit > 0.0 && frameFold.x > 0.0
+        ? mix(wave, infiniteDockSdf(pixel), frameFold.x) : wave;
 }
 
 float frameSdf(vec2 point) {
@@ -1522,8 +1528,8 @@ CBox liquidPanelBox(const CBox& surfaceBox) {
 // The interpolated field stays inside the union of the source frame and
 // destination dock. Existing side damage covers the rails; only this lower
 // band grows beyond their old bottom corners. Coordinates may be fractional.
-CBox infiniteDesktopBottomBox(const CBox& output, const double unit) {
-    const double band = std::min(output.height, 128.0 * unit + 4.0);
+CBox infiniteDesktopBottomBox(const CBox& output, const double unit, const double visualizerHeight = 0.0) {
+    const double band = std::min(output.height, std::max(128.0 * unit, visualizerHeight) + 4.0);
     return {output.x, output.y + output.height - band, output.width, band};
 }
 
@@ -2041,7 +2047,10 @@ bool renderLiquidBackdrop(VeloraCompat::RenderContext& ctx, WP<CTexPassElement> 
         const double scale = layer && layer->m_monitor ? layer->m_monitor->m_scale : 1.0;
         const double unit = scale * std::min({1.0, surfaceBox.width / scale / 1280.0,
             surfaceBox.height / scale / 720.0});
-        liquidDamage.add(infiniteDesktopBottomBox(surfaceBox, unit));
+        const auto material = g_desktopBarMaterials.find(monitorName);
+        const double visualizerHeight = material != g_desktopBarMaterials.end()
+            && material->second.spectrum ? 182.0 * scale : 0.0;
+        liquidDamage.add(infiniteDesktopBottomBox(surfaceBox, unit, visualizerHeight));
     }
     if (connectedTopbar && panelBox.height > 0.01) {
         const double neck = independentShape->neckHalfWidth * surfaceBox.width;
@@ -2933,7 +2942,7 @@ void damageTopbarMorph(const STopbarMorph& previous,
     }
 }
 
-void damageInfiniteDesktopMorph(const std::string& monitorName) {
+void damageInfiniteDesktopMorph(const std::string& monitorName, const double visualizerHeight = 0.0) {
     if (!State::monitorState() || !g_pHyprRenderer) return;
     for (const auto& monitor : State::monitorState()->monitors()) {
         if (!monitor || monitor->m_name != monitorName) continue;
@@ -2944,7 +2953,7 @@ void damageInfiniteDesktopMorph(const std::string& monitorName) {
             ? topbar->second.barHeight * output.height : 40.0;
         const double unit = std::min({1.0, output.width / 1280.0, (output.height-top) / 720.0});
         g_pHyprRenderer->damageBox(CBox{output.x, output.y, output.width, top + 4.0});
-        g_pHyprRenderer->damageBox(infiniteDesktopBottomBox(output, unit));
+        g_pHyprRenderer->damageBox(infiniteDesktopBottomBox(output, unit, visualizerHeight));
     }
 }
 
@@ -3358,8 +3367,11 @@ SDispatchResult unifiedBarShapeDispatcher(std::string arguments) {
     shape.sideBodyHeight = std::clamp(bodyHeight, 0.F, 1.F);
     shape.bottomHeight = std::clamp(bottomHeight, 0.F, 0.1F);
     damageTopbarMorph(previous, shape, monitor);
-    if (previous.desktopFold != shape.desktopFold || previous.desktopDockWidth != shape.desktopDockWidth)
-        damageInfiniteDesktopMorph(monitor);
+    if (previous.desktopFold != shape.desktopFold || previous.desktopDockWidth != shape.desktopDockWidth) {
+        const auto material = g_desktopBarMaterials.find(monitor);
+        damageInfiniteDesktopMorph(monitor, material != g_desktopBarMaterials.end()
+            && material->second.spectrum ? 182.0 : 0.0);
+    }
     return {};
 }
 
@@ -4834,7 +4846,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         .name = "velora-blur",
         .description = "Clear live framebuffer refraction for Velora",
         .author = "Velora Shell",
-        .version = "0.17.40",
+        .version = "0.17.41",
     };
 }
 

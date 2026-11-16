@@ -441,6 +441,48 @@ int main(int argc, char** argv) {
         check(alpha(200,290)>250,"Disabling the spectrum removes the bottom frame");
         check(alpha(200,220)==0,"Disabled spectrum still draws a wave");
         check(alpha(20,140)==0,"Disabled spectrum duplicates the upper sidebar");
+        // Constant audio isolates entrance motion from analyzer smoothing.
+        // The last partial pose must already be almost as tall as the final
+        // normal wave, rather than gaining its whole height at progress zero.
+        {
+            bands.fill(.8F);
+            glUniform1fv(glGetUniformLocation(program,"barBands"),96,bands.data());
+            four("desktopWaveBounds",50,350,100,8);
+            four("frameInterior",40,30,WIDTH-44,252);
+            one("infiniteDockUnit",.3125F);
+            one("infiniteDockWidth",0);
+            auto column=[&](float progress,bool spectrum) {
+                two("frameFold",progress,HEIGHT);
+                std::array<unsigned char,HEIGHT> result{};
+                for (float pass : {1.F,2.F}) {
+                    four("barMaterial",pass,1,1,spectrum?WIDTH:0); draw();
+                    std::array<unsigned char,HEIGHT*4> pixels{};
+                    glReadPixels(WIDTH/2,0,1,HEIGHT,GL_RGBA,GL_UNSIGNED_BYTE,pixels.data());
+                    for (int i=0;i<HEIGHT;++i) result[i]=std::max(result[i],pixels[i*4+3]);
+                }
+                return result;
+            };
+            auto raised=[&](float progress) {
+                const auto quiet=column(progress,false), playing=column(progress,true);
+                int count=0;
+                for (int i=0;i<HEIGHT;++i) if (quiet[i]<20 && playing[i]>250) ++count;
+                return count;
+            };
+            const int full=raised(0), near=raised(.01F), middle=raised(.2F);
+            check(full>50,"Normal visualizer lost its configured height");
+            check(near>=full-4,"Normal visualizer pops to full height at the end of the morph");
+            check(middle>3 && middle<full-10,"Normal visualizer needs a real intermediate entrance pose");
+            check(raised(.4F)==0 && raised(1)==0,"Normal visualizer survives in Infinite Desk mode");
+            const int silence=raised(.15F);
+            bands.fill(0);
+            glUniform1fv(glGetUniformLocation(program,"barBands"),96,bands.data());
+            check(raised(.15F)==0 && raised(0)==0,"Visualizer entrance raises a silent bottom frame");
+            check(silence>0,"Partial entrance did not respond to audio");
+            bands.fill(.6F);
+            glUniform1fv(glGetUniformLocation(program,"barBands"),96,bands.data());
+            four("desktopWaveBounds",0,WIDTH,180*.9948F,1);
+            one("infiniteDockUnit",0); two("frameFold",0,0);
+        }
         // Morph the complete field without clipping the side into blocks or
         // sweeping a horizontal edge through the wallpaper. Composite the two
         // ownership passes and check all successive/reversed output poses.

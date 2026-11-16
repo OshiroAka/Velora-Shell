@@ -239,6 +239,7 @@ Scope {
     property string infiniteDesktopCommand: ""
     property bool infiniteDesktopCanvasEnabled: false
     property bool infiniteDesktopStateReady: false
+    readonly property bool infiniteDesktopBarsActive: infiniteDesktopTransition.effectiveActive
     readonly property real infiniteDesktopMorphProgress: infiniteDesktopTransition.progress
     readonly property real infiniteDesktopFrameFoldProgress: infiniteDesktopTransition.frameFold
     readonly property real infiniteDesktopSourceReveal: infiniteDesktopTransition.sourceReveal
@@ -279,7 +280,7 @@ Scope {
     readonly property int barPanelWidth: sideBarLayoutEnabled ? sidebarVisualWidth + sidebarOuterMargin : 0
     // Layer-shell exclusion is discrete. Animating it forces client layout and
     // Wayland configure roundtrips on every pose of an otherwise visual morph.
-    readonly property int barReserveWidth: sideBarLayoutEnabled && !infiniteDesktopTransition.effectiveActive ? barPanelWidth : 0
+    readonly property int barReserveWidth: sideBarLayoutEnabled && !infiniteDesktopBarsActive ? barPanelWidth : 0
     readonly property int desktopFrameRadius: 24
     readonly property bool frameVisualsEnabled: veloraTheme.desktopFrameEnabled && !topBarLayout
     readonly property int frameVisualInset: frameVisualsEnabled ? desktopFrameMargin : 0
@@ -4685,7 +4686,10 @@ Scope {
             exclusionMode: ExclusionMode.Normal
             focusable: wantsDrawerKeyboard || whatsappKeyboard
 
-            WlrLayershell.layer: root.infiniteDesktopMorphProgress > .0001
+            // Reservation and layer must switch in the same commit. Keeping
+            // Bottom until progress reaches zero lets the reserving sidebar
+            // arrange before the Top workspace strip, then jump down at rest.
+            WlrLayershell.layer: root.infiniteDesktopBarsActive
                 && !wantsDrawerKeyboard && !whatsappKeyboard ? WlrLayer.Bottom : WlrLayer.Overlay
             WlrLayershell.namespace: "velora-shell-unified-bar"
             WlrLayershell.keyboardFocus: root.weatherTopKeyboardFocus
