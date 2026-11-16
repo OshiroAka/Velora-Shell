@@ -9,6 +9,8 @@ drag reads only relative motion and the release of the button that began it.
 from __future__ import annotations
 
 import json
+import fcntl
+from contextlib import contextmanager
 import math
 import os
 import random
@@ -49,6 +51,8 @@ STATE_FILES = (
 INVERT_FILES = tuple(path.with_suffix(".inverted") for path in STATE_FILES)
 LAYOUT_FILES = tuple(path.with_suffix(".layout.json") for path in STATE_FILES)
 UI_STATE_FILE = RUNTIME_DIR / "velora-infinite-desktop.state"
+WORKSPACE_STATE_FILE = RUNTIME_DIR / f"infinite-desktop-{os.getuid()}.workspaces.json"
+MODE_LOCK = RUNTIME_DIR / f"infinite-desktop-{os.getuid()}.mode.lock"
 DIRECTIONS = {
     "left": (-1, 0),
     "right": (1, 0),
@@ -103,8 +107,72 @@ def notify(message: str, force: bool = False) -> None:
         print("Infinite Desktop: " + message, file=sys.stderr)
 
 
-def enabled() -> bool:
-    return any(path.exists() for path in STATE_FILES)
+def independent_workspaces() -> bool:
+    path = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "velora-shell/config.json"
+    try:
+        value = json.loads(path.read_text()).get("infiniteDesk", {}).get("workspaceIndependent", True)
+        return value if isinstance(value, bool) else True
+    except (OSError, ValueError, AttributeError):
+        return True
+
+
+def current_workspace() -> int:
+    identifier = int(hyprctl_json("activeworkspace")["id"])
+    if identifier <= 0:
+        raise HyprlandError("use uma workspace normal para alterar o Infinite Desk")
+    return identifier
+
+
+def read_modes(workspace: int | None = None) -> dict:
+    try:
+        data = json.loads(WORKSPACE_STATE_FILE.read_text())
+        if not isinstance(data, dict) or not isinstance(data.get("workspaces"), dict):
+            raise ValueError("invalid modes")
+        modes = {str(int(key)): True for key, value in data["workspaces"].items()
+                 if str(key).isdigit() and int(key) > 0 and value is True}
+        state = {"version": 1, "independent": data.get("independent") is not False,
+                 "global": data.get("global") is True, "workspaces": modes}
+    except (OSError, ValueError):
+        legacy = any(path.exists() for path in STATE_FILES)
+        state = {"version": 1, "independent": True, "global": legacy,
+                 "workspaces": {str(workspace or current_workspace()): True} if legacy else {}}
+    independent = independent_workspaces()
+    if state["independent"] and not independent:
+        state["global"] = str(workspace or current_workspace()) in state["workspaces"]
+    state["independent"] = independent
+    return state
+
+
+def mode_enabled(state: dict, workspace: int) -> bool:
+    return str(workspace) in state["workspaces"] if state["independent"] else state["global"]
+
+
+@contextmanager
+def mode_lock():
+    MODE_LOCK.parent.mkdir(parents=True, exist_ok=True)
+    with MODE_LOCK.open("a") as stream:
+        fcntl.flock(stream, fcntl.LOCK_EX)
+        yield
+
+
+def write_modes(state: dict) -> None:
+    WORKSPACE_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    temporary = WORKSPACE_STATE_FILE.with_suffix(".tmp")
+    temporary.write_text(json.dumps(state, separators=(",", ":")))
+    temporary.replace(WORKSPACE_STATE_FILE)
+    set_marker(STATE_FILES, bool(state["workspaces"]) if state["independent"] else state["global"])
+
+
+def sync_camera_modes(state: dict) -> None:
+    scope = "workspace" if state["independent"] else "global"
+    identifiers = " ".join(sorted(state["workspaces"], key=int))
+    camera_action(f"scope {scope} {int(state['global'])}" + (" " + identifiers if identifiers else ""))
+
+
+def enabled(monitor_name: str = "") -> bool:
+    workspace = current_workspace() if not monitor_name else int(next(
+        item for item in hyprctl_json("monitors") if item["name"] == monitor_name)["activeWorkspace"]["id"])
+    return mode_enabled(read_modes(workspace), workspace)
 
 
 def inverted() -> bool:
@@ -128,12 +196,14 @@ def set_marker(paths: tuple[Path, ...], value: bool) -> None:
     raise HyprlandError("não foi possível salvar o estado do canvas")
 
 
-def publish_ui_state(value: bool | None = None) -> str:
-    """Expose canvas state to the optional Quickshell gesture surface."""
-    state = enabled() if value is None else value
-    payload = f"enabled={int(state)}\n"
+def publish_ui_state(state: dict | None = None) -> str:
+    """Publish the whole registry; QML selects locally on workspace changes."""
+    state = state or read_modes()
+    payload = json.dumps(state, separators=(",", ":")) + "\n"
+    temporary = UI_STATE_FILE.with_suffix(".tmp")
     try:
-        UI_STATE_FILE.write_text(payload)
+        temporary.write_text(payload)
+        temporary.replace(UI_STATE_FILE)
     except OSError as error:
         raise HyprlandError("não foi possível sincronizar o estado com o Velora") from error
     return payload.strip()
@@ -171,9 +241,9 @@ def window_id(window: dict[str, Any]) -> str:
     return str(window.get("stableId") or window["address"])
 
 
-def save_canvas_layout() -> tuple[int, str]:
-    workspace = hyprctl_json("activeworkspace")
-    workspace_id = workspace["id"]
+def save_canvas_layout(workspace_id: int | None = None) -> tuple[int, str]:
+    if workspace_id is None:
+        workspace_id = current_workspace()
     clients = hyprctl_json("clients")
     windows = [
         client
@@ -200,9 +270,9 @@ def save_canvas_layout() -> tuple[int, str]:
     return len(windows), str(workspace_id)
 
 
-def restore_canvas_layout() -> int:
-    workspace = hyprctl_json("activeworkspace")
-    workspace_id = workspace["id"]
+def restore_canvas_layout(workspace_id: int | None = None) -> int:
+    if workspace_id is None:
+        workspace_id = current_workspace()
     record = read_layouts()["workspaces"].get(str(workspace_id))
     if not isinstance(record, dict):
         return 0
@@ -234,15 +304,15 @@ def restore_canvas_layout() -> int:
         restored += 1
     focused_id = record.get("focused")
     focused = visible_clients.get(str(focused_id)) if focused_id else None
-    if focused:
+    if focused and current_workspace() == workspace_id:
         commands.append(f"dispatch focuswindow address:{focused['address']}")
     hyprctl_batch(commands)
     return restored
 
 
-def tile_canvas_windows() -> int:
-    workspace = hyprctl_json("activeworkspace")
-    workspace_id = workspace["id"]
+def tile_canvas_windows(workspace_id: int | None = None) -> int:
+    if workspace_id is None:
+        workspace_id = current_workspace()
     windows = [
         client
         for client in hyprctl_json("clients")
@@ -257,26 +327,34 @@ def tile_canvas_windows() -> int:
 
 
 def toggle(announce_activation: bool = True) -> int:
-    if enabled():
-        camera_action("disable")
-        saved, _ = save_canvas_layout()
-        tiled = tile_canvas_windows()
-        set_marker(STATE_FILES, False)
-        publish_ui_state(False)
-        print(f"Infinite desktop: disabled ({saved} janelas salvas)")
-        return 0
-    camera_action("enable")
-    set_marker(STATE_FILES, True)
-    publish_ui_state(True)
-    restored = restore_canvas_layout()
-    message = (
-        f"Canvas ativado — {restored} janelas restauradas"
-        if restored
-        else "Canvas ativado"
-    )
-    if announce_activation:
-        notify(message, force=True)
-    print(f"Infinite desktop: enabled ({restored} janelas restauradas)")
+    with mode_lock():
+        workspace = current_workspace()
+        state = read_modes(workspace)
+        sync_camera_modes(state)
+        active = mode_enabled(state, workspace)
+        # Pin all camera commands to the captured monitor. A focus change while
+        # waiting for IPC must not redirect the action to a different workspace.
+        monitors = hyprctl_json("monitors")
+        monitor = next((item["name"] for item in monitors
+                        if item.get("activeWorkspace", {}).get("id") == workspace), "")
+        if not monitor:
+            raise HyprlandError("a workspace mudou durante a alteração; tente novamente")
+        camera_action(("disable" if active else "enable") + f" {workspace}", monitor)
+        if state["independent"]:
+            if active: state["workspaces"].pop(str(workspace), None)
+            else: state["workspaces"][str(workspace)] = True
+        else:
+            state["global"] = not active
+        write_modes(state)
+        publish_ui_state(state=state)
+        if active:
+            saved, _ = save_canvas_layout(workspace)
+            tile_canvas_windows(workspace)
+            print(f"Infinite desktop: workspace {workspace} disabled ({saved} janelas salvas)")
+        else:
+            restored = restore_canvas_layout(workspace)
+            if announce_activation: notify("Canvas ativado", force=True)
+            print(f"Infinite desktop: workspace {workspace} enabled ({restored} janelas restauradas)")
     return 0
 
 
@@ -287,15 +365,19 @@ def toggle_invert() -> int:
     return 0
 
 
-def require_enabled() -> bool:
-    if enabled():
+def require_enabled(monitor_name: str = "") -> bool:
+    if enabled(monitor_name) if monitor_name else enabled():
         return True
     notify("Canvas desativado — use Super + Z")
     return False
 
 
 def sync_state() -> int:
-    print(publish_ui_state(), flush=True)
+    with mode_lock():
+        state = read_modes()
+        sync_camera_modes(state)
+        write_modes(state)
+        print(publish_ui_state(state=state), flush=True)
     return 0
 
 
@@ -685,7 +767,7 @@ def drag_empty_canvas() -> int:
 
 def stream_drag_canvas(monitor_name: str = "") -> int:
     """Pan from relative MOVE records sent by the Quickshell desktop surface."""
-    if not require_enabled():
+    if not (require_enabled(monitor_name) if monitor_name else require_enabled()):
         return 1
     windows, _, _ = active_canvas(monitor_name) if monitor_name else active_canvas()
     if not windows:

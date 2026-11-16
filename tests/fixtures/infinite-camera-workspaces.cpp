@@ -1,4 +1,5 @@
 #include "InfiniteDesktopCamera.hpp"
+#include "InfiniteDesktopWorkspaceMode.hpp"
 #include <cassert>
 #include <chrono>
 #include <iostream>
@@ -64,6 +65,7 @@ Controller* controller() { static Controller instance; return &instance; }
 #include "camera-view.inc"
 static std::unordered_map<const Workspace::CHLWorkspace*,View> views;
 static bool enabled = true, unloading = false;
+static WorkspaceModes workspaceModes{false,true,{}};
 #include "camera-workspaces.inc"
 #include "camera-active-monitor.inc"
 
@@ -158,5 +160,35 @@ int main() {
     g_pSessionLockManager->locked = false; publishWidgetCamera(monitor); assert(eventPose()["active"].toBool());
     unloading = true; publishWidgetCameras();
     assert(!QJsonDocument::fromJson(QByteArray::fromStdString(widgetCameraSnapshot())).array()[0].toObject()["active"].toBool());
+    // Workspace 1 and 4 keep independent cameras; ordinary desktops never
+    // acquire a view merely because another workspace has enabled the canvas.
+    unloading = false; enabled = true;
+    workspaceModes = WorkspaceModes{true,false,{1,4}};
+    first->id = 1; second->id = 4;
+    const auto retainedCenter = a->camera.center;
+    monitor->m_activeWorkspace = first;
+    assert(viewFor(monitor) == a && a->camera.zoom == saved.zoom);
+    for (unsigned id=2;id<=10;id++) {
+        if (id==4) continue;
+        auto normal=std::make_shared<Workspace::CHLWorkspace>();normal->id=id;normal->m_monitor=monitor;
+        monitor->m_activeWorkspace=normal;
+        assert(!available(monitor) && !ensureView(monitor) && !viewFor(monitor));
+    }
+    monitor->m_activeWorkspace=second; assert(viewFor(monitor)==b);
+    workspaceModes.set(4,false); assert(!viewFor(monitor));
+    monitor->m_activeWorkspace=first; assert(viewFor(monitor)==a && a->camera.center==retainedCenter);
+    assert(workspaceModes.configure("global 1 1"));
+    monitor->m_activeWorkspace=second; assert(viewFor(monitor)==b);
+    workspaceModes.set(4,false); assert(!workspaceModes.active(1) && !viewFor(monitor));
+    assert(workspaceModes.configure("workspace 0 1"));
+    monitor->m_activeWorkspace=first; assert(viewFor(monitor)==a);
+    const auto modes=workspaceModes;
+    for (const auto& invalid : {"workspace 2 1", "global 0 -1", "workspace 0 4294967296", "other 0 1"}) {
+        assert(!workspaceModes.configure(invalid) && workspaceModes==modes);
+    }
+    // Destroyed workspaces leave weak references until their view is pruned.
+    views[nullptr] = View{}; views[nullptr].monitor = monitor;
+    workspaceModes.workspaces.clear();
+    assert(!activeMonitor(monitor));
     std::cout << "INFINITE_CAMERA_WORKSPACES_OK\n";
 }

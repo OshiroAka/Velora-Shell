@@ -43,6 +43,7 @@ ShellRoot {
                 if (test.stage===0) {
                     test.stage=-1
                     if (Quickshell.env("VELORA_DESK_RELOAD")==="1") {
+                        check(!config.infiniteDeskWorkspaceIndependent,"workspace scope lost after restart")
                         check(config.infiniteDeskSizes.length===1 && config.infiniteDeskSizes[0].width===960
                             && config.infiniteDeskSizes[0].height===640,"dimensions lost after restart")
                         check(config.infiniteDeskDragSensitivity===4,"sensitivity lost after restart")
@@ -50,6 +51,10 @@ ShellRoot {
                         test.stage=1;return
                     }
                     check(config.infiniteDeskSizes.length===3,"three initial sizes")
+                    check(config.infiniteDeskWorkspaceIndependent,"per-workspace mode must default on")
+                    const scope=input.findChild(page,"infiniteDesk.workspaceIndependent")
+                    scope.forceActiveFocus();input.keyClick(Qt.Key_Space)
+                    check(!config.infiniteDeskWorkspaceIndependent,"workspace switch disconnected")
                     config.setValue("appearance.reducedMotion",true)
                     const add=input.findChild(page,"infiniteDesk.addSize")
                     input.mouseClick(add,20,16);input.mouseClick(add,20,16)

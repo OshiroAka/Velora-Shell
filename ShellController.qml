@@ -241,7 +241,11 @@ Scope {
     readonly property bool activeWorkspaceFullscreen: Hyprland.focusedWorkspace ? Hyprland.focusedWorkspace.hasFullscreen : false
     readonly property bool shellSuppressedByFullscreen: activeWorkspaceFullscreen || (composition && composition.lockOccluding)
     property string infiniteDesktopCommand: ""
-    property bool infiniteDesktopCanvasEnabled: false
+    readonly property bool infiniteDesktopCanvasEnabled: infiniteWorkspaceState.active
+    Core.InfiniteDesktopWorkspaceState {
+        id: infiniteWorkspaceState
+        workspaceId: root.focusedWorkspaceId
+    }
     property bool infiniteDesktopStateReady: false
     readonly property bool infiniteDesktopBarsActive: infiniteDesktopTransition.effectiveActive
     readonly property real infiniteDesktopMorphProgress: infiniteDesktopTransition.progress
@@ -355,11 +359,32 @@ Scope {
     readonly property var topBarSystemPages: ["settings", "wallpaper", "volume", "wifi", "display", "notifications", "bluetooth", "battery"]
 
     function applyInfiniteDesktopState(data) {
-        const line = String(data || "").trim()
-        if (line === "enabled=1")
-            infiniteDesktopCanvasEnabled = true
-        else if (line === "enabled=0")
-            infiniteDesktopCanvasEnabled = false
+        infiniteWorkspaceState.apply(data)
+    }
+    function syncInfiniteDesktopState() {
+        if (!infiniteDesktopCommand) return
+        if (infiniteDesktopStateSync.running) infiniteDesktopSyncQueued = true
+        else infiniteDesktopStateSync.running = true
+    }
+    property bool infiniteDesktopSyncQueued: false
+    property bool infiniteDesktopPreferenceSyncPending: false
+    Connections {
+        target: root.composition ? root.composition.configStore : null
+        function onInfiniteDeskWorkspaceIndependentChanged() {
+            root.infiniteDesktopPreferenceSyncPending = true
+            Qt.callLater(function() {
+                if (root.composition && !root.composition.configStore.savePending) {
+                    root.infiniteDesktopPreferenceSyncPending = false
+                    root.syncInfiniteDesktopState()
+                }
+            })
+        }
+        function onSavePendingChanged() {
+            if (root.composition && !root.composition.configStore.savePending && root.infiniteDesktopPreferenceSyncPending) {
+                root.infiniteDesktopPreferenceSyncPending = false
+                root.syncInfiniteDesktopState()
+            }
+        }
     }
 
     function updateInfiniteDesktopFeature() {
@@ -385,7 +410,7 @@ Scope {
     }
 
     onInfiniteDesktopCommandChanged: {
-        infiniteDesktopCanvasEnabled = false
+        infiniteWorkspaceState.state = ({independent: true, global: false, workspaces: {}})
         infiniteDesktopStateReady = false
         if (infiniteDesktopCommand.length <= 0)
             return
@@ -1326,6 +1351,10 @@ Scope {
             running = false
             root.infiniteDesktopStateReady = root.infiniteDesktopCommand.length > 0
             infiniteDesktopStateFile.reload()
+            if (root.infiniteDesktopSyncQueued) {
+                root.infiniteDesktopSyncQueued = false
+                Qt.callLater(root.syncInfiniteDesktopState)
+            }
         }
     }
 

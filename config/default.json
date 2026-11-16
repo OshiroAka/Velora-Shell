@@ -28,6 +28,7 @@
     "characterPywal": false
   },
   "infiniteDesk": {
+    "workspaceIndependent": true,
     "outlineIcons": true,
     "pinnedItems": [],
     "windowSpacing": 1,

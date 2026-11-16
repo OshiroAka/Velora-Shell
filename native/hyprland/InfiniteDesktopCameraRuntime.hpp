@@ -2,6 +2,7 @@
 #define VELORA_INFINITE_CAMERA_RUNTIME 1
 
 #include "InfiniteDesktopCamera.hpp"
+#include "InfiniteDesktopWorkspaceMode.hpp"
 #include <hyprland/src/desktop/state/FocusState.hpp>
 #include <hyprland/src/desktop/state/ViewState.hpp>
 #include <hyprland/src/desktop/state/ViewHitTester.hpp>
@@ -45,6 +46,7 @@ struct View {
 };
 inline std::unordered_map<const Workspace::CHLWorkspace*, View> views;
 inline bool enabled = false, unloading = false;
+inline WorkspaceModes workspaceModes;
 inline HANDLE handle = nullptr;
 inline SP<CEventLoopTimer> animationTimer;
 inline CHyprSignalListener openListener, panButtonListener, panMotionListener, panFrameListener;
@@ -56,11 +58,13 @@ inline PHLWORKSPACEREF dragWorkspace;
 
 inline bool available(PHLMONITOR monitor) {
     return enabled && !unloading && monitor && monitor->m_activeWorkspace && !monitor->m_activeSpecialWorkspace
+        && workspaceModes.active(monitor->m_activeWorkspace->numberedID().value_or(0))
         && !g_pSessionLockManager->isSessionLocked()
         && !Fullscreen::controller()->hasFullscreen(monitor->m_activeWorkspace);
 }
 inline View* viewFor(PHLWORKSPACE workspace) {
-    if (!enabled || unloading || !workspace || g_pSessionLockManager->isSessionLocked()
+    if (!enabled || unloading || !workspace || !workspaceModes.active(workspace->numberedID().value_or(0))
+        || g_pSessionLockManager->isSessionLocked()
         || Fullscreen::controller()->hasFullscreen(workspace)) return nullptr;
     const auto monitor = workspace->m_monitor.lock();
     if (!monitor) return nullptr;
@@ -548,13 +552,50 @@ inline SDispatchResult dispatch(std::string arguments) {
         input >> action;
     }
     if (drag) return {.success = false, .error = "Finish moving or resizing the window before changing the camera"};
-    if (action == "disable") {
-        if (input >> extra) return {.success = false, .error = "Unexpected camera argument"};
-        enabled = false; drag.reset();
-        for (auto& [_, view] : views) { view.animating = false; damage(view); }
-        views.clear(); publishWidgetCameras(); return {};
+    if (action == "enable" || action == "disable") {
+        std::string expected;
+        if (input >> expected) {
+            if (expected.find_first_not_of("0123456789") != std::string::npos || !monitor || !monitor->m_activeWorkspace)
+                return {.success = false, .error = "Invalid expected workspace"};
+            try {
+                if (std::stoull(expected) != monitor->m_activeWorkspace->numberedID().value_or(0))
+                    return {.success = false, .error = "Workspace changed before camera action"};
+            } catch (...) { return {.success = false, .error = "Invalid expected workspace"}; }
+            if (input >> extra) return {.success = false, .error = "Unexpected camera argument"};
+        }
+        input.clear();
+    }
+    if (action == "scope") {
+        std::string arguments; std::getline(input, arguments);
+        auto next = workspaceModes;
+        if (!next.configure(arguments)) return {.success = false, .error = "Invalid workspace scope"};
+        if (next == workspaceModes) return {};
+        workspaceModes = next; enabled = workspaceModes.any();
+        for (auto& [_, view] : views) {
+            if (!view.workspace || !workspaceModes.active(view.workspace->numberedID().value_or(0))) {
+                view.animating = false; view.pan.pending = {}; view.inertia = {};
+            }
+            damage(view);
+        }
+        for (const auto& output : State::monitorState()->monitors()) {
+            if (available(output)) ensureView(output);
+            g_pHyprRenderer->damageMonitor(output);
+        }
+        for (auto& window : Desktop::windowState()->windows()) attach(window);
+        publishWidgetCameras(); return {};
     }
     if (!monitor || !monitor->m_activeWorkspace) return {.success = false, .error = "No active camera output"};
+    if (action == "disable") {
+        if (input >> extra) return {.success = false, .error = "Unexpected camera argument"};
+        workspaceModes.set(monitor->m_activeWorkspace->numberedID().value_or(0), false);
+        for (auto it = views.begin(); it != views.end();) {
+            if (!it->second.workspace || !workspaceModes.active(it->second.workspace->numberedID().value_or(0))) {
+                damage(it->second); it = views.erase(it);
+            } else ++it;
+        }
+        enabled = workspaceModes.any();
+        publishWidgetCameras(); return {};
+    }
     if (action != "enable" && action != "zoom" && action != "pan" && action != "center" && action != "reset" && action != "restore")
         return {.success = false, .error = "Unknown camera action"};
     double x = 0, y = 0, zoom = 1.;
@@ -574,7 +615,13 @@ inline SDispatchResult dispatch(std::string arguments) {
     if (action == "zoom" && !explicitMonitor) {
         if (auto pointerMonitor = State::monitorState()->query().vec(Pointer::mgr()->untransformedPosition()).run()) monitor = pointerMonitor;
     }
-    enabled = true;
+    if ((action == "enable" || action == "restore") && (monitor->m_activeSpecialWorkspace
+        || g_pSessionLockManager->isSessionLocked() || Fullscreen::controller()->hasFullscreen(monitor->m_activeWorkspace)))
+        return {.success = false, .error = "Camera suspended on this workspace"};
+    if (action == "enable" || action == "restore") {
+        workspaceModes.set(monitor->m_activeWorkspace->numberedID().value_or(0), true);
+        enabled = workspaceModes.any();
+    }
     if (!available(monitor)) return {.success = false, .error = "Camera suspended on this workspace"};
     auto& view = *ensureView(monitor);
     if (action == "pan") { queuePan(monitor, {x, y}); return {}; }
@@ -601,7 +648,8 @@ inline SDispatchResult dispatch(std::string arguments) {
 inline bool activeMonitor(PHLMONITOR monitor) {
     if (!enabled || unloading || g_pSessionLockManager->isSessionLocked()) return false;
     for (const auto& [_, view] : views)
-        if (view.monitor == monitor && workspaceRenderable(view) && transformed(&view)) return true;
+        if (view.monitor == monitor && view.workspace && workspaceModes.active(view.workspace->numberedID().value_or(0))
+            && workspaceRenderable(view) && transformed(&view)) return true;
     return false;
 }
 
@@ -673,13 +721,33 @@ inline void init(HANDLE plugin) {
     panButtonListener = Event::bus()->m_events.input.mouse.button.listen(panButton);
     panMotionListener = Event::bus()->m_events.input.mouse.move.listen(panMotion);
     panFrameListener = Event::bus()->m_events.render.pre.listen([](PHLMONITOR monitor) {
+        if (available(monitor) && !viewFor(monitor)) {
+            ensureView(monitor);
+            for (auto& window : Desktop::windowState()->windows()) attach(window);
+        }
         panFrame(monitor);
         // Publish the actual pose after this output consumed its input batch.
         // Deduplication leaves idle outputs silent; no QML per-frame subprocess.
         publishWidgetCamera(monitor);
     });
     infiniteDesktopNativeScroll = scroll;
-    enabled = hasMarker("enabled");
+    workspaceModes = {};
+    std::ifstream modesFile(marker("workspaces.json"));
+    const std::string modesText((std::istreambuf_iterator<char>(modesFile)), std::istreambuf_iterator<char>());
+    const auto modes = QJsonDocument::fromJson(QByteArray::fromStdString(modesText)).object();
+    if (modes.value("version").toInt() == 1) {
+        workspaceModes.independent = modes.value("independent").toBool(true);
+        workspaceModes.global = modes.value("global").toBool(false);
+        const auto entries = modes.value("workspaces").toObject();
+        for (auto it = entries.begin(); it != entries.end(); ++it) {
+            bool ok = false; const auto id = it.key().toUInt(&ok);
+            if (ok && id > 0 && it.value().toBool(false)) workspaceModes.workspaces.insert(id);
+        }
+    } else if (hasMarker("enabled")) {
+        const auto monitor = Desktop::focusState()->monitor();
+        if (monitor && monitor->m_activeWorkspace) workspaceModes.set(monitor->m_activeWorkspace->numberedID().value_or(0), true);
+    }
+    enabled = workspaceModes.any();
     animationTimer = makeShared<CEventLoopTimer>(std::nullopt, [](SP<CEventLoopTimer>, void*) { animate(); }, nullptr);
     g_pEventLoopManager->addTimer(animationTimer);
     auto command = VeloraCompat::statusCommand(status);

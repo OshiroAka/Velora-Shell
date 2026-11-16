@@ -73,6 +73,7 @@ Scope {
         ? "bar.opticalRefractionStrength" : "bar.refractionStrength"
     property real barBrightness: 1.0
     property bool barMatchKittyMaterial: false
+    property bool infiniteDeskWorkspaceIndependent: true
     property bool infiniteDesktopTopbarEnabled: true
     property real infiniteDeskDragSensitivity: 1.15
     property real infiniteDeskWindowSpacing: 1
@@ -507,6 +508,8 @@ Scope {
         widgetBlurEnabled = Boolean(valueAt(resolved, "lockPreview.sharedWidgets.blurEnabled", true))
         barMatchKittyMaterial = Boolean(valueAt(resolved, "bar.matchKittyMaterial", false))
         infiniteDesktopTopbarEnabled = Boolean(valueAt(resolved, "bar.infiniteDesktopTopbarEnabled", true))
+        const independent = valueAt(resolved, "infiniteDesk.workspaceIndependent", true)
+        infiniteDeskWorkspaceIndependent = typeof independent === "boolean" ? independent : true
         const outlineIcons = valueAt(resolved, "infiniteDesk.outlineIcons", true)
         infiniteDeskOutlineIcons = typeof outlineIcons === "boolean" ? outlineIcons : true
         const pinned = valueAt(resolved, "infiniteDesk.pinnedItems", [])

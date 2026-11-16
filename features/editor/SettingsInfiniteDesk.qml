@@ -32,6 +32,19 @@ Column {
         text: "Infinite Desk"; color: root.theme.textPrimary
         font.family: root.theme.bodyFont; font.pixelSize: 22
     }
+    Components.VeloraSettingsSwitch {
+        objectName: "infiniteDesk.workspaceIndependent"
+        width: parent.width; theme: root.theme; motion: root.motion
+        label: "Modo independente por workspace"
+        checked: root.config.infiniteDeskWorkspaceIndependent
+        onTriggered: root.config.setValue("infiniteDesk.workspaceIndependent", !checked)
+    }
+    Text {
+        width: parent.width
+        text: "Super + Z altera somente a workspace atual. Desligue para usar um único estado em todas; os modos individuais ficam guardados."
+        wrapMode: Text.WordWrap; color: root.theme.textSecondary
+        font.family: root.theme.bodyFont; font.pixelSize: 12
+    }
     SettingsInfiniteDock { width: parent.width; config: root.config; theme: root.theme }
     Components.VeloraSettingsSlider {
         objectName: "infiniteDesk.sensitivity"

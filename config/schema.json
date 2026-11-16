@@ -11,6 +11,7 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "workspaceIndependent": {"type": "boolean"},
         "outlineIcons": {"type": "boolean"},
         "pinnedItems": {"type": "array", "maxItems": 40, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 256}},
         "windowSpacing": {"type": "number", "minimum": 0, "maximum": 3},
