@@ -10,6 +10,12 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class WidgetParallaxTests(unittest.TestCase):
     def test_camera_scene_layers_input_editing_and_persistence(self):
+        self.exercise_fixture("widget-parallax.qml", "WIDGET_PARALLAX_OK")
+
+    def test_exit_returns_smoothly_without_delaying_camera_navigation(self):
+        self.exercise_fixture("widget-parallax-return.qml", "WIDGET_PARALLAX_RETURN_OK")
+
+    def exercise_fixture(self, fixture_name, marker):
         with tempfile.TemporaryDirectory(prefix="velora-widget-parallax-") as temporary:
             base = Path(temporary)
             for name in ("core", "features", "components", "services", "platform", "assets", "config", "shaders"):
@@ -18,7 +24,7 @@ class WidgetParallaxTests(unittest.TestCase):
             (base/"scripts/velora-theme-state").symlink_to(ROOT/"scripts/velora-theme-state")
             host = (ROOT/"surfaces/SharedWidgetsHost.qml").read_text()
             native_shape = host[host.index("        function nativeShape("):host.index("\n        function queueNativeShapes(")]
-            fixture = (ROOT/"tests/fixtures/widget-parallax.qml").read_text()
+            fixture = (ROOT/"tests/fixtures"/fixture_name).read_text()
             fixture = fixture.replace("// NATIVE_SHAPE_FIXTURE", native_shape.replace("sharedScene", "scene"))
             (base/"shell.qml").write_text(fixture.replace('"../../', '"./'))
             (base/"runtime").mkdir(mode=0o700)
@@ -32,6 +38,6 @@ class WidgetParallaxTests(unittest.TestCase):
             result = subprocess.run(["qs", "-p", str(base)], env=env, capture_output=True, text=True, timeout=18)
             output = result.stdout+result.stderr
             self.assertEqual(result.returncode, 0, output)
-            self.assertIn("WIDGET_PARALLAX_OK", output)
+            self.assertIn(marker, output)
             for error in ("WIDGET_PARALLAX_FAILED", "TypeError:", "ReferenceError:", "Binding loop", "Cannot assign"):
                 self.assertNotIn(error, output)

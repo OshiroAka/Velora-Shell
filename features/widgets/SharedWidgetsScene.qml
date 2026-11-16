@@ -29,9 +29,10 @@ Item {
     Core.WidgetParallax {
         id: parallax
         camera: root.camera
-        active: root.infiniteDesktopEnabled && !root.motion.reduced
-            && !root.editing && !root.lockPresented && !root.transition.running
-            && root.transition.progress <= .001
+        active: root.infiniteDesktopEnabled
+        snapToRest: root.motion.reduced || root.editing || root.lockPresented
+            || root.transition.running || root.transition.progress > .001
+        pace: root.motion.pace
         viewportWidth: root.width
         viewportHeight: root.height
     }

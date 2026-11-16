@@ -113,6 +113,8 @@ ShellRoot {
     property var saved: null
     property string customId: ""
     property var customBase: null
+    property double returnStarted: 0
+    property bool returnChecked: false
     readonly property var cards: [scene.clockHitItem,scene.weatherHitItem,scene.mediaHitItem,
         scene.galleryHitItem,scene.systemHitItem,scene.batteryHitItem]
     Timer {
@@ -172,16 +174,35 @@ ShellRoot {
                         near(shape[2]*window.height,cards[i].y,"native glass y follows camera")
                         near(shape[3]*window.width,cards[i].width*cards[i].scale,"native glass scales once")
                     }
-                    scene.editing=true
+                    scene.infiniteDesktopEnabled=false
+                    returnStarted=Date.now()
+                    near(scene.parallaxX,140,"exit keeps the presented pose")
                 } else if (step === 4) {
+                    if (Date.now()-returnStarted<180) return
+                    if (!returnChecked) {
+                        assert(scene.parallaxX>0 && scene.parallaxX<140,"scene returns through intermediate positions")
+                        assert(scene.parallaxScale>.825 && scene.parallaxScale<1,"scene returns through intermediate scales")
+                        for (let i=0;i<cards.length;i++) {
+                            near(cards[i].x,scene.parallaxX+basePos[i].x*scene.parallaxScale,"cards share return progress")
+                            const shape=window.nativeShape(cards[i],cards[i].currentRadius).split(" ").map(Number)
+                            near(shape[1]*window.width,cards[i].x,"glass follows return frame")
+                        }
+                        const point=scene.dynamicHitItem(0).mapToItem(scene,0,0)
+                        near(point.x,scene.parallaxX+customBase.x*scene.parallaxScale,"text shares return progress")
+                        returnChecked=true
+                    }
+                    if (Date.now()-returnStarted<800) return
+                    near(scene.parallaxX,0,"return finishes at normal desktop")
+                    near(scene.parallaxScale,1,"return restores original scale")
+                    scene.editing=true
                     for(let i=0;i<cards.length;i++) near(cards[i].x,basePos[i].x,"editor uses saved position")
                     scene.editing=false
                     send(pose(600,550))
                     testConfig.setValue("appearance.reducedMotion",true)
                 } else if (step === 5) {
                     near(scene.parallaxX,0,"reduced motion neutral")
-                    testConfig.setValue("appearance.reducedMotion",false)
                     scene.infiniteDesktopEnabled=false
+                    testConfig.setValue("appearance.reducedMotion",false)
                 } else if (step === 6) {
                     near(scene.parallaxX,0,"normal desktop neutral")
                     scene.infiniteDesktopEnabled=true
@@ -197,7 +218,9 @@ ShellRoot {
                 } else if (step === 9) {
                     near(scene.parallaxX,70,"other monitor isolated")
                     send({monitor:"DP-1", active:false})
+                    returnStarted=Date.now()
                 } else if (step === 10) {
+                    if (Date.now()-returnStarted<800) return
                     near(scene.parallaxX,0,"suspended workspace neutral")
                     send(pose(600,550))
                     scene.barOnRight=true
@@ -218,6 +241,7 @@ ShellRoot {
                     near(scene.parallaxX,70,"fractional logical screen x")
                     near(scene.parallaxY,-35,"fractional logical screen y")
                     assert(saved===JSON.stringify([testConfig.sharedWidgets,testConfig.sceneLayers]),"parallax never saves camera into layout")
+                    scene.editing=true
                     assert(cameraState.applySnapshot({widgetViews:[{monitor:"DP-2",active:false}]}),"snapshot accepted")
                     assert(!cameraState.views["DP-1"],"snapshot clears removed outputs")
                     near(scene.parallaxX,0,"missing camera fallback")
