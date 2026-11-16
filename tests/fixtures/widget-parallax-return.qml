@@ -6,6 +6,12 @@ import "../../core" as Core
 
 ShellRoot {
     Core.WidgetParallax { id: parallax; viewportWidth: 1600; viewportHeight: 900 }
+    Core.InfiniteDesktopCameraState { id: cameraState }
+    Core.WidgetParallax {
+        id: workspaceParallax
+        viewportWidth: 1600; viewportHeight: 900; active: true
+        camera: cameraState.views["DP-1"] || null
+    }
     Window {
         width: 1600; height: 900; visible: true
         TestCase {
@@ -17,10 +23,15 @@ ShellRoot {
                     center:[x,y], zoom:zoom}
             }
             function near(value, expected) { verify(Math.abs(value-expected)<.00001) }
+            function startAt(value) {
+                parallax.snapToRest=true
+                parallax.active=true
+                parallax.camera=value
+                parallax.snapToRest=false
+            }
             function test_return_camera_order_reversal_and_navigation() {
                 for (const cameraFirst of [false,true]) {
-                    parallax.active=true
-                    parallax.camera=pose(400,650,.5)
+                    startAt(pose(400,650,.5))
                     near(parallax.x,210); near(parallax.y,43.75); near(parallax.scale,.825)
                     // Navigation follows each new camera sample with no trailing animation.
                     parallax.camera=pose(600,550,.5)
@@ -44,8 +55,7 @@ ShellRoot {
                     tryCompare(parallax,"moving",false,800)
                     near(parallax.x,0); near(parallax.y,0); near(parallax.scale,1)
                 }
-                parallax.active=true
-                parallax.camera=pose(600,550,1)
+                startAt(pose(600,550,1))
                 near(parallax.x,70)
                 parallax.active=false
                 wait(200)
@@ -71,15 +81,70 @@ ShellRoot {
                 parallax.active=false
                 tryCompare(parallax,"moving",false,1000)
                 near(parallax.x,0)
-                console.info("WIDGET_PARALLAX_RETURN_OK")
-                Qt.quit()
+            }
+            function sendWorkspace(workspace, x, y, zoom) {
+                const value=pose(x,y,zoom)
+                value.monitor="DP-1"; value.workspace=workspace
+                verify(cameraState.readEvent("velora-infinite-camera>>"+JSON.stringify(value)))
+            }
+            function test_workspace_resume_after_settling_and_direct_switch() {
+                sendWorkspace(1,400,650,.5)
+                near(workspaceParallax.x,210)
+                verify(cameraState.applyPose({monitor:"DP-1",active:false}))
+                tryCompare(workspaceParallax,"moving",false,1000)
+                near(workspaceParallax.x,0); near(workspaceParallax.scale,1)
+                // Returning after the entire departure has finished must still animate.
+                sendWorkspace(1,400,650,.5)
+                verify(workspaceParallax.moving,"workspace resume must animate after settling")
+                near(workspaceParallax.x,0); near(workspaceParallax.scale,1)
+                wait(200)
+                verify(workspaceParallax.x>0 && workspaceParallax.x<210)
+                verify(workspaceParallax.scale>.825 && workspaceParallax.scale<1)
+                tryCompare(workspaceParallax,"moving",false,1000)
+                near(workspaceParallax.x,210); near(workspaceParallax.scale,.825)
+                sendWorkspace(1,600,550,.5)
+                near(workspaceParallax.x,175)
+                verify(!workspaceParallax.moving,"pan within a workspace stays direct")
+                // Two nonempty workspaces never publish an inactive pose between them.
+                sendWorkspace(2,1200,200,1.5)
+                verify(workspaceParallax.moving,"direct workspace switch must animate")
+                near(workspaceParallax.x,175); near(workspaceParallax.scale,.825)
+                wait(200)
+                verify(workspaceParallax.x>-350 && workspaceParallax.x<175)
+                verify(workspaceParallax.scale>.825 && workspaceParallax.scale<1.175)
+                tryCompare(workspaceParallax,"moving",false,1000)
+                near(workspaceParallax.x,-350); near(workspaceParallax.y,52.5)
+                near(workspaceParallax.scale,1.175)
+                sendWorkspace(1,600,550,.5)
+                near(workspaceParallax.x,-350)
+                verify(workspaceParallax.moving)
+                // Live camera events update the destination without restarting the tween.
+                for(let i=0;i<8;i++) {
+                    wait(100)
+                    sendWorkspace(1,600+i,550,.5)
+                }
+                verify(!workspaceParallax.moving,"camera samples must not restart workspace entry")
+                near(workspaceParallax.x,.35*(800-607*.5))
+                near(workspaceParallax.scale,.825)
+                workspaceParallax.active=false
+                tryCompare(workspaceParallax,"moving",false,1000)
+                near(workspaceParallax.x,0)
+                workspaceParallax.active=true
+                verify(workspaceParallax.moving,"mode resume also animates after settling")
+                near(workspaceParallax.x,0)
+                tryCompare(workspaceParallax,"moving",false,1000)
+                near(workspaceParallax.x,.35*(800-607*.5))
             }
         }
     }
     Timer {
         interval:100; running:true
         onTriggered: {
-            try { checks.test_return_camera_order_reversal_and_navigation() }
+            try {
+                checks.test_return_camera_order_reversal_and_navigation()
+                checks.test_workspace_resume_after_settling_and_direct_switch()
+                console.info("WIDGET_PARALLAX_RETURN_OK")
+            }
             catch(error) { console.error("WIDGET_PARALLAX_FAILED",String(error),error.stack) }
             Qt.quit()
         }

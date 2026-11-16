@@ -224,7 +224,9 @@ ShellRoot {
                     near(scene.parallaxX,0,"suspended workspace neutral")
                     send(pose(600,550))
                     scene.barOnRight=true
+                    returnStarted=Date.now()
                 } else if (step === 11) {
+                    if (Date.now()-returnStarted<800) return
                     near(scene.parallaxX,70,"right rail keeps camera")
                     send(pose(-1120,450,1)); const changed=pose(-1120,450,1)
                     changed.origin=[-1920,0]; changed.viewport=[1600,900]; send(changed)

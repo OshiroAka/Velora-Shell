@@ -12,6 +12,8 @@ QtObject {
     property real viewportWidth: 0
     property real viewportHeight: 0
     property bool tracking: false
+    property bool resumeSmoothly: false
+    property string trackedContext: ""
     property var targetPose: ({x: 0, y: 0, scale: 1})
     property real fromX: 0
     property real fromY: 0
@@ -36,10 +38,13 @@ QtObject {
                 * viewportHeight / camera.viewport[1],
             scale: 1 + (camera.zoom - 1) * amount
         } : {x: 0, y: 0, scale: 1}
-        // Capture the displayed pose before changing the target. Camera-off
-        // events can arrive either before or after the mode's state update.
+        const context = nextTracking
+            ? JSON.stringify([camera.monitor || "", camera.workspace === undefined ? null : camera.workspace]) : ""
+        // Keep the resume intent after the departure animation has finished.
+        // Workspace identity distinguishes a restored camera from live panning.
         const retarget = !snapToRest && ((tracking && !nextTracking)
-            || (!tracking && nextTracking && settling.running))
+            || (!tracking && nextTracking && resumeSmoothly)
+            || (tracking && nextTracking && context !== trackedContext))
         const presentedX = x, presentedY = y, presentedScale = scale
         if (snapToRest || retarget) settling.stop()
         if (retarget) {
@@ -47,7 +52,11 @@ QtObject {
             blend = 0
         } else if (snapToRest) blend = 1
         targetPose = target
+        if (snapToRest) resumeSmoothly = false
+        else if (tracking && !nextTracking) resumeSmoothly = true
+        else if (nextTracking) resumeSmoothly = false
         tracking = nextTracking
+        trackedContext = context
         if (retarget) settling.start()
     }
 
