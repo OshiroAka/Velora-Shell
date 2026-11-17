@@ -4553,7 +4553,7 @@ int luaDispatch(lua_State* state) {
 
 std::string status(VeloraCompat::OutputFormat format, std::string) {
 #ifdef VELORA_INFINITE_CAMERA_RUNTIME
-    constexpr auto cameraCapability = ",\"infinite-camera\",\"infinite-widget-camera\",\"infinite-workspace-modes\"";
+    constexpr auto cameraCapability = ",\"infinite-camera\",\"infinite-widget-camera\",\"infinite-workspace-modes\",\"infinite-terminal-rectangle\"";
 #else
     constexpr auto cameraCapability = "";
 #endif
@@ -4895,7 +4895,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         .name = "velora-blur",
         .description = "Clear live framebuffer refraction for Velora",
         .author = "Velora Shell",
-        .version = "0.17.43",
+        .version = "0.17.44",
     };
 }
 

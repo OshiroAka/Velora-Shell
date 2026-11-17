@@ -3,6 +3,7 @@
 
 #include "InfiniteDesktopCamera.hpp"
 #include "InfiniteDesktopWorkspaceMode.hpp"
+#include "InfiniteDesktopTerminal.hpp"
 #include <hyprland/src/desktop/state/FocusState.hpp>
 #include <hyprland/src/desktop/state/ViewState.hpp>
 #include <hyprland/src/desktop/state/ViewHitTester.hpp>
@@ -421,7 +422,60 @@ inline bool panGestureActive() {
     return panGesture && available(panGesture->monitor.lock())
         && panGesture->monitor->m_activeWorkspace == panGesture->workspace;
 }
+struct TerminalGesture {
+    PHLMONITORREF monitor;
+    PHLWORKSPACEREF workspace;
+    TerminalRectangle rectangle;
+};
+inline std::optional<TerminalGesture> terminalGesture;
+inline bool terminalButtonHeld = false, terminalEscapeHeld = false;
+inline CHyprSignalListener terminalKeyListener;
+inline void publishTerminalRectangle(const char* phase) {
+    if (!terminalGesture || !terminalGesture->monitor || !terminalGesture->workspace) return;
+    const auto& gesture = *terminalGesture;
+    const auto screen = gesture.rectangle.screen(), world = gesture.rectangle.world();
+    QJsonObject data{{"phase", phase}, {"monitor", QString::fromStdString(gesture.monitor->m_name)},
+        {"workspace", qint64(gesture.workspace->numberedID().value_or(0))},
+        {"screen", QJsonArray{screen.x, screen.y, screen.w, screen.h}},
+        {"world", QJsonArray{world.x, world.y, world.w, world.h}}};
+    const auto payload = QJsonDocument(data).toJson(QJsonDocument::Compact).toStdString();
+#if __has_include(<hyprland/src/ipc/s2/S2.hpp>)
+    if (IPC::Socket2::sock()) IPC::Socket2::sock()->postEvent({"velora-terminal-rectangle", payload});
+#else
+    if (g_pEventManager) g_pEventManager->postEvent({"velora-terminal-rectangle", payload});
+#endif
+}
+inline bool terminalGestureActive() {
+    if (!terminalGesture) return false;
+    const auto monitor = terminalGesture->monitor.lock();
+    const auto view = viewFor(monitor);
+    return view && monitor->m_activeWorkspace == terminalGesture->workspace
+        && view->camera.center == terminalGesture->rectangle.camera.center
+        && view->camera.zoom == terminalGesture->rectangle.camera.zoom
+        && view->camera.viewport == terminalGesture->rectangle.camera.viewport
+        && !monitor->m_activeWorkspace->m_renderOffset->isBeingAnimated();
+}
+inline void cancelTerminalGesture() {
+    publishTerminalRectangle("cancel");
+    terminalGesture.reset();
+}
+inline void terminalKey(const IKeyboard::SKeyEvent& event, Event::SCallbackInfo& info) {
+    if (terminalEscapeHeld && event.keycode == 1 && event.state == WL_KEYBOARD_KEY_STATE_RELEASED) {
+        terminalEscapeHeld = false; info.cancelled = true; return;
+    }
+    if (terminalGesture && event.keycode == 1 && event.state == WL_KEYBOARD_KEY_STATE_PRESSED) {
+        cancelTerminalGesture(); terminalEscapeHeld = true; info.cancelled = true;
+    }
+}
 inline void panButton(const IPointer::SButtonEvent& event, Event::SCallbackInfo& info) {
+    if (terminalButtonHeld && event.button == 272 && event.state == WL_POINTER_BUTTON_STATE_RELEASED) {
+        if (terminalGesture && terminalGestureActive()) {
+            terminalGesture->rectangle.update(Pointer::mgr()->untransformedPosition() - terminalGesture->monitor->m_position);
+            publishTerminalRectangle(terminalGestureActive() && terminalGesture->rectangle.usable() ? "end" : "cancel");
+        } else if (terminalGesture) publishTerminalRectangle("cancel");
+        terminalGesture.reset();
+        terminalButtonHeld = false; info.cancelled = true; return;
+    }
     if (event.button == 274 && event.state == WL_POINTER_BUTTON_STATE_PRESSED) {
         ++focusPresses; focusResult = info.cancelled ? "cancelled" : "pressed";
     }
@@ -443,6 +497,19 @@ inline void panButton(const IPointer::SButtonEvent& event, Event::SCallbackInfo&
     if (event.button == 274 && mods == 0 && !panGesture && focusClick(monitor, point)) {
         focusButtonHeld = true; info.cancelled = true; return;
     }
+    if (event.button == 272 && mods == 64U && !panGesture && infiniteDesktopGestureFocused(monitor)) {
+        auto view = ensureView(monitor);
+        const auto window = Desktop::viewState()->hitTest().windowAt(point, Desktop::View::INPUT_EXTENTS | Desktop::View::ALLOW_FLOATING);
+        if (view && !window && !monitor->m_activeWorkspace->m_renderOffset->isBeingAnimated()) {
+            view->pan.pending = {}; view->inertia = {}; view->animating = false;
+            view->from = view->target = view->camera;
+            terminalGesture.emplace(TerminalGesture{monitor, monitor->m_activeWorkspace,
+                TerminalRectangle(view->camera, point - monitor->m_position)});
+            terminalButtonHeld = true;
+            publishTerminalRectangle("begin"); info.cancelled = true; return;
+        }
+    }
+    if (terminalButtonHeld) return;
     const bool fallbackDrag = event.button == 272 && mods == (64U | 8U);
     if (!fallbackDrag && (event.button != 273 || !infiniteDesktopGestureFocused(monitor))) return;
     if (!ensureView(monitor)) return;
@@ -451,6 +518,14 @@ inline void panButton(const IPointer::SButtonEvent& event, Event::SCallbackInfo&
     info.cancelled = true;
 }
 inline void panMotion(const Vector2D& point, Event::SCallbackInfo& info) {
+    if (terminalGesture) {
+        if (!terminalGestureActive()) cancelTerminalGesture();
+        else {
+            terminalGesture->rectangle.update(point - terminalGesture->monitor->m_position);
+            publishTerminalRectangle("update");
+        }
+        info.cancelled = true; return;
+    }
     if (!panGesture) return;
     if (panGestureActive() && !relativePanMotion)
         queuePan(panGesture->monitor.lock(), (point - panGesture->last) * panGesture->prefs.sensitivity * panGesture->prefs.direction, true);
@@ -718,6 +793,7 @@ inline void init(HANDLE plugin) {
     dragMoveHook = installHook("mouseMove", "CDragStateController::mouseMove(", reinterpret_cast<const void*>(&moveDrag));
     dragEndHook = installHook("dragEnd", "CDragStateController::dragEnd(", reinterpret_cast<const void*>(&endDrag));
     relativeMotionHook = installHook("onMouseMoved", "CInputManager::onMouseMoved(", reinterpret_cast<const void*>(&relativeMotion));
+    terminalKeyListener = Event::bus()->m_events.input.keyboard.key.listen(terminalKey);
     panButtonListener = Event::bus()->m_events.input.mouse.button.listen(panButton);
     panMotionListener = Event::bus()->m_events.input.mouse.move.listen(panMotion);
     panFrameListener = Event::bus()->m_events.render.pre.listen([](PHLMONITOR monitor) {
@@ -725,6 +801,7 @@ inline void init(HANDLE plugin) {
             ensureView(monitor);
             for (auto& window : Desktop::windowState()->windows()) attach(window);
         }
+        if (terminalGesture && !terminalGestureActive()) cancelTerminalGesture();
         panFrame(monitor);
         // Publish the actual pose after this output consumed its input batch.
         // Deduplication leaves idle outputs silent; no QML per-frame subprocess.
@@ -761,6 +838,7 @@ inline void init(HANDLE plugin) {
 }
 inline void exit() {
     if (drag && dragEndHook) endDrag(drag->controller);
+    cancelTerminalGesture(); terminalButtonHeld = false; terminalEscapeHeld = false; terminalKeyListener.reset();
     enabled = false; unloading = true; drag.reset();
     publishWidgetCameras();
     widgetCameraPublished.clear();

@@ -16,6 +16,9 @@ import os
 import random
 import re
 import select
+import shlex
+import shutil
+import uuid
 import struct
 import subprocess
 import sys
@@ -933,6 +936,63 @@ def status() -> int:
     return 0
 
 
+def terminal_rectangle(monitor_name: str, workspace: int, values: list[float]) -> int:
+    """Open one identifiable Kitty; never resize or focus an unrelated client."""
+    if len(values) != 4 or not all(math.isfinite(v) for v in values):
+        raise HyprlandError("retângulo inválido")
+    x, y, width, height = (round(v) for v in values)
+    if workspace <= 0 or not 16 <= width <= 32768 or not 16 <= height <= 32768 or max(abs(x), abs(y)) > 10000000:
+        raise HyprlandError("retângulo fora dos limites")
+    monitor = next((m for m in hyprctl_json("monitors") if m.get("name") == monitor_name), None)
+    if not monitor or monitor.get("activeWorkspace", {}).get("id") != workspace or current_workspace() != workspace:
+        return 0
+    if not enabled(monitor_name):
+        return 0
+    kitty = shutil.which("kitty")
+    if not kitty:
+        raise HyprlandError("Kitty não está instalado")
+    identity = "velora-drawn-" + uuid.uuid4().hex
+    command = shlex.join([kitty, "--class", identity, "--override", "remember_window_size=no",
+                          "--override", f"initial_window_width={width}",
+                          "--override", f"initial_window_height={height}"])
+    # Detect the same transport used by the canvas dispatchers.
+    global _hyprland_backend
+    if _hyprland_backend is None:
+        info = subprocess.run(["hyprctl", "systeminfo"], text=True, capture_output=True, timeout=10)
+        if info.returncode:
+            raise HyprlandError("não foi possível identificar o transporte Hyprland")
+        _hyprland_backend = "lua" if "configProvider: lua" in info.stdout else "legacy"
+    if _hyprland_backend == "lua":
+        rules = ("{float=true,no_initial_focus=true,workspace=" + json.dumps(f"{workspace} silent")
+                 + ",monitor=" + json.dumps(monitor_name) + f",size={{{width},{height}}}"
+                 + f",move={{{x - monitor['x']},{y - monitor['y']}}}" + "}")
+        arguments = ["hyprctl", "eval", "hl.exec_cmd(" + json.dumps(command) + "," + rules + ")"]
+    else:
+        rules = f"[float;noinitialfocus;workspace {workspace} silent;monitor {monitor_name};size {width} {height}] "
+        arguments = ["hyprctl", "dispatch", "exec", rules + command]
+    result = subprocess.run(arguments, text=True, capture_output=True, timeout=10)
+    if result.returncode or "error" in result.stdout.lower():
+        raise HyprlandError(result.stderr.strip() or result.stdout.strip())
+    deadline = time.monotonic() + 8
+    while time.monotonic() < deadline:
+        client = next((c for c in hyprctl_json("clients") if c.get("mapped")
+                       and c.get("initialClass", c.get("class")) == identity), None)
+        if client:
+            if client.get("workspace", {}).get("id") != workspace:
+                raise HyprlandError("o terminal abriu em outra workspace")
+            address = client.get("address", "")
+            if not re.fullmatch(r"0x[0-9a-fA-F]+", address):
+                raise HyprlandError("endereço do terminal inválido")
+            hyprctl_batch([f"dispatch setfloating address:{address}",
+                           f"dispatch resizewindowpixel exact {width} {height},address:{address}",
+                           f"dispatch movewindowpixel exact {x} {y},address:{address}"])
+            if current_workspace() == workspace and enabled(monitor_name):
+                hyprctl_batch([f"dispatch focuswindow address:{address}"])
+            return 0
+        time.sleep(.04)
+    raise HyprlandError("o terminal não apareceu em 8 segundos")
+
+
 def main() -> int:
     commands = {
         ("toggle",): toggle,
@@ -948,6 +1008,8 @@ def main() -> int:
     }
     try:
         args = tuple(sys.argv[1:])
+        if len(args) == 7 and args[0] == "terminal-rectangle":
+            return terminal_rectangle(args[1], int(args[2]), [float(v) for v in args[3:]])
         if args in commands:
             return commands[args]()
         if len(args) == 2 and args[0] == "stream-drag":
@@ -965,8 +1027,8 @@ def main() -> int:
             file=sys.stderr,
         )
         return 2
-    except (HyprlandError, KeyError, ValueError) as error:
-        notify(f"Erro: {error}")
+    except (HyprlandError, KeyError, ValueError, OSError, subprocess.SubprocessError) as error:
+        notify(f"Erro: {error}", force=bool(sys.argv[1:2] == ["terminal-rectangle"]))
         print(f"Infinite desktop: {error}", file=sys.stderr)
         return 1
 

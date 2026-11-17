@@ -16,6 +16,60 @@ Item {
     property real lastPointerY: 0
     property real pendingX: 0
     property real pendingY: 0
+    property var terminalSelection: null
+    property var terminalQueue: []
+
+    function readTerminalEvent(line) {
+        const prefix = "velora-terminal-rectangle>>"
+        if (!line.startsWith(prefix)) return false
+        try {
+            const data = JSON.parse(line.slice(prefix.length))
+            if (data.monitor !== monitorName) return false
+            const validBox = box => Array.isArray(box) && box.length === 4
+                && box.every(n => typeof n === "number" && Number.isFinite(n))
+                && box[2] >= 0 && box[3] >= 0
+            if (!validBox(data.screen) || !validBox(data.world)
+                    || !Number.isInteger(data.workspace) || data.workspace <= 0) return false
+            if (data.phase === "cancel" || data.phase === "end") {
+                terminalSelection = null
+                selectionTimeout.stop()
+                if (data.phase === "end" && data.screen[2] >= 80 && data.screen[3] >= 48) {
+                    terminalQueue = terminalQueue.concat([data])
+                    startNextTerminal()
+                }
+            } else if (data.phase === "begin" || data.phase === "update") {
+                terminalSelection = data
+                selectionTimeout.restart()
+            } else return false
+            return true
+        } catch (error) { return false }
+    }
+    function startNextTerminal() {
+        if (terminalLaunch.running || terminalQueue.length === 0) return
+        const data = terminalQueue[0]
+        terminalQueue = terminalQueue.slice(1)
+        terminalLaunch.command = [bridgePath, "terminal-rectangle", monitorName,
+            String(data.workspace)].concat(data.world.map(n => String(n)))
+        terminalLaunch.running = true
+    }
+    Timer { id: selectionTimeout; interval: 30000; onTriggered: root.terminalSelection = null }
+    Process {
+        id: terminalLaunch
+        onExited: root.startNextTerminal()
+        stderr: SplitParser { onRead: data => console.warn("Terminal rectangle:", data) }
+    }
+    Rectangle {
+        objectName: "terminalRectanglePreview"
+        visible: root.terminalSelection !== null
+        x: root.terminalSelection ? root.terminalSelection.screen[0] : 0
+        y: root.terminalSelection ? root.terminalSelection.screen[1] : 0
+        width: root.terminalSelection ? root.terminalSelection.screen[2] : 0
+        height: root.terminalSelection ? root.terminalSelection.screen[3] : 0
+        color: "#185daceb"
+        border.color: "#b9ddfa"
+        border.width: 1
+        radius: 3
+    }
 
     function resetGesture() {
         dragging = false
@@ -95,6 +149,7 @@ Item {
             && Quickshell.env("VELORA_VALIDATE") !== "1"
         parser: SplitParser {
             onRead: line => {
+                if (root.readTerminalEvent(line)) return
                 const prefix = "velora-infinite-scroll>>"
                 if (!line.startsWith(prefix)) return
                 const fields = line.slice(prefix.length).split(",")
