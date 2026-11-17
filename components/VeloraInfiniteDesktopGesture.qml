@@ -8,6 +8,7 @@ Item {
 
     required property string bridgePath
     property string monitorName: ""
+    property color selectionAccent: "#d8d8d8"
     property bool scrolling: false
     property bool dragging: false
     property bool bridgeReady: false
@@ -65,8 +66,8 @@ Item {
         y: root.terminalSelection ? root.terminalSelection.screen[1] : 0
         width: root.terminalSelection ? root.terminalSelection.screen[2] : 0
         height: root.terminalSelection ? root.terminalSelection.screen[3] : 0
-        color: "#185daceb"
-        border.color: "#b9ddfa"
+        color: Qt.rgba(root.selectionAccent.r, root.selectionAccent.g, root.selectionAccent.b, 0.10)
+        border.color: Qt.rgba(root.selectionAccent.r, root.selectionAccent.g, root.selectionAccent.b, 0.90)
         border.width: 1
         radius: 3
     }

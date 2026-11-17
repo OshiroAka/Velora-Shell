@@ -412,7 +412,9 @@ def lua_dispatch(command: str) -> str:
     if name == "focuswindow":
         return "hl.dsp.focus({window=" + json.dumps(arguments) + "})"
     if name in ("setfloating", "settiled"):
-        return "hl.dsp.window.float({action=" + json.dumps("set" if name == "setfloating" else "unset") + ",window=" + json.dumps(arguments) + "})"
+        # The Lua float action uses enable/disable. set/unset silently mean
+        # toggle, which tiles a terminal that the launch rule already floated.
+        return "hl.dsp.window.float({action=" + json.dumps("enable" if name == "setfloating" else "disable") + ",window=" + json.dumps(arguments) + "})"
     if name == "movecursor" and re.fullmatch(r"-?\d+ -?\d+", arguments):
         x, y = arguments.split()
         return f"hl.dsp.cursor.move({{x={x},y={y}}})"

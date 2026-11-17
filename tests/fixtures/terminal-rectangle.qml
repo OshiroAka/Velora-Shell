@@ -24,6 +24,12 @@ ShellRoot {
         onTriggered: {
             try {
                 if (test.stage === 0) {
+                    const preview = gesture.children.find(child => child.objectName === "terminalRectanglePreview")
+                    gesture.selectionAccent = "#de4924"
+                    test.check(Math.abs(preview.border.color.r - 222/255) < .01, "Border ignored accent")
+                    test.check(Math.abs(preview.color.r - 222/255) < .01 && preview.color.a > .05 && preview.color.a < .2, "Fill ignored accent/alpha")
+                    gesture.selectionAccent = "#428fde"
+                    test.check(Math.abs(preview.border.color.b - 222/255) < .01 && Math.abs(preview.border.color.r - 66/255) < .01, "Preview did not follow palette change")
                     test.check(!gesture.readTerminalEvent("velora-terminal-rectangle>>{"), "Malformed event accepted")
                     test.check(!gesture.readTerminalEvent(test.event("begin", "DP-2")), "Other output accepted")
                     test.check(gesture.readTerminalEvent(test.event("begin")), "Begin rejected")

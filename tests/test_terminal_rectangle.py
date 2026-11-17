@@ -61,6 +61,33 @@ int main() {
             self.assertEqual(result.returncode,0,result.stdout+result.stderr)
             self.assertIn("TERMINAL_NATIVE_INPUT_OK",result.stdout)
 
+    def test_float_commands_are_idempotent_with_hyprland_lua_actions(self):
+        # Hyprland parseToggleStr accepts enable/on and disable/off. Unknown
+        # strings (including set/unset) fall back to toggle. Exercise emitted
+        # dispatches in Lua instead of checking their spelling alone.
+        m=helper();m._hyprland_backend="lua"
+        prefix = '''
+local floating = true
+local count = 0
+hl = {dsp = {window = {}}}
+function hl.dsp.window.float(value) return value end
+function hl.dispatch(value)
+    assert(value.window == "address:0x12", "Wrong target")
+    local action = value.action
+    if action == "enable" or action == "on" then floating = true
+    elseif action == "disable" or action == "off" then floating = false
+    else floating = not floating end
+    count = count + 1
+    if count <= 2 then assert(floating, "Already-floating terminal was tiled")
+    else assert(not floating, "Already-tiled window was floated") end
+end
+'''
+        real_run=subprocess.run
+        def execute(args, **kwargs):
+            return real_run(["lua","-"],input=prefix+args[2],capture_output=True,text=True)
+        with patch.object(m.subprocess,"run",side_effect=execute):
+            m.hyprctl_batch(["dispatch setfloating address:0x12"]*2 + ["dispatch settiled address:0x12"]*2)
+
     def test_spawn_matches_only_new_terminal_and_never_focuses_other_workspace(self):
         for backend in ("lua", "legacy"):
             with self.subTest(backend=backend):

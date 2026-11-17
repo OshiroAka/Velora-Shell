@@ -3623,6 +3623,7 @@ Scope {
                 anchors.fill: parent
                 bridgePath: root.infiniteDesktopCommand
                 monitorName: modelData.name
+                selectionAccent: veloraTheme.accentPrimary
             }
         }
     }
