@@ -11,6 +11,8 @@ import time
 from urllib.parse import urlsplit
 from xml.etree import ElementTree
 
+from velora_dlna import renderer_description
+
 
 def interface_addresses():
     try:
@@ -107,30 +109,16 @@ def neighbor_devices(sources):
 
 
 def ssdp_description(address, location):
-    connection = None
     try:
-        url = urlsplit(location)
-        if url.scheme != "http" or url.hostname != address or url.username or url.password:
-            return ""
-        connection = http.client.HTTPConnection(address, url.port or 80, timeout=0.7)
-        connection.request("GET", url.path + ("?" + url.query if url.query else "") or "/")
-        response = connection.getresponse()
-        if response.status != 200:
-            return ""
-        data = response.read(65_537)
-        if len(data) > 65_536 or b"<!DOCTYPE" in data:
-            return ""
-        return device_name(ElementTree.fromstring(data).findtext(".//{*}friendlyName") or "")
-    except (OSError, ValueError, http.client.HTTPException, ElementTree.ParseError):
-        return ""
-    finally:
-        if connection:
-            connection.close()
+        name, renderer = renderer_description(address, location)
+        return device_name(name), bool(renderer)
+    except (OSError, ValueError, RuntimeError, http.client.HTTPException, ElementTree.ParseError):
+        return "", False
 
 
 def ssdp_replies(source):
     address = ("239.255.255.250", 1900)
-    query = b'M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: "ssdp:discover"\r\nMX: 1\r\nST: ssdp:all\r\n\r\n'
+    query = b'M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: "ssdp:discover"\r\nMX: 1\r\nST: '
     devices = {}
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
@@ -138,7 +126,8 @@ def ssdp_replies(source):
             if source:
                 sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton(source))
             sock.settimeout(0.35)
-            sock.sendto(query, address)
+            for target in (b"ssdp:all", b"urn:schemas-upnp-org:service:AVTransport:1"):
+                sock.sendto(query + target + b"\r\n\r\n", address)
             deadline = time.monotonic() + 2
             while time.monotonic() < deadline and len(devices) < 40:
                 try:
@@ -151,7 +140,8 @@ def ssdp_replies(source):
                 fields = {key.lower(): value.strip() for key, separator, value in (line.partition(":") for line in lines[1:])
                           if separator}
                 location = fields.get("location", "")
-                media = any(":mediarenderer:" in fields.get(key, "").lower() for key in ("st", "usn"))
+                advertised = (fields.get("st", "") + " " + fields.get("usn", "")).lower()
+                media = ":mediarenderer:" in advertised or ":avtransport:" in advertised
                 previous = devices.get(host)
                 if previous is None or media and not previous[1]:
                     devices[host] = (location, media)
@@ -169,9 +159,17 @@ def ssdp_devices(sources):
                 if address not in replies or media:
                     replies[address] = (location, media)
         selected = list(replies.items())[:40]
-        names = executor.map(lambda entry: ssdp_description(entry[0], entry[1][0]), selected)
-        devices = [{"address": address, "name": name or address, "protocol": "dlna" if media and name else "lan",
-                    "label": "DLNA" if media else "UPnP"} for ((address, (_, media)), name) in zip(selected, names)]
+        descriptions = executor.map(lambda entry: ssdp_description(entry[0], entry[1][0]), selected)
+        devices = []
+        for ((address, (location, media)), (name, has_renderer)) in zip(selected, descriptions):
+            try:
+                url = urlsplit(location)
+                is_local = url.scheme == "http" and url.hostname == address and not url.username and not url.password
+            except ValueError:
+                is_local = False
+            can_control = is_local and (has_renderer or media)
+            devices.append({"address": address, "name": name or address, "protocol": "dlna" if can_control else "lan",
+                            "label": "DLNA" if can_control else "UPnP", "location": location if can_control else ""})
     return devices, any(ok for _, ok in scans)
 
 

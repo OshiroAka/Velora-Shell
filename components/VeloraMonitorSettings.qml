@@ -84,7 +84,7 @@ Item {
         wirelessActionPending = true
         wirelessAction.command = action === "wireless-start"
             ? [helper, action, wirelessMode, receiver.protocol, receiver.address,
-                mirrorOutputs[mirrorSource.currentIndex]?.name || "", receiver.name]
+                mirrorOutputs[mirrorSource.currentIndex]?.name || "", receiver.name, receiver.location || ""]
             : [helper, action]
         wirelessAction.running = true
     }

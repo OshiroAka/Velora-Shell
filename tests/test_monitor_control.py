@@ -161,6 +161,50 @@ else: sys.exit(2)
             self.assertEqual(scan(), {"available": True, "networkAvailable": True,
                                      "directError": "Wi-Fi Direct indisponível", "devices": [phone]})
 
+    def test_upnp_renderer_without_a_media_renderer_ad_is_listed_as_dlna(self):
+        import velora_dlna as dlna
+        import velora_wireless_network as network
+
+        location = "http://192.0.2.4:8080/device.xml"
+        descriptor = dlna.XML.fromstring('''<root xmlns="urn:schemas-upnp-org:device-1-0"><device>
+            <friendlyName>Smart TV Pro</friendlyName><serviceList><service>
+            <serviceType>urn:schemas-upnp-org:service:AVTransport:1</serviceType>
+            <controlURL>/av/control</controlURL></service></serviceList></device></root>''')
+        with patch.object(dlna, "request_xml", return_value=descriptor), \
+             patch.object(network, "ssdp_replies", return_value=({"192.0.2.4": (location, False)}, True)):
+            devices, available = network.ssdp_devices({})
+        self.assertTrue(available)
+        self.assertEqual(devices, [{"address": "192.0.2.4", "name": "Smart TV Pro", "protocol": "dlna",
+                                    "label": "DLNA", "location": location}])
+
+    def test_dlna_posts_avtransport_to_selected_receiver_and_falls_back_to_ts(self):
+        import velora_dlna as dlna
+
+        address = "192.0.2.4"
+        renderer = (f"http://{address}:8080/av/control", "urn:schemas-upnp-org:service:AVTransport:1")
+        uri = "http://192.0.2.5:37377/session/stream.m3u8"
+        with patch.object(dlna, "request_xml") as request:
+            dlna.set_playback(address, renderer, uri, "application/x-mpegurl")
+        set_uri, play = [entry.args for entry in request.call_args_list]
+        self.assertEqual(set_uri[:3], (address, renderer[0], "POST"))
+        self.assertEqual(dlna.XML.fromstring(set_uri[3]).findtext(".//CurrentURI"), uri)
+        self.assertEqual(dlna.XML.fromstring(play[3]).findtext(".//Speed"), "1")
+        self.assertIn("#Play", play[4]["SOAPAction"])
+
+        playback = Mock(side_effect=(RuntimeError("HLS rejected"), None))
+        with patch.object(dlna, "set_playback", playback):
+            dlna.start_playback(address, renderer, "http://192.0.2.5:37377/session/",
+                                Mock(wait=lambda _: True), Mock(poll=lambda: None))
+        self.assertTrue(playback.call_args.args[2].endswith("/progressive.ts"))
+        with self.assertRaises(ValueError):
+            dlna.request_xml(address, "http://192.0.2.99/foreign-control")
+
+    def test_dlna_transport_uses_the_discovered_address_and_description(self):
+        command = runpy.run_path(str(SCRIPT))["streaming_command"]
+        parameters = command("/usr/bin/fluxcast", "dlna", "192.0.2.4", "eDP-1", "http://192.0.2.4/root.xml")
+        self.assertEqual(Path(parameters[1]).name, "velora_dlna.py")
+        self.assertEqual(parameters[2:], ["192.0.2.4", "http://192.0.2.4/root.xml", "eDP-1"])
+
     def test_start_runs_fluxcast_worker_as_a_session_specific_service(self):
         start = runpy.run_path(str(SCRIPT))["wireless_start"]
         with tempfile.TemporaryDirectory(prefix="velora-wireless-") as directory, \

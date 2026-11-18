@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Control Hyprland monitors and discover wireless display receivers."""
 from concurrent.futures import ThreadPoolExecutor
-from collections import Counter
 import hashlib
 import importlib.util
 import ipaddress
@@ -20,6 +19,7 @@ import threading
 import time
 
 sys.dont_write_bytecode = True
+from velora_dlna import FLUXCAST_DIR
 from velora_wireless_network import discover_network
 
 
@@ -172,9 +172,10 @@ def fluxcast_protocols():
         return set()
     supported = {"wfd"}
     site_packages = list(Path("/opt/fluxcast/venv/lib").glob("python*/site-packages"))
-    for protocol, module in (("cast", "pychromecast"), ("dlna", "upnpclient")):
-        if importlib.util.find_spec(module) or any((path / module).is_dir() for path in site_packages):
-            supported.add(protocol)
+    if importlib.util.find_spec("pychromecast") or any((path / "pychromecast").is_dir() for path in site_packages):
+        supported.add("cast")
+    if (FLUXCAST_DIR / "server.py").is_file() and (FLUXCAST_DIR / "capture").is_dir() and shutil.which("wf-recorder"):
+        supported.add("dlna")
     return supported
 
 
@@ -188,17 +189,13 @@ def scan_wireless():
             direct, direct_error = [], ""
         network, network_available = lan.result()
     devices = sorted(direct + network, key=lambda item: (not item["canConnect"], item["name"].casefold(), item["id"]))
-    dlna_names = Counter(item["name"].casefold() for item in devices if item["protocol"] == "dlna")
-    for item in devices:
-        if item["protocol"] == "dlna" and dlna_names[item["name"].casefold()] > 1:
-            item.update(canConnect=False, label="DLNA · nome duplicado")
     return {"available": bool(fluxcast), "networkAvailable": network_available, "directError": direct_error,
             "devices": devices[:100]}
 
 
 def wireless_error(lines, fallback):
     for line in reversed(lines):
-        if re.search(r"\[FluxCast(?: WFD)?\] ERROR:", line):
+        if re.search(r"\[(?:FluxCast(?: WFD)?|Velora DLNA)\] ERROR:", line):
             return line.split("ERROR:", 1)[-1].strip()[:210] or fallback
     return fallback
 
@@ -298,13 +295,17 @@ def validate_receiver(protocol, address):
             raise ValueError("Endereço de rede inválido.")
 
 
-def wireless_start(mode, protocol, address, monitor, name):
+def wireless_start(mode, protocol, address, monitor, name, location=""):
     validate_receiver(protocol, address)
+    if protocol == "dlna" and not location:
+        raise ValueError("Busque novamente para localizar o serviço DLNA do dispositivo.")
     state = wireless_state_path()
     command = ["systemd-run", "--user", "--quiet", "--collect", "--expand-environment=no", f"--unit={wireless_unit(state)}",
                "--property=Type=exec", "--property=KillMode=mixed", "--property=TimeoutStopSec=20s"]
     command.extend(f"--setenv={key}={os.environ[key]}" for key in SESSION_ENV if key in os.environ)
     command.extend([sys.executable, str(Path(__file__).resolve()), "wireless-run", mode, protocol, address, monitor, name[:120]])
+    if location and protocol == "dlna":
+        command.append(location)
     result = subprocess.run(command, capture_output=True, text=True, timeout=8)
     if result.returncode:
         raise RuntimeError("Não foi possível iniciar a transmissão. Confira o serviço de usuário.")
@@ -349,7 +350,8 @@ def watch_transmission(process, stop, state, details):
         backend_error = wireless_error([line], "")
         if backend_error:
             return backend_error
-        if any(message in line for message in ("PLAY accepted; media stream started", "TV playback: PLAYING", "Output signal sent!")):
+        if any(message in line for message in ("PLAY accepted; media stream started", "TV playback: PLAYING",
+                                              "[Velora DLNA] O receptor iniciou a leitura do vídeo.")):
             streaming = True
             write_wireless_status(state, "streaming", **details)
         if streaming and any(message in line for message in ("Stopping RTP stream", "RTP sender is not healthy",
@@ -358,7 +360,10 @@ def watch_transmission(process, stop, state, details):
     return "" if stop.is_set() else error
 
 
-def streaming_command(fluxcast, protocol, address, monitor, name):
+def streaming_command(fluxcast, protocol, address, monitor, location):
+    if protocol == "dlna":
+        helper = Path(__file__).resolve().with_name("velora_dlna.py")
+        return [sys.executable, str(helper), address, location, monitor]
     command = [fluxcast, "--protocol", protocol, "--monitor", monitor]
     if protocol == "wfd":
         return command + ["--wfd-peer", address, "--wfd-capture-backend", "wf-recorder", "--wfd-no-firewall",
@@ -367,12 +372,10 @@ def streaming_command(fluxcast, protocol, address, monitor, name):
         route.connect((address, 9))
         host = route.getsockname()[0]
     command += ["--host", host, "--capture-backend", "wf-recorder", "--transport", "hls"]
-    if protocol == "cast":
-        return command + ["--tv-ip", address]
-    return command + [f"--device-name={name}"]
+    return command + ["--tv-ip", address]
 
 
-def run_wireless(mode, protocol, address, monitor, name):
+def run_wireless(mode, protocol, address, monitor, name, location=""):
     state = wireless_state_path()
     stop = threading.Event()
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
@@ -389,7 +392,7 @@ def run_wireless(mode, protocol, address, monitor, name):
         elif not any(item["name"] == monitor and not item.get("disabled") for item in monitors()):
             raise RuntimeError("O monitor a espelhar não está disponível.")
         if not stop.is_set():
-            command = streaming_command(fluxcast, protocol, address, monitor, name)
+            command = streaming_command(fluxcast, protocol, address, monitor, location)
             process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                        stderr=subprocess.STDOUT, text=True, errors="replace",
                                        env=dict(os.environ, PYTHONUNBUFFERED="1"))
@@ -432,7 +435,7 @@ def main():
         rollback(sys.argv[2])
     elif action == "wireless-scan" and len(sys.argv) == 2:
         print(json.dumps(scan_wireless(), ensure_ascii=False))
-    elif action in {"wireless-start", "wireless-run"} and len(sys.argv) == 7 and sys.argv[2] in {"mirror", "extend"}:
+    elif action in {"wireless-start", "wireless-run"} and len(sys.argv) in {7, 8} and sys.argv[2] in {"mirror", "extend"}:
         if action == "wireless-start":
             print(json.dumps(wireless_start(*sys.argv[2:]), ensure_ascii=False))
         else:
