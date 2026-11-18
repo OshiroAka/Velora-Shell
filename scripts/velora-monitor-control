@@ -1,24 +1,46 @@
 #!/usr/bin/env python3
-"""Apply temporary Hyprland monitor rules with an independent rollback timer."""
+"""Control Hyprland monitors and discover wireless display receivers."""
+from concurrent.futures import ThreadPoolExecutor
+from collections import Counter
+import hashlib
+import importlib.util
+import ipaddress
 import json
 import os
 from pathlib import Path
+import queue
 import re
 import secrets
+import shutil
+import signal
+import socket
 import subprocess
 import sys
+import threading
 import time
+
+sys.dont_write_bytecode = True
+from velora_wireless_network import discover_network
+
+
+WIRELESS_OUTPUT = re.compile(r"VELORA-TV-[0-9a-f]{8}")
+PEER_ADDRESS = r"(?:[0-9a-f]{2}:){5}[0-9a-f]{2}"
+PEER_LINE = re.compile(r"^\s*\[\d+\]\s+(" + PEER_ADDRESS + r")(?:\s+(.*))?$", re.IGNORECASE)
+SESSION_ENV = ("PATH", "HYPRLAND_INSTANCE_SIGNATURE", "WAYLAND_DISPLAY", "DISPLAY", "XDG_RUNTIME_DIR",
+               "XDG_SESSION_TYPE", "XDG_CURRENT_DESKTOP", "DBUS_SESSION_BUS_ADDRESS")
 
 
 def hyprctl(*args):
     result = subprocess.run(["hyprctl", *args], capture_output=True, text=True, timeout=6)
-    if result.returncode or (args[:2] == ("keyword", "monitor") and result.stdout.strip().lower() != "ok"):
+    expects_ok = args[0] == "output" or args[:2] == ("keyword", "monitor")
+    if result.returncode or (expects_ok and result.stdout.strip().lower() != "ok"):
         raise RuntimeError(result.stderr.strip() or result.stdout.strip() or "Hyprland indisponível")
     return result.stdout
 
 
-def monitors():
-    return [m for m in json.loads(hyprctl("-j", "monitors", "all")) if m.get("name")]
+def monitors(include_wireless=False):
+    outputs = json.loads(hyprctl("-j", "monitors", "all"))
+    return [m for m in outputs if m.get("name") and (include_wireless or not WIRELESS_OUTPUT.fullmatch(m["name"]))]
 
 
 def rule(m):
@@ -109,6 +131,292 @@ def rollback(token):
         path.unlink(missing_ok=True)
 
 
+def parse_wireless_peers(output):
+    peers = {}
+    peer = None
+    for line in output.splitlines():
+        match = PEER_LINE.fullmatch(line)
+        if match:
+            address, label = match.groups()
+            label = re.sub(r"(?:^|\s)via [\w.-]+$", "", label or "")
+            name = " ".join(label.split())[:120]
+            peer = peers.setdefault(address.lower(), {"id": address.lower(), "address": address.lower(),
+                                    "name": name or address, "label": "Miracast", "protocol": "wfd", "canConnect": True})
+        elif peer and any(note in line.lower() for note in (
+                "not advertising wi-fi display", "as a source, not a sink", "already running its own group", "pairs by pin only")):
+            peer.update(label="Wi-Fi Direct", canConnect=False)
+    return list(peers.values())
+
+
+def wifi_direct_arguments():
+    interfaces = [path.parent.name for path in Path("/sys/class/net").glob("*/phy80211")]
+    return ["--wfd-interface", interfaces[0]] if len(interfaces) == 1 else []
+
+
+def scan_wifi_direct(fluxcast):
+    try:
+        result = subprocess.run([fluxcast, "--wfd-scan", "--wfd-timeout", "8", *wifi_direct_arguments()],
+                                capture_output=True, text=True, errors="replace", timeout=30)
+        if result.returncode:
+            raise RuntimeError(wireless_error((result.stdout + "\n" + result.stderr).splitlines(),
+                                              "Não foi possível iniciar a busca por Wi-Fi Direct."))
+        return parse_wireless_peers(result.stdout), ""
+    except subprocess.TimeoutExpired:
+        return [], "A busca Wi-Fi Direct demorou demais."
+    except (OSError, RuntimeError) as exc:
+        return [], str(exc)
+
+
+def fluxcast_protocols():
+    if not shutil.which("fluxcast"):
+        return set()
+    supported = {"wfd"}
+    site_packages = list(Path("/opt/fluxcast/venv/lib").glob("python*/site-packages"))
+    for protocol, module in (("cast", "pychromecast"), ("dlna", "upnpclient")):
+        if importlib.util.find_spec(module) or any((path / module).is_dir() for path in site_packages):
+            supported.add(protocol)
+    return supported
+
+
+def scan_wireless():
+    fluxcast = shutil.which("fluxcast")
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        lan = executor.submit(discover_network, fluxcast_protocols())
+        if fluxcast:
+            direct, direct_error = scan_wifi_direct(fluxcast)
+        else:
+            direct, direct_error = [], ""
+        network, network_available = lan.result()
+    devices = sorted(direct + network, key=lambda item: (not item["canConnect"], item["name"].casefold(), item["id"]))
+    dlna_names = Counter(item["name"].casefold() for item in devices if item["protocol"] == "dlna")
+    for item in devices:
+        if item["protocol"] == "dlna" and dlna_names[item["name"].casefold()] > 1:
+            item.update(canConnect=False, label="DLNA · nome duplicado")
+    return {"available": bool(fluxcast), "networkAvailable": network_available, "directError": direct_error,
+            "devices": devices[:100]}
+
+
+def wireless_error(lines, fallback):
+    for line in reversed(lines):
+        if re.search(r"\[FluxCast(?: WFD)?\] ERROR:", line):
+            return line.split("ERROR:", 1)[-1].strip()[:210] or fallback
+    return fallback
+
+
+def wireless_state_path():
+    session = os.environ.get("HYPRLAND_INSTANCE_SIGNATURE")
+    runtime = os.environ.get("XDG_RUNTIME_DIR")
+    if not session or not runtime:
+        raise RuntimeError("Abra este controle dentro da sessão Hyprland.")
+    directory = Path(runtime) / "velora-shell" / "wireless-display"
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    key = hashlib.sha256(session.encode()).hexdigest()[:24]
+    return directory / key
+
+
+def owned_output(state):
+    if not state.is_file():
+        return ""
+    name = state.read_text().strip()
+    return name if WIRELESS_OUTPUT.fullmatch(name) else ""
+
+
+def find_output(name):
+    return next((item for item in monitors(include_wireless=True) if item["name"] == name), None)
+
+
+def create_virtual_output(state):
+    name = owned_output(state)
+    current = find_output(name) if name else None
+    if current and not current.get("disabled") and current.get("width", 0) > 0:
+        return name
+    if current:
+        hyprctl("output", "remove", name)
+    name = "VELORA-TV-" + secrets.token_hex(4)
+    temporary = state.with_suffix(".new")
+    temporary.write_text(name + "\n")
+    temporary.replace(state)
+    try:
+        hyprctl("output", "create", "headless", name)
+        for _ in range(10):
+            item = find_output(name)
+            if item and not item.get("disabled") and item.get("width", 0) > 0:
+                return name
+            time.sleep(0.15)
+        raise RuntimeError("O Hyprland não disponibilizou a tela virtual.")
+    except (RuntimeError, OSError, ValueError, subprocess.TimeoutExpired):
+        try:
+            hyprctl("output", "remove", name)
+        except (RuntimeError, OSError, subprocess.TimeoutExpired):
+            # Keep the name if the compositor cannot confirm cleanup.
+            pass
+        else:
+            state.unlink(missing_ok=True)
+        raise
+
+
+def remove_wireless_output(state):
+    name = owned_output(state)
+    if name and find_output(name):
+        hyprctl("output", "remove", name)
+    state.unlink(missing_ok=True)
+
+
+def write_wireless_status(state, phase, **details):
+    path = state.with_suffix(".json")
+    temporary = state.with_suffix(".status-new")
+    temporary.write_text(json.dumps({"phase": phase, **details}, ensure_ascii=False))
+    temporary.replace(path)
+
+
+def wireless_status():
+    state = wireless_state_path()
+    try:
+        status = json.loads(state.with_suffix(".json").read_text())
+    except (FileNotFoundError, ValueError):
+        return {"phase": "idle"}
+    if status.get("phase") in {"connecting", "streaming"}:
+        unit = subprocess.run(["systemctl", "--user", "is-active", wireless_unit(state)],
+                              capture_output=True, text=True, timeout=4)
+        if unit.stdout.strip() in {"inactive", "failed", "unknown"}:
+            return {"phase": "error", "error": "A transmissão foi interrompida."}
+    return status
+
+
+def wireless_unit(state):
+    return f"velora-wireless-display-{state.name}.service"
+
+
+def validate_receiver(protocol, address):
+    if protocol not in fluxcast_protocols():
+        raise ValueError("O receptor ou a dependência FluxCast está indisponível.")
+    if protocol == "wfd" and not re.fullmatch(PEER_ADDRESS, address, re.IGNORECASE):
+        raise ValueError("Endereço Wi-Fi Direct inválido.")
+    if protocol in {"cast", "dlna"}:
+        ip = ipaddress.IPv4Address(address)
+        if ip.is_loopback or ip.is_multicast or ip.is_unspecified:
+            raise ValueError("Endereço de rede inválido.")
+
+
+def wireless_start(mode, protocol, address, monitor, name):
+    validate_receiver(protocol, address)
+    state = wireless_state_path()
+    command = ["systemd-run", "--user", "--quiet", "--collect", "--expand-environment=no", f"--unit={wireless_unit(state)}",
+               "--property=Type=exec", "--property=KillMode=mixed", "--property=TimeoutStopSec=20s"]
+    command.extend(f"--setenv={key}={os.environ[key]}" for key in SESSION_ENV if key in os.environ)
+    command.extend([sys.executable, str(Path(__file__).resolve()), "wireless-run", mode, protocol, address, monitor, name[:120]])
+    result = subprocess.run(command, capture_output=True, text=True, timeout=8)
+    if result.returncode:
+        raise RuntimeError("Não foi possível iniciar a transmissão. Confira o serviço de usuário.")
+    return {"phase": "connecting", "device": name[:120], "mode": mode}
+
+
+def wireless_stop():
+    state = wireless_state_path()
+    result = subprocess.run(["systemctl", "--user", "stop", wireless_unit(state)],
+                            capture_output=True, text=True, timeout=23)
+    if result.returncode:
+        raise RuntimeError("Não foi possível encerrar a transmissão.")
+    status = wireless_status()
+    if status.get("phase") == "error":
+        return status
+    return {"phase": "idle"}
+
+
+def copy_fluxcast_log(stream, messages):
+    for line in stream:
+        print(line.rstrip(), file=sys.stderr, flush=True)
+        messages.put(line)
+    messages.put(None)
+
+
+def watch_transmission(process, stop, state, details):
+    messages = queue.Queue()
+    logger = threading.Thread(target=copy_fluxcast_log, args=(process.stdout, messages), daemon=True)
+    logger.start()
+    deadline = time.monotonic() + 100
+    streaming = False
+    error = "O FluxCast encerrou a transmissão."
+    while not stop.is_set():
+        if not streaming and time.monotonic() >= deadline:
+            return "A TV não iniciou a transmissão a tempo."
+        try:
+            line = messages.get(timeout=0.25)
+        except queue.Empty:
+            continue
+        if line is None:
+            break
+        backend_error = wireless_error([line], "")
+        if backend_error:
+            return backend_error
+        if any(message in line for message in ("PLAY accepted; media stream started", "TV playback: PLAYING", "Output signal sent!")):
+            streaming = True
+            write_wireless_status(state, "streaming", **details)
+        if streaming and any(message in line for message in ("Stopping RTP stream", "RTP sender is not healthy",
+                                                              "TV playback: IDLE (reason=")):
+            return "A TV encerrou a transmissão ou o sinal foi interrompido."
+    return "" if stop.is_set() else error
+
+
+def streaming_command(fluxcast, protocol, address, monitor, name):
+    command = [fluxcast, "--protocol", protocol, "--monitor", monitor]
+    if protocol == "wfd":
+        return command + ["--wfd-peer", address, "--wfd-capture-backend", "wf-recorder", "--wfd-no-firewall",
+                          *wifi_direct_arguments()]
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as route:
+        route.connect((address, 9))
+        host = route.getsockname()[0]
+    command += ["--host", host, "--capture-backend", "wf-recorder", "--transport", "hls"]
+    if protocol == "cast":
+        return command + ["--tv-ip", address]
+    return command + [f"--device-name={name}"]
+
+
+def run_wireless(mode, protocol, address, monitor, name):
+    state = wireless_state_path()
+    stop = threading.Event()
+    signal.signal(signal.SIGTERM, lambda *_: stop.set())
+    signal.signal(signal.SIGINT, lambda *_: stop.set())
+    details = {"device": name, "mode": mode}
+    write_wireless_status(state, "connecting", **details)
+    process = None
+    error = ""
+    try:
+        fluxcast = shutil.which("fluxcast")
+        validate_receiver(protocol, address)
+        if mode == "extend":
+            monitor = create_virtual_output(state)
+        elif not any(item["name"] == monitor and not item.get("disabled") for item in monitors()):
+            raise RuntimeError("O monitor a espelhar não está disponível.")
+        if not stop.is_set():
+            command = streaming_command(fluxcast, protocol, address, monitor, name)
+            process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                       stderr=subprocess.STDOUT, text=True, errors="replace",
+                                       env=dict(os.environ, PYTHONUNBUFFERED="1"))
+            error = watch_transmission(process, stop, state, details)
+    except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as exc:
+        error = str(exc)
+    finally:
+        if process is not None:
+            if process.poll() is None:
+                # FluxCast handles Ctrl+C to clean up its RTSP session and Wi-Fi Direct group.
+                process.send_signal(signal.SIGINT)
+                try:
+                    process.wait(timeout=13)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=2)
+            process.stdout.close()
+        try:
+            remove_wireless_output(state)
+        except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired):
+            error = error or "Não foi possível remover a tela virtual."
+        if error:
+            write_wireless_status(state, "error", error=error[:210], **details)
+        else:
+            write_wireless_status(state, "idle")
+
+
 def main():
     action = sys.argv[1]
     if action == "probe":
@@ -122,6 +430,17 @@ def main():
     elif action == "rollback" and len(sys.argv) == 3:
         time.sleep(12)
         rollback(sys.argv[2])
+    elif action == "wireless-scan" and len(sys.argv) == 2:
+        print(json.dumps(scan_wireless(), ensure_ascii=False))
+    elif action in {"wireless-start", "wireless-run"} and len(sys.argv) == 7 and sys.argv[2] in {"mirror", "extend"}:
+        if action == "wireless-start":
+            print(json.dumps(wireless_start(*sys.argv[2:]), ensure_ascii=False))
+        else:
+            run_wireless(*sys.argv[2:])
+    elif action == "wireless-stop" and len(sys.argv) == 2:
+        print(json.dumps(wireless_stop(), ensure_ascii=False))
+    elif action == "wireless-status" and len(sys.argv) == 2:
+        print(json.dumps(wireless_status(), ensure_ascii=False))
     else:
         raise ValueError("Uso inválido")
 

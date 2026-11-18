@@ -21,7 +21,7 @@ function padding(type) {
 
 function size(type) {
     const sizes = { profile: [800, 432], battery: [268, 148], clock: [344, 368], timer: [300, 154],
-        monitor: [320, 272], weather: [368, 354], paint: [220, 162], wifi: [344, 330], caffeine: [300, 290], cat: [280, 164], usb: [416, 330],
+        monitor: [344, 320], weather: [368, 354], paint: [220, 162], wifi: [344, 330], caffeine: [300, 290], cat: [280, 164], usb: [416, 330],
         thing: [300, 68], notes: [352, 368] }
     Object.assign(sizes, {volume: [300, 114], brightness: [300, 114], bluetooth: [360, 380], notifications: [350, 410]})
     return sizes[type] || [304, 180]

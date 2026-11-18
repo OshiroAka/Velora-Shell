@@ -7,10 +7,12 @@ import Quickshell.Io
 
 Item {
     id: root
+    implicitHeight: 288
     property bool opened: true
     property bool reducedMotion: false
     property color surfaceColor: "#24242d"
-    readonly property bool interactionHeld: awaitingConfirmation || outputs.popup.visible || modeSelect.popup.visible || scaleControl.pressed
+    readonly property bool interactionHeld: awaitingConfirmation || outputs.popup.visible || modeSelect.popup.visible
+        || scaleControl.pressed || wirelessActionPending || receiverSelect.popup.visible || mirrorSource.popup.visible || scroll.dragging
     property color ink: "white"
     property string uiFont: "sans-serif"
     property var monitors: []
@@ -27,12 +29,65 @@ Item {
         ? monitor.availableModes.filter((value, index, values) => values.indexOf(value) === index) : []
     property bool actionPending: false
     readonly property bool busy: query.running || writer.running || actionProcess.running || actionPending
+    property bool wireless: false
+    property string wirelessMode: "mirror"
+    property bool wirelessAvailable: false
+    property bool networkAvailable: false
+    property string directError: ""
+    property bool checkingWireless: false
+    property var receivers: []
+    property string wirelessReceiver: ""
+    property string wirelessPhase: "idle"
+    property string wirelessDevice: ""
+    property string wirelessError: ""
+    property string wirelessStatusError: ""
+    property bool scanningWireless: false
+    property bool wirelessActionPending: false
+    readonly property bool casting: wirelessPhase === "connecting" || wirelessPhase === "streaming"
+    readonly property var receiver: receivers.find(item => item.id === wirelessReceiver) || null
+    readonly property var mirrorOutputs: monitors.filter(item => !item.disabled)
     onOpenedChanged: {
-        if (opened) refresh()
+        if (opened) {
+            if (wireless) loadWireless()
+            else refresh()
+        }
         else if (awaitingConfirmation) revert()
+    }
+    onWirelessChanged: {
+        scroll.contentY = 0
+        if (!opened) return
+        if (wireless) loadWireless()
+        else refresh()
     }
     function alpha(c, a) { return Qt.rgba(c.r, c.g, c.b, a) }
     function refresh() { if (!query.running && !writer.running) query.running = true }
+    function loadWireless() {
+        refresh()
+        checkingWireless = true
+        if (!wirelessStatus.running) wirelessStatus.running = true
+    }
+    function setWirelessStatus(data) {
+        wirelessPhase = data.phase
+        wirelessDevice = data.device || ""
+        wirelessStatusError = data.error || ""
+    }
+    function scanWireless() {
+        if (scanningWireless || wirelessActionPending || casting) return
+        wirelessError = ""
+        scanningWireless = true
+        wirelessScan.running = true
+    }
+    function runWireless(action) {
+        if (wirelessActionPending || scanningWireless) return
+        if (action === "wireless-start" && !receiver?.canConnect) return
+        wirelessError = ""
+        wirelessActionPending = true
+        wirelessAction.command = action === "wireless-start"
+            ? [helper, action, wirelessMode, receiver.protocol, receiver.address,
+                mirrorOutputs[mirrorSource.currentIndex]?.name || "", receiver.name]
+            : [helper, action]
+        wirelessAction.running = true
+    }
     function select(index) {
         monitorIndex = index
         const item = monitor
@@ -105,8 +160,95 @@ Item {
             else root.refresh()
         }
     }
-    Column {
-                anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
+    Process {
+        id: wirelessScan
+        command: [root.helper, "wireless-scan"]
+        stdout: StdioCollector { id: scanResult }
+        onExited: code => {
+            try {
+                if (code !== 0) throw Error()
+                const data = JSON.parse(scanResult.text)
+                root.receivers = data.devices
+                root.wirelessAvailable = data.available
+                root.networkAvailable = data.networkAvailable
+                root.directError = data.directError || ""
+                root.wirelessError = data.error || ""
+                if (!root.receiver) root.wirelessReceiver = data.devices[0]?.id || ""
+            } catch (e) { root.wirelessError = "Não foi possível buscar telas sem fio." }
+            root.scanningWireless = false
+        }
+    }
+    Process {
+        id: wirelessAction
+        stdout: StdioCollector { id: actionResult }
+        stderr: StdioCollector { id: wirelessDiagnostic }
+        onExited: code => {
+            try {
+                if (code !== 0) throw Error()
+                root.setWirelessStatus(JSON.parse(actionResult.text))
+            } catch (e) {
+                root.wirelessError = wirelessDiagnostic.text.trim().slice(0, 160) || "Não foi possível abrir a transmissão."
+            }
+            root.wirelessActionPending = false
+        }
+    }
+
+    Process {
+        id: wirelessStatus
+        command: [root.helper, "wireless-status"]
+        stdout: StdioCollector { id: statusResult }
+        onExited: code => {
+            if (code === 0 && !root.wirelessActionPending) {
+                try { root.setWirelessStatus(JSON.parse(statusResult.text)) } catch (e) {}
+            }
+            if (root.checkingWireless) {
+                root.checkingWireless = false
+                if (root.opened && root.wireless && !root.casting) root.scanWireless()
+            }
+        }
+    }
+    Timer {
+        interval: 1800
+        repeat: true
+        running: root.opened && root.wireless && root.casting && !root.wirelessActionPending
+        onTriggered: if (!wirelessStatus.running) wirelessStatus.running = true
+    }
+
+    Flickable {
+        id: scroll
+        anchors.fill: parent
+        clip: true
+        contentHeight: pages.implicitHeight
+        contentWidth: width
+        boundsBehavior: Flickable.StopAtBounds
+        Column {
+            id: pages
+            width: scroll.width
+            spacing: 8
+
+            Row {
+                width: parent.width
+                spacing: 8
+                MonitorButton {
+                    width: (parent.width - parent.spacing) / 2
+                    text: "Monitores"
+                    selected: !root.wireless
+                    enabled: !root.wirelessActionPending
+                    onClicked: root.wireless = false
+                }
+                MonitorButton {
+                    objectName: "monitorWirelessTab"
+                    width: (parent.width - parent.spacing) / 2
+                    text: "Telas sem fio"
+                    selected: root.wireless
+                    enabled: !root.awaitingConfirmation && !writer.running && !root.actionPending
+                    onClicked: root.wireless = true
+                }
+            }
+
+            Column {
+                width: parent.width
+                visible: !root.wireless
                 spacing: 8
                 Row {
                     width: parent.width; height: 56
@@ -124,7 +266,7 @@ Item {
                             height: 56
                             monitorChoice: true
                             compact: true
-                            loopPreview: root.opened
+                            loopPreview: root.opened && !root.wireless
                             reducedMotion: root.reducedMotion
                             choice: modelData.key
                             text: modelData.label
@@ -206,6 +348,96 @@ Item {
                         contentItem: VeloraMaterialIcon { iconName: root.awaitingConfirmation ? "rotate" : "refresh"; iconColor: root.ink; glyphScale: .65 }
                     }
                 }
+            }
+
+            Column {
+                width: parent.width
+                visible: root.wireless
+                spacing: 8
+
+                MonitorButton {
+                    objectName: "monitorWirelessScan"
+                    width: parent.width
+                    text: root.scanningWireless ? "Buscando dispositivos…" : "Buscar dispositivos"
+                    enabled: !root.checkingWireless && !root.scanningWireless && !root.wirelessActionPending && !root.casting
+                    onClicked: root.scanWireless()
+                }
+                MonitorSelect {
+                    id: receiverSelect
+                    objectName: "monitorWirelessReceivers"
+                    width: parent.width; height: 32
+                    visible: root.receivers.length > 0 && !root.casting
+                    enabled: !root.scanningWireless && !root.wirelessActionPending
+                    Accessible.name: "Tela sem fio"
+                    model: root.receivers.map(item => item.name + " · " + item.label)
+                    currentIndex: root.receivers.findIndex(item => item.id === root.wirelessReceiver)
+                    onActivated: index => root.wirelessReceiver = root.receivers[index].id
+                }
+                Text {
+                    objectName: "monitorWirelessStatus"
+                    width: parent.width
+                    visible: text.length > 0
+                    color: root.ink
+                    font.family: root.uiFont; font.pixelSize: 11
+                    textFormat: Text.PlainText; wrapMode: Text.Wrap
+                    text: root.wirelessError
+                        || (root.wirelessPhase === "streaming" ? "Transmitindo para " + root.wirelessDevice
+                            : root.wirelessPhase === "connecting" ? "Conectando a " + root.wirelessDevice + "…"
+                            : root.wirelessStatusError || (root.checkingWireless || root.scanningWireless
+                                ? "Buscando na rede local e no Wi-Fi Direct…"
+                                : root.receiver?.canConnect ? "Receptor compatível com transmissão de tela."
+                                : root.receiver ? (!root.wirelessAvailable ? "Instale o pacote fluxcast para habilitar a transmissão."
+                                    : "Este dispositivo foi encontrado. O modo de tela está indisponível.")
+                                : root.directError ? "Wi-Fi Direct: " + root.directError
+                                : !root.networkAvailable ? "A busca na rede local está indisponível."
+                                : "Nenhum dispositivo respondeu à busca."))
+                }
+                Row {
+                    id: wirelessModes
+                    width: parent.width
+                    visible: !root.casting
+                    spacing: 8
+                    Repeater {
+                        model: [{key: "mirror", label: "Espelhar"}, {key: "extend", label: "Estender"}]
+                        MonitorButton {
+                            required property var modelData
+                            objectName: "monitorWirelessMode-" + modelData.key
+                            width: (wirelessModes.width - wirelessModes.spacing) / 2
+                            text: modelData.label
+                            selected: root.wirelessMode === modelData.key
+                            enabled: !root.wirelessActionPending
+                            onClicked: root.wirelessMode = modelData.key
+                        }
+                    }
+                }
+                MonitorSelect {
+                    id: mirrorSource
+                    objectName: "monitorWirelessSource"
+                    width: parent.width; height: 32
+                    visible: !root.casting && root.wirelessMode === "mirror" && root.mirrorOutputs.length > 1
+                    enabled: !root.wirelessActionPending
+                    Accessible.name: "Monitor a espelhar"
+                    model: root.mirrorOutputs.map(item => item.name)
+                }
+                MonitorButton {
+                    objectName: "monitorWirelessStart"
+                    visible: root.wirelessAvailable && !root.casting
+                    width: parent.width
+                    text: "Conectar"
+                    enabled: !root.checkingWireless && !root.scanningWireless && !root.wirelessActionPending
+                        && !!root.receiver?.canConnect && root.mirrorOutputs.length > 0
+                    onClicked: root.runWireless("wireless-start")
+                }
+                MonitorButton {
+                    objectName: "monitorWirelessStop"
+                    visible: root.casting
+                    width: parent.width
+                    text: root.wirelessPhase === "connecting" ? "Cancelar" : "Desconectar"
+                    enabled: !root.wirelessActionPending
+                    onClicked: root.runWireless("wireless-stop")
+                }
+            }
+        }
     }
     Component.onCompleted: refresh()
     Component.onDestruction: revert()
@@ -229,6 +461,7 @@ Item {
         contentItem: Text {
             leftPadding: 11; rightPadding: 24
             text: select.displayText
+            textFormat: Text.PlainText
             color: root.ink
             font: select.font
             verticalAlignment: Text.AlignVCenter
@@ -255,6 +488,7 @@ Item {
             }
             contentItem: Text {
                 text: option.text
+                textFormat: Text.PlainText
                 color: root.ink
                 font: option.font
                 verticalAlignment: Text.AlignVCenter

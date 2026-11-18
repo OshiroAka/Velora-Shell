@@ -74,13 +74,42 @@ ShellRoot {
                 test.check(!mirror.previewLooping && mirror.previewProgress===stopped,"Closed preview keeps animating")
                 monitor.reducedMotion=true; monitor.opened=true; input.wait(120)
                 test.check(!mirror.previewLooping && mirror.previewProgress===1,"Reduced motion does not settle the preview")
+                const wireless = test.find(monitor,"monitorWirelessTab")
+                input.mouseClick(wireless,wireless.width/2,wireless.height/2)
+                input.tryVerify(() => monitor.wireless && monitor.receivers.length === 3)
+                test.check(!mirror.visible,"Physical controls remain visible in the wireless tab")
+                test.check(test.find(monitor,"monitorWirelessReceivers").count === 3,"Missing receiver rows")
+                const scan = test.find(monitor,"monitorWirelessScan")
+                input.mouseClick(scan,scan.width/2,scan.height/2)
+                input.tryVerify(() => scan.enabled)
+                const receivers = test.find(monitor,"monitorWirelessReceivers")
+                receivers.forceActiveFocus()
+                input.keyClick(Qt.Key_End)
+                test.check(!test.find(monitor,"monitorWirelessStart").enabled,"Ordinary LAN devices must not start a cast")
+                input.keyClick(Qt.Key_Up)
+                test.check(monitor.wirelessReceiver === "01:23:45:67:89:ac","Receiver did not change inside Velora")
+                const extend = test.find(monitor,"monitorWirelessMode-extend")
+                input.mouseClick(extend,extend.width/2,extend.height/2)
+                test.check(monitor.wirelessMode === "extend","Wireless mode did not switch to extend")
+                const start = test.find(monitor,"monitorWirelessStart")
+                test.check(start.visible && start.enabled,"Wireless start unavailable")
+                input.mouseClick(start,start.width/2,start.height/2)
+                input.tryVerify(() => monitor.wirelessPhase === "connecting" || monitor.wirelessError.length > 0, 1500)
+                test.check(monitor.wirelessDevice === "TV Quarto", monitor.wirelessError)
+                input.tryVerify(() => monitor.wirelessPhase === "streaming", 2500)
+                monitor.opened=false; input.wait(30)
+                monitor.opened=true; input.tryVerify(() => !monitor.checkingWireless && monitor.casting)
+                const stop = test.find(monitor,"monitorWirelessStop")
+                input.mouseClick(stop,stop.width/2,stop.height/2)
+                input.tryVerify(() => monitor.wirelessPhase === "idle")
                 console.info("MONITOR_COMPACT_OK")
                 Qt.quit()
             } catch(error) {
-                console.error("MONITOR_COMPACT_FAILED",String(error),error.stack)
+                console.error("MONITOR_COMPACT_FAILED",String(error),error.stack,
+                    panel.item.wirelessError, panel.item.wirelessPhase, panel.item.wirelessDevice)
                 Qt.quit()
             }
         }
     }
-    Timer { interval: 9000; running: true; onTriggered: { console.error("MONITOR_COMPACT_FAILED timeout"); Qt.quit() } }
+    Timer { interval: 11000; running: true; onTriggered: { console.error("MONITOR_COMPACT_FAILED timeout"); Qt.quit() } }
 }

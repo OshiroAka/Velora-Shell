@@ -47,6 +47,7 @@ MODULES = {'Qt6Core': 'qt6-base', 'Qt6Gui': 'qt6-base', 'Qt6Qml': 'qt6-declarati
            'Qt6Svg': 'qt6-svg', 'libpulse-simple': 'libpulse', 'fftw3f': 'fftw'}
 OPTIONAL = {'tesseract': 'tesseract + tesseract-data-por (Texto)',
             'hyprpicker': 'hyprpicker (Pipeta)', 'wf-recorder': 'wf-recorder (Gravar tela)',
+            'fluxcast': 'fluxcast (AUR, telas sem fio Miracast)',
             'playerctl': 'playerctl', 'bluetoothctl': 'bluez-utils', 'powerprofilesctl': 'power-profiles-daemon',
             'xdg-open': 'xdg-utils', 'notify-send': 'libnotify', 'ffmpeg': 'ffmpeg',
             'magick': 'imagemagick', 'cava': 'cava', 'cmatrix': 'cmatrix',

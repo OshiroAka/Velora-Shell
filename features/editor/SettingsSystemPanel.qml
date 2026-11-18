@@ -23,7 +23,7 @@ Item {
         ? shell.infiniteDesktopLevels(Hyprland.focusedMonitor.name) : null
     readonly property bool servicesAvailable: kind === "battery" ? !!(status && tools && fan)
         : kind === "wifi" ? !!(status && tools) : true
-    implicitHeight: kind === "monitor" ? 250+(levels ? 80 : 0) : kind === "volume" ? 120
+    implicitHeight: kind === "monitor" ? (monitorControl ? monitorControl.implicitHeight : 288) + (levels ? 80 : 0) : kind === "volume" ? 120
         : kind === "battery" ? (servicesAvailable ? 170 : 44) : kind === "notifications" ? 340 : 366
 
     PwObjectTracker { objects: root.audioSink ? [root.audioSink] : [] }
@@ -61,7 +61,7 @@ Item {
             Components.VeloraMonitorSettings {
                 id: display
                 objectName: "settingsInlineMonitor"
-                width: parent.width; height: 250
+                width: parent.width; height: implicitHeight
                 opened: root.presented
                 reducedMotion: root.motion.reduced
                 ink: root.theme.textPrimary; uiFont: root.theme.bodyFont
