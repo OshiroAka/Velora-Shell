@@ -185,7 +185,7 @@ Item {
             media: "Mídia e áudio", lock: "Lockscreen"}
         return labels[id] || Catalog.category(id).name
     }
-    readonly property var sideNavigation: ["system", "appearance", "wallpapers", "infiniteDesk", "media", "lock", "credits"].map(id => Catalog.category(id))
+    readonly property var sideNavigation: ["system", "appearance", "wallpapers", "infiniteDesk", "media", "lock"].map(id => Catalog.category(id))
     Item {
         anchors.fill: parent
         clip: true

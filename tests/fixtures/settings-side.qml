@@ -131,7 +131,7 @@ ShellRoot {
                     poseWidth=home.width;poseHeight=home.height
                     home.navigate("credits"); phase=4; return
                 }
-                if (phase === 4 && home.page === "credits" && !home.animating) {
+                if (phase === 4 && home.page === "wallpapers" && !home.animating) {
                     assert(Math.abs(home.width-poseWidth)<1 && Math.abs(home.height-poseHeight)<1,"category switch resizes the side panel")
                     home.searchText="resolução"
                     assert(home.searchResults.some(result=>result.page==="system"),"global settings search missing")

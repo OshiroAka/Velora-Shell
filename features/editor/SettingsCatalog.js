@@ -37,14 +37,7 @@ var categories = [
     "name": "Sistema",
     "icon": "settings",
     "detail": "Tela, som, notificações, energia e rede."
-  },
-  {
-    "id": "credits",
-    "name": "Créditos",
-    "icon": "favorite",
-    "detail": "Quem cria e ajuda o Velora a evoluir."
-  },
-
+  }
 ]
 
 var entries = [
@@ -55,10 +48,6 @@ var entries = [
     {"id":"infiniteDesk.sensitivity","name":"Sensibilidade do arraste","page":"infiniteDesk","section":"main","target":"infiniteDesk.sensitivity","label":"","action":"","aliases":"InfiniteDesk; canvas; touchpad; dois dedos; mouse; velocidade"},
     {"id":"infiniteDesk.sizes","name":"Tamanhos ao misturar janelas","page":"infiniteDesk","section":"main","target":"infiniteDesk.sizes","label":"","action":"","aliases":"InfiniteDesk; automático; aleatório; largura; altura; apagar; remover"},
     {"id":"infiniteDesk.addSize","name":"Adicionar tamanho de janela","page":"infiniteDesk","section":"main","target":"infiniteDesk.addSize","label":"","action":"","aliases":"InfiniteDesk; canvas; misturar; mais; novo; +"},
-    {"id":"credits.feedbacker","name":"Feedbacker: liam | tech","page":"credits","section":"main","target":"credits.feedbacker","label":"","action":"","aliases":"créditos; feedback; liam; l1am_edxts; tiktok"},
-    {"id":"credits.creator","name":"Criador: Oshiro_","page":"credits","section":"main","target":"credits.creator","label":"","action":"","aliases":"créditos; criação; desenvolvedor; tiktok; _m_i_k_u__"},
-    {"id":"credits.tester1","name":"Tester: sooren","page":"credits","section":"main","target":"credits.tester1","label":"","action":"","aliases":"créditos; testers; testes; sooren"},
-    {"id":"credits.tester2","name":"Tester: なかの|𝘏𝘈𝘙𝘜✩°｡⋆ 💞🪽","page":"credits","section":"main","target":"credits.tester2","label":"","action":"","aliases":"créditos; testers; HARU; primeiro tester; longa data; tiktok; naka_haru_; seguidores; curtidas"},
     {"id":"system.locale","name":"Formato de data e hora","page":"system","section":"main","group":"accessibility","target":"system.locale","label":"","action":"","aliases":"idioma; português; inglês; japonês; acessibilidade; appearance.locale"},
     {"id":"wallpaper.choose","name":"Escolher wallpaper","page":"wallpapers","section":"main","target":"wallpaper.choose","label":"","action":"","aliases":"biblioteca; grade; imagem; fundo"},
     {"id":"lock.preview","name":"Nova lockscreen: prévia e integrações pendentes","page":"lock","section":"main","target":"lock.preview","label":"Visualizar nova tela","action":"","aliases":"bloqueio; senha; autenticação; energia; mídia; bateria; revisão"},

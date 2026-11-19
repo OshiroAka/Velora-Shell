@@ -232,7 +232,6 @@ Item {
             : root.page === "system" ? systemPage
             : root.page === "media" ? mediaPage
             : root.page === "infiniteDesk" ? infiniteDeskPage
-            : root.page === "credits" ? creditsPage
             : wallpapersPage
     }
     SequentialAnimation {
@@ -610,12 +609,6 @@ Item {
     }
     Component { id: lockPage
         SettingsLock { width: parent.width; theme: root.theme; motion: root.motion; controller: root.controller }
-    }
-    Component { id: creditsPage
-        SettingsCredits {
-            width: parent.width; theme: root.theme; motion: root.motion
-            onProfileLinkRequested: url => Qt.openUrlExternally(url)
-        }
     }
     Component { id: infiniteDeskPage
         SettingsInfiniteDesk {

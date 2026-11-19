@@ -83,6 +83,7 @@ ShellRoot {
                     assert(!Catalog.search("reflexos").some(entry=>entry.id==="appearance.reflection"),"removed reflection control remains searchable")
                     assert(Catalog.search("aparencia").length>0,"accent insensitive search")
                     assert(Catalog.search("blur").length>=4,"blur options search")
+                    assert(!Catalog.search("créditos").length && !Catalog.entries.some(entry=>entry.page==="credits"),"removed Credits entries remain searchable")
                     config.setValue("appearance.reducedMotion",true)
                     controller.show("desktop")
                 } else if (test.step <= destinations.length) {
@@ -107,18 +108,9 @@ ShellRoot {
                         reduced.triggered(); assert(config.reducedMotion,"reduced motion cannot be restored")
                         assert(Catalog.category("language").id==="system" && Catalog.category("motion").id==="system","old routes must resolve to System")
                     }
-                    if (home.page === "credits") {
-                        const creator=find(home,"credits.creator")
-                        const sooren=find(home,"credits.tester1")
-                        const veteran=find(home,"credits.tester2")
-                        assert(!!creator && !!sooren && !!veteran,"Credits page is missing a supplied profile")
-                        assert(!!find(home,"Testers") && !find(home,"Tester 1") && !find(home,"Tester 2"),"testers must share one category without numbering")
-                        assert(sooren.profileName === "sooren" && !sooren.tiktok,"sooren must not have a TikTok account invented")
-                        veteran.forceActiveFocus(Qt.TabFocusReason)
-                        assert(veteran.reveal === 1 && veteran.statistics[1].value === "6260","keyboard search must expand the veteran's details")
-                    }
                     if (home.page === "appearance") {
-                        assert(home.sideNavigation.length===7 && !!find(home,"settingsNav-infiniteDesk") && !find(home,"settingsNav-profiles"),"navigation must include Infinite Desk")
+                        assert(home.sideNavigation.length===6 && !!find(home,"settingsNav-infiniteDesk") && !find(home,"settingsNav-profiles"),"navigation must include Infinite Desk")
+                        assert(!find(home,"settingsNav-credits"),"removed Credits page remains in navigation")
                         assert(find(home,"appearanceGroup-bar").icon==="tune" && !find(home,"appearanceGroup-sidebar"),"merged groups lost their icons")
                         assert(!find(home,"Tom do Pywal"),"tone controls remain in Appearance")
                         find(home,"appearanceGroup-bar").expanded=true
