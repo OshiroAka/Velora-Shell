@@ -38,6 +38,9 @@ WidgetSurface {
                 required property var modelData
                 anchors.centerIn: parent; width: 1; height: 1
                 rotation: modelData.angle
+                Behavior on rotation {
+                    RotationAnimation { duration: root.motionDuration; direction: RotationAnimation.Shortest; easing.type: Easing.OutCubic }
+                }
                 Rectangle {
                     x: -parent.modelData.thickness / 2
                     y: -face.height * parent.modelData.length
@@ -58,6 +61,7 @@ WidgetSurface {
         objectName: "clock.dots"; visible: root.dotted
         x: 24; y: 47; width: parent.width - 48; height: parent.height - 94
         text: root.clock.timeText; color: root.contentColor
+        duration: root.motionDuration; pulseColon: true
     }
     Text {
         visible: !root.analog && !root.dotted

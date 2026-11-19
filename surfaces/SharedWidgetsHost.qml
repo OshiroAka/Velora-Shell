@@ -47,7 +47,7 @@ Variants {
         implicitWidth: modelData.width
         implicitHeight: modelData.height
         exclusionMode: ExclusionMode.Ignore
-        focusable: false
+        focusable: sharedScene.detailsOpen
 
         anchors { top: true; bottom: true; left: true; right: true }
 
@@ -55,7 +55,7 @@ Variants {
             && root.settings.mode === "editing" ? WlrLayer.Top
             : (root.preview.occluding ? WlrLayer.Overlay : WlrLayer.Bottom)
         WlrLayershell.namespace: "velora-shell-shared-widgets"
-        WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+        WlrLayershell.keyboardFocus: sharedScene.detailsOpen ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
 
         function nativeShape(item, radius) {
             if (!item || width <= 0 || height <= 0 || !item.visible
@@ -177,6 +177,7 @@ Variants {
         Region { id: noWidgetBlur }
 
         mask: Region {
+            Region { item: sharedScene.detailsHitItem; intersection: Intersection.Combine }
             Region { item: root.config.sceneLayers.length > 0 ? sharedScene.dynamicHitItem(0) : null; intersection: Intersection.Combine }
             Region { item: root.config.sceneLayers.length > 1 ? sharedScene.dynamicHitItem(1) : null; intersection: Intersection.Combine }
             Region { item: root.config.sceneLayers.length > 2 ? sharedScene.dynamicHitItem(2) : null; intersection: Intersection.Combine }

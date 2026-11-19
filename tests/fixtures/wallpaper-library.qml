@@ -13,7 +13,7 @@ ShellRoot {
         id: library; active: true
         onEntriesChanged: {
             test.countChanges++
-            if (test.everReady && entries.length<2) {console.error("LIBRARY_FAILED transient empty inventory");Qt.quit()}
+            if (test.everReady && entries.length<3) {console.error("LIBRARY_FAILED transient empty inventory");Qt.quit()}
         }
     }
     Process {
@@ -25,11 +25,11 @@ ShellRoot {
         onTriggered: {
             try {
                 if (phase===0 && library.ready) {
-                    if (library.entries.length!==2)throw Error("initial inventory")
+                    if (library.entries.length!==3 || !library.entries.some(entry => entry.title === "Velora"))throw Error("initial inventory")
                     test.everReady=true
                     if (!library.running)throw Error("quick inventory waited for thumbnail enrichment")
                     started=Date.now();add.running=true;phase=1
-                } else if (phase===1 && library.entries.length===3) {
+                } else if (phase===1 && library.entries.length===4) {
                     const elapsed=Date.now()-started
                     if(elapsed>1200)throw Error("discovery delayed "+elapsed)
                     const entry=library.entries.find(entry=>entry.title==="new")
@@ -41,7 +41,7 @@ ShellRoot {
                     const entry=library.entries.find(entry=>entry.title==="new")
                     if(entry.addedAt!==discoveredAt)throw Error("enrichment lost discovery time")
                     if(entry.preview.indexOf("wallpaper-previews")<0 || library.running) return
-                    if(library.entries.length!==3)throw Error("enrichment replaced the inventory")
+                    if(library.entries.length!==4)throw Error("enrichment replaced the inventory")
                     library.active=false;phase=3
                 } else if (phase===3) {
                     if(library.error)throw Error(library.error)

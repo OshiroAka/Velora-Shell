@@ -21,6 +21,8 @@ build_dir=$("$project_dir/scripts/build")
 export QML_IMPORT_PATH="$build_dir/visualizer/qml:$build_dir/spectrum/qml${QML_IMPORT_PATH:+:$QML_IMPORT_PATH}"
 export QS_NO_RELOAD_POPUP=1
 export QSG_RENDER_LOOP=threaded
+"$project_dir/scripts/velora-wallpaper-apply" --first-run || \
+    printf '%s\n' 'Velora: o wallpaper inicial será tentado novamente na próxima inicialização.' >&2
 python3 "$project_dir/scripts/velora-notifications" claim || \
     printf '%s\n' 'Velora: conflito de notificações preservado; consulte scripts/velora-notifications status.' >&2
 exec "$qs_executable" -p "$project_dir" "$@"

@@ -10,6 +10,7 @@ import shutil
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
+BUNDLED = ROOT / 'assets/wallpapers/velora.png'
 
 
 class WallpaperScanTests(unittest.TestCase):
@@ -56,6 +57,7 @@ class WallpaperScanTests(unittest.TestCase):
             ('WallpaperSelector/nested/art.webp', 'static'),
             ('static/still.gif', 'static'), ('live/animation.gif', 'live')]}
         self.add('notes.txt')
+        expected[BUNDLED] = 'static'
         for json_mode in (False, True):
             rows = self.scan(json_mode=json_mode)
             self.assertEqual(len(rows), len(expected))
@@ -64,10 +66,10 @@ class WallpaperScanTests(unittest.TestCase):
     def test_add_remove_and_replace_invalidate_both_warm_caches(self):
         first = self.add('static/old.png')
         for mode in (False, True):
-            self.assertEqual(len(self.scan(json_mode=mode)), 1)
+            self.assertEqual(len(self.scan(json_mode=mode)), 2)
         new = self.add('static/new.mp4')
         for mode in (False, True):
-            self.assertEqual({row['path'] for row in self.scan(json_mode=mode)}, {str(first), str(new)})
+            self.assertEqual({row['path'] for row in self.scan(json_mode=mode)}, {str(first), str(new), str(BUNDLED)})
         before = next(row['preview'] for row in self.scan(json_mode=True) if row['path'] == str(new))
         new.write_bytes(b'changed-media-content')
         after = next(row['preview'] for row in self.scan(json_mode=True) if row['path'] == str(new))
@@ -75,14 +77,14 @@ class WallpaperScanTests(unittest.TestCase):
         first.unlink()
         new.unlink()
         for mode in (False, True):
-            self.assertEqual(self.scan(json_mode=mode), [])
-            self.assertEqual(self.scan(json_mode=mode, refresh=True), [])
+            self.assertEqual([row['path'] for row in self.scan(json_mode=mode)], [str(BUNDLED)])
+            self.assertEqual([row['path'] for row in self.scan(json_mode=mode, refresh=True)], [str(BUNDLED)])
 
     def test_same_video_names_have_distinct_thumbnails(self):
         self.add('static/first/clip.mp4')
         self.add('live/second/clip.mp4')
         rows = self.scan(json_mode=True)
-        self.assertEqual(len({row['preview'] for row in rows}), 2)
+        self.assertEqual(len({row['preview'] for row in rows if row['kind'] == 'live'}), 2)
 
     def test_quick_inventory_skips_media_tools_and_remembers_discovery(self):
         for name in ('ffmpeg', 'magick'):
@@ -98,7 +100,7 @@ class WallpaperScanTests(unittest.TestCase):
             self.assertEqual(result.stdout.splitlines()[-1],'END')
             return [json.loads(line) for line in result.stdout.splitlines()[1:-1]]
         first=quick()
-        self.assertEqual(first[0]['addedAt'],0)
+        self.assertEqual({row['path']: row['addedAt'] for row in first}, {str(old): 0, str(BUNDLED): 0})
         added=self.add('live/brand-new.mp4')
         os.utime(added,(time.time()-86400,time.time()-86400))
         rows=quick()
@@ -108,7 +110,7 @@ class WallpaperScanTests(unittest.TestCase):
         self.assertFalse((self.base/'unexpected-media-decode').exists())
         self.assertEqual(next(row for row in quick() if row['path']==str(added))['addedAt'],entry['addedAt'])
         added.unlink()
-        self.assertEqual(len(quick()),1)
+        self.assertEqual(len(quick()),2)
 
     def test_watch_detects_completed_files_nested_moves_and_library_recreation(self):
         process=subprocess.Popen(['python3',str(ROOT/'scripts/velora-wallpaper-index'),'--watch'],

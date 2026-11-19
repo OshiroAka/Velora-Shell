@@ -7,6 +7,7 @@ scanner enriches these same identities with cached previews/colors afterwards.
 import argparse
 import ctypes
 import hashlib
+from itertools import chain
 import json
 import os
 from pathlib import Path
@@ -29,10 +30,11 @@ def cache_key(path):
 
 def inventory(home, runtime=None):
     library = home / "Pictures/Wallpapers"
+    bundled = Path(__file__).resolve().parents[1] / "assets/wallpapers/velora.png"
     cache = home / ".cache/velora-shell"
     ram = Path(runtime or os.environ.get("XDG_RUNTIME_DIR") or "/dev/shm") / "velora-shell/wallpaper-previews"
     entries = []
-    for directory, folders, files in os.walk(library):
+    for directory, folders, files in chain([(bundled.parent, [], [bundled.name])], os.walk(library)):
         folders.sort()
         for name in sorted(files):
             path = Path(directory) / name
@@ -55,7 +57,7 @@ def inventory(home, runtime=None):
             except (OSError, ValueError):
                 pass
             entries.append(dict(key=f"{kind}:{path}", kind=kind, mediaType="gif" if extension == ".gif" else "vid" if live else "img",
-                                path=str(path), preview=str(preview or ""), title=path.stem,
+                                path=str(path), preview=str(preview or ""), title="Velora" if path == bundled else path.stem,
                                 dominantColor=color, colorGroup=group))
     engines = set()
     for root in (home / ".steam/steam/steamapps/workshop/content/431960",
@@ -106,7 +108,9 @@ def inventory(home, runtime=None):
     seen = {}
     for entry in entries:
         key = entry["key"]
-        if previous is not None and key in previous:
+        if entry["path"] == str(bundled):
+            added = 0
+        elif previous is not None and key in previous:
             try: added = float(previous[key])
             except (TypeError,ValueError): added=0
             if not 0<=added<=now: added=0

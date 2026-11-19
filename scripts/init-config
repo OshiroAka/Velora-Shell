@@ -16,3 +16,5 @@ try:
         handle.write((root / "config/default.json").read_text(encoding="utf-8"))
 except FileExistsError:
     pass
+else:
+    (directory / "first-wallpaper.pending").touch()

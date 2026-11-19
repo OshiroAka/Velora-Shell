@@ -121,7 +121,11 @@ def main():
         state = json.loads(state_path.read_text())
     except (FileNotFoundError, ValueError):
         state = {}
-    document = build(document, image, tone, state.get(key), operation == 'shuffle')
+    previous = state.get(key)
+    bundled = Path(__file__).resolve().parents[1] / 'assets/wallpapers'
+    if not previous and tone == 'dark' and Path(source).resolve() == bundled / 'velora.png':
+        previous = json.loads((bundled / 'velora-dark.json').read_text())['special']['background']
+    document = build(document, image, tone, previous, operation == 'shuffle')
     document.update(wallpaper=source, tone=tone)
     if operation == 'shuffle':
         document.setdefault('checksum', key)

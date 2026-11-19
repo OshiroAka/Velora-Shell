@@ -22,10 +22,11 @@ WidgetSurface {
         columns: root.metrics ? 2 : root.minimal ? 3 : 1
         columnSpacing: 12; rowSpacing: 12
         Repeater {
-            model: root.readings
+            model: root.metrics ? 4 : 3
             Item {
-                required property var modelData
+                id: readout
                 required property int index
+                readonly property var reading: root.readings[index] || ({name: "", value: 0, available: false})
                 width: root.metrics ? (root.width - 52) / 2 : root.minimal ? (root.width - 64) / 3 : root.width - 40
                 height: root.metrics ? 78 : root.minimal ? 54 : 47
                 Rectangle {
@@ -34,28 +35,29 @@ WidgetSurface {
                 }
                 Text {
                     x: root.metrics ? 12 : 0; y: root.metrics ? 8 : 0
-                    text: parent.modelData.name; color: root.mutedColor
+                    text: readout.reading.name; color: root.mutedColor
                     font.family: root.contentFont; font.pixelSize: 10
                 }
                 DotMatrixText {
                     visible: root.metrics; x: 12; y: 26; width: parent.width - 44; height: 32
-                    text: parent.modelData.available ? String(Math.round(parent.modelData.value)) : "—"
+                    text: readout.reading.available ? String(Math.round(readout.reading.value)) : "—"
                     color: root.contentColor
+                    duration: root.motionDuration
                 }
                 Text {
                     visible: !root.metrics
                     anchors.right: root.minimal ? undefined : parent.right
                     y: root.minimal ? 20 : 0
-                    text: parent.modelData.available ? Math.round(parent.modelData.value) + "%" : "—"
+                    text: readout.reading.available ? Math.round(readout.reading.value) + "%" : "—"
                     color: root.contentColor; font.family: root.contentFont
                     font.pixelSize: root.minimal ? 22 : 12
                 }
                 Text {
                     visible: root.metrics; anchors.right: parent.right; anchors.rightMargin: 10; y: 40
-                    text: parent.modelData.unit || "%"; color: root.mutedColor; font.family: root.contentFont; font.pixelSize: 10
+                    text: readout.reading.unit || "%"; color: root.mutedColor; font.family: root.contentFont; font.pixelSize: 10
                 }
                 Row {
-                    visible: !root.minimal && !parent.modelData.unit; x: root.metrics ? 12 : 0; width: parent.width - 2*x; y: root.metrics ? 66 : 28; spacing: 3
+                    visible: !root.minimal && !readout.reading.unit; x: root.metrics ? 12 : 0; width: parent.width - 2*x; y: root.metrics ? 66 : 28; spacing: 3
                     Repeater {
                         model: 20
                         Rectangle {
@@ -63,8 +65,19 @@ WidgetSurface {
                             width: Math.max(1, (parent.width - 57) / 20)
                             height: root.metrics ? 4 : 5; radius: 1
                             color: root.contentColor
-                            opacity: parent.parent.modelData.available && index < Math.round(parent.parent.modelData.value / 5) ? .88 : .12
+                            opacity: readout.reading.available && index < Math.round(readout.reading.value / 5) ? .88 : .12
+                            Behavior on opacity {
+                                NumberAnimation { duration: root.motionDuration; easing.type: Easing.OutCubic }
+                            }
                         }
+                    }
+                }
+                Loader {
+                    active: root.metrics && readout.index === 3
+                    x: 12; y: 58; width: parent.width - 24; height: 13
+                    sourceComponent: WidgetNetworkTrace {
+                        samples: root.status.networkHistory || []
+                        ink: root.mutedColor
                     }
                 }
             }

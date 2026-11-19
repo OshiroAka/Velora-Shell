@@ -5,9 +5,11 @@ Canvas {
     id: root
     property string name: "partly"
     property color ink: "white"
+    property bool drawRain: true
     implicitWidth: 24; implicitHeight: 24
     onNameChanged: requestPaint()
     onInkChanged: requestPaint()
+    onDrawRainChanged: requestPaint()
     onWidthChanged: requestPaint()
     onHeightChanged: requestPaint()
     onPaint: {
@@ -38,7 +40,7 @@ Canvas {
                 c.beginPath(); c.moveTo(18,23); c.lineTo(13,28); c.lineTo(17,28); c.lineTo(15,31); c.stroke()
             } else if(name === "snow") {
                 for(const x of [10,22]) { line(x-2,27,x+2,27); line(x,25,x,29); line(x-1.5,25.5,x+1.5,28.5) }
-            } else { line(10,25,8,29); line(17,25,15,29); line(24,25,22,29) }
+            } else if (drawRain) { line(10,25,8,29); line(17,25,15,29); line(24,25,22,29) }
         } else if (name === "wind") {
             line(3,12,22,12); c.beginPath(); c.moveTo(22,12); c.bezierCurveTo(30,12,28,2,22,6); c.stroke()
             line(3,17,28,17); line(7,22,20,22)

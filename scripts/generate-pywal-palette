@@ -24,35 +24,50 @@ mkdir -p "$palette_cache_root"
 palette_work=$(mktemp -d "$palette_cache_root/.extract.XXXXXX")
 trap 'rm -rf -- "$palette_work"' EXIT
 
-palette_input="$palette_work/frame.png"
-python3 "$palette_project_dir/scripts/prepare-palette-input" \
-    "$source_path" "$palette_input" "${3:-}"
+default_wallpaper="$palette_project_dir/assets/wallpapers/velora.png"
+default_palette="$palette_project_dir/assets/wallpapers/velora-dark.json"
+operation=${4:-restore}
+use_default_palette() {
+    [[ "$source_path" -ef "$default_wallpaper" && "$palette_tone" == dark && "$operation" == restore ]] || return 1
+    local key selected
+    key=$(printf '%s\0%s' "$source_path" "$palette_tone" | sha256sum)
+    selected=$(jq -r --arg key "${key%% *}" '.[$key] // empty' "$palette_cache_root/surface-choices.json" 2>/dev/null || true)
+    [[ -z "$selected" || "$selected" == "$(jq -r '.special.background' "$default_palette")" ]]
+}
 
-# Keep pywal entirely inside the Velora cache. These switches explicitly avoid
-# changing wallpaper, terminal sequences, TTY, GTK, Xresources or other apps.
-wal_tone_args=(--cols16 darken)
-if [[ "$palette_tone" == "light" ]]; then
-    wal_tone_args=(-l --cols16 lighten)
+if use_default_palette; then
+    jq --arg wallpaper "$source_path" '.wallpaper = $wallpaper' "$default_palette" > "$palette_work/colors.json.next"
+else
+    palette_input="$palette_work/frame.png"
+    python3 "$palette_project_dir/scripts/prepare-palette-input" \
+        "$source_path" "$palette_input" "${3:-}"
+
+    # Keep pywal entirely inside the Velora cache. These switches explicitly avoid
+    # changing wallpaper, terminal sequences, TTY, GTK, Xresources or other apps.
+    wal_tone_args=(--cols16 darken)
+    if [[ "$palette_tone" == "light" ]]; then
+        wal_tone_args=(-l --cols16 lighten)
+    fi
+    PYWAL_CACHE_DIR="$palette_work" XDG_CONFIG_HOME="$palette_work/config" \
+        "$palette_project_dir/scripts/velora-wal" -n -q -s -t -e "${wal_tone_args[@]}" \
+            -i "$palette_input"
+
+    palette_source=$(find "$palette_work/schemes" -maxdepth 1 -type f -name '*.json' -print -quit)
+    if [[ -z "$palette_source" ]]; then
+        printf 'pywal did not produce a palette for: %s\n' "$source_path" >&2
+        exit 4
+    fi
+
+    palette_accents=$("$palette_project_dir/scripts/select-velora-accents" \
+        "$palette_input" "$palette_source")
+
+    jq --arg wallpaper "$source_path" --arg tone "$palette_tone" \
+        --argjson velora "$palette_accents" \
+        '.wallpaper = $wallpaper | .tone = $tone | .velora = $velora' \
+        "$palette_source" > "$palette_work/colors.json.next"
+    "$palette_project_dir/scripts/velora-palette-surfaces" "$palette_input" \
+        "$palette_work/colors.json.next" "$source_path" "$palette_tone" "$palette_cache_root" "$operation"
 fi
-PYWAL_CACHE_DIR="$palette_work" XDG_CONFIG_HOME="$palette_work/config" \
-    "$palette_project_dir/scripts/velora-wal" -n -q -s -t -e "${wal_tone_args[@]}" \
-        -i "$palette_input"
-
-palette_source=$(find "$palette_work/schemes" -maxdepth 1 -type f -name '*.json' -print -quit)
-if [[ -z "$palette_source" ]]; then
-    printf 'pywal did not produce a palette for: %s\n' "$source_path" >&2
-    exit 4
-fi
-
-palette_accents=$("$palette_project_dir/scripts/select-velora-accents" \
-    "$palette_input" "$palette_source")
-
-jq --arg wallpaper "$source_path" --arg tone "$palette_tone" \
-    --argjson velora "$palette_accents" \
-    '.wallpaper = $wallpaper | .tone = $tone | .velora = $velora' \
-    "$palette_source" > "$palette_work/colors.json.next"
-"$palette_project_dir/scripts/velora-palette-surfaces" "$palette_input" \
-    "$palette_work/colors.json.next" "$source_path" "$palette_tone" "$palette_cache_root" "${4:-restore}"
 chmod 0644 "$palette_work/colors.json.next"
 mv -f -- "$palette_work/colors.json.next" "$palette_cache_root/colors.json"
 printf '%s\n' "$palette_cache_root/colors.json"
@@ -61,6 +76,6 @@ printf '%s\n' "$palette_cache_root/colors.json"
 # browser CSS; this avoids a second raw-wal palette tinting monochrome chrome.
 python3 "$palette_project_dir/scripts/velora-zen-theme.py" --managed-only --quiet
 
-if [[ "${4:-restore}" == "shuffle" ]]; then
+if [[ "$operation" == shuffle ]]; then
     python3 "$palette_project_dir/scripts/velora-pywal-theme.py" --no-ipc >/dev/null
 fi

@@ -3,6 +3,10 @@ set -euo pipefail
 
 original_args=("$@")
 wallpaper_request_id="${VELORA_WALLPAPER_REQUEST_ID:-$(date +%s%N)-$(printf '%010d' "$$")}"
+base_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+velora_cache="${XDG_CACHE_HOME:-$HOME/.cache}/velora-shell"
+state_file="$velora_cache/current_wallpaper"
+first_wallpaper_marker="${XDG_CONFIG_HOME:-$HOME/.config}/velora-shell/first-wallpaper.pending"
 
 if [ "${1:-}" = "__wave-cleanup" ]; then
   cleanup_shader="${2:-}"
@@ -29,6 +33,7 @@ worker_img=""
 worker_delay="0"
 transition_preload_file=""
 restore_mode=0
+first_run=0
 
 if [ "$kind" = "__theme-worker" ]; then
   worker_stamp="${2:-}"
@@ -53,7 +58,14 @@ if [ "$kind" = "__transition-preload-current" ] || [ "$kind" = "__transition-pre
   preview="$kind"
 fi
 
-if [ $# -eq 1 ] && [ "$1" != "restore" ] && [ "$1" != "--restore" ] && [[ "$1" != __transition-preload* ]]; then
+if [ "$kind" = "--first-run" ]; then
+  [ -f "$first_wallpaper_marker" ] || exit 0
+  first_run=1
+  restore_mode=1
+  kind=static
+  path="$base_dir/assets/wallpapers/velora.png"
+  preview="$path"
+elif [ $# -eq 1 ] && [ "$1" != "restore" ] && [ "$1" != "--restore" ] && [[ "$1" != __transition-preload* ]]; then
   kind="static"
   path="$1"
   preview="$1"
@@ -61,7 +73,6 @@ fi
 
 if [ "$kind" = "restore" ] || [ "$kind" = "--restore" ]; then
   restore_mode=1
-  state_file="$HOME/.cache/velora-shell/current_wallpaper"
   [ -s "$state_file" ] || exit 0
   IFS='|' read -r kind path preview < "$state_file" || exit 0
   [ -n "$kind" ] || exit 0
@@ -83,8 +94,7 @@ fi
 theme_path="$path"
 [ -n "$preview" ] && [ -f "$preview" ] && theme_path="$preview"
 
-script_path="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
-base_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+script_path="$base_dir/scripts/$(basename "${BASH_SOURCE[0]}")"
 theme_state_script="${base_dir}/scripts/velora-theme-state"
 pywal_theme_script="${base_dir}/scripts/velora-pywal-theme.py"
 desktop_theme_script="${base_dir}/scripts/velora-desktop-theme.py"
@@ -98,8 +108,8 @@ telegram_theme_script="${base_dir}/scripts/velora-telegram-theme.py"
 zen_live_script="${base_dir}/scripts/velora-zen-live-apply"
 wallpaper_controller_script="${base_dir}/scripts/velora-wallpaper-controller.py"
 state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/velora-shell"
-static_cache_dir="$HOME/.cache/velora-shell/static-display"
-wallpaper_transition_cache_dir="$HOME/.cache/velora-shell/wallpaper-transition"
+static_cache_dir="$velora_cache/static-display"
+wallpaper_transition_cache_dir="$velora_cache/wallpaper-transition"
 wallpaper_preload_state="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/velora-shell/wallpaper-transition-preload"
 theme_stamp_file="${state_dir}/wallpaper-theme.stamp"
 theme_log_file="/tmp/velora-wallpaper-theme.log"
@@ -118,9 +128,9 @@ previous_wallpaper_kind=""
 previous_wallpaper_path=""
 previous_wallpaper_preview=""
 
-mkdir -p "$HOME/.cache/velora-shell" "$static_cache_dir" "$wallpaper_transition_cache_dir" "$state_dir"
+mkdir -p "$velora_cache" "$static_cache_dir" "$wallpaper_transition_cache_dir" "$state_dir"
 
-wallpaper_apply_pending="$HOME/.cache/velora-shell/wallpaper-apply.pending"
+wallpaper_apply_pending="$velora_cache/wallpaper-apply.pending"
 wallpaper_apply_pending_snapshot="${wallpaper_apply_pending}.$$"
 
 queue_latest_wallpaper_request() {
@@ -203,11 +213,13 @@ drain_latest_wallpaper_request() {
 
 if [ "$kind" != "__theme-worker" ] && [[ "$kind" != __transition-preload* ]] && command -v flock >/dev/null 2>&1; then
   if [ "${VELORA_WALLPAPER_LOCK_HELD:-0}" != "1" ]; then
-    lock_file="$HOME/.cache/velora-shell/wallpaper-apply.lock"
-    pending_guard_file="$HOME/.cache/velora-shell/wallpaper-apply.pending.lock"
+    lock_file="$velora_cache/wallpaper-apply.lock"
+    pending_guard_file="$velora_cache/wallpaper-apply.pending.lock"
     exec 8>"$pending_guard_file"
     exec 9>"$lock_file"
-    if ! flock -n 9 >/dev/null 2>&1; then
+    if [ "$first_run" -eq 1 ]; then
+      flock -w 2 9 || exit 0
+    elif ! flock -n 9 >/dev/null 2>&1; then
       queue_latest_wallpaper_request
       if ! flock -w 0.60 9 >/dev/null 2>&1; then
         exit 0
@@ -218,8 +230,12 @@ if [ "$kind" != "__theme-worker" ] && [[ "$kind" != __transition-preload* ]] && 
   adopt_newer_wallpaper_request
 fi
 
-if [ -s "$HOME/.cache/velora-shell/current_wallpaper" ]; then
-  IFS='|' read -r previous_wallpaper_kind previous_wallpaper_path previous_wallpaper_preview < "$HOME/.cache/velora-shell/current_wallpaper" || true
+if [ -s "$state_file" ]; then
+  if [ "$first_run" -eq 1 ]; then
+    rm -f -- "$first_wallpaper_marker"
+    exit 0
+  fi
+  IFS='|' read -r previous_wallpaper_kind previous_wallpaper_path previous_wallpaper_preview < "$state_file" || true
 fi
 
 clamp_decimal() {
@@ -737,7 +753,25 @@ apply_theme_core() {
 
   [ -f "$img" ] || return 0
   if "$base_dir/scripts/velora-wal" --resolve >/dev/null 2>&1; then
-    run_low_priority "$base_dir/scripts/velora-wal" -i "$img" -n -q >/dev/null 2>&1 || true
+    if [[ "$img" -ef "$base_dir/assets/wallpapers/velora.png" ]]; then
+      local tone palette
+      tone=$(python3 - "${XDG_CONFIG_HOME:-$HOME/.config}/velora-shell/config.json" <<'PYTONE'
+import json, sys
+try:
+    with open(sys.argv[1]) as stream:
+        appearance = json.load(stream).get("appearance", {})
+except (OSError, ValueError):
+    appearance = {}
+tone = appearance.get("pywalTone")
+print(tone if tone in ("dark", "light") else "light" if appearance.get("colorScheme") == "light" else "dark")
+PYTONE
+)
+      if palette=$(run_low_priority "$base_dir/scripts/generate-pywal-palette" "$img" "$tone" "$img" restore); then
+        run_low_priority "$base_dir/scripts/velora-wal" -n -q -f "$palette" >/dev/null 2>&1 || true
+      fi
+    else
+      run_low_priority "$base_dir/scripts/velora-wal" -i "$img" -n -q >/dev/null 2>&1 || true
+    fi
   fi
 
   if [ -n "$expected_stamp" ] && ! theme_stamp_matches "$expected_stamp"; then
@@ -862,6 +896,7 @@ start_theme_worker() {
       --unit="$unit" \
       --collect \
       --quiet \
+      --setenv="XDG_CACHE_HOME=${XDG_CACHE_HOME:-$HOME/.cache}" \
       --setenv="XDG_STATE_HOME=${XDG_STATE_HOME:-$HOME/.local/state}" \
       --setenv="XDG_CONFIG_HOME=${XDG_CONFIG_HOME:-$HOME/.config}" \
       --setenv="XDG_DATA_HOME=${XDG_DATA_HOME:-$HOME/.local/share}" \
@@ -1081,7 +1116,10 @@ esac
 # state, and failures must not advertise a wallpaper that never appeared.
 case "$kind" in
   static|bg|live|mpv|engine)
-    printf '%s|%s|%s\n' "$kind" "$path" "$preview" > "$HOME/.cache/velora-shell/current_wallpaper.$$"
-    mv -f "$HOME/.cache/velora-shell/current_wallpaper.$$" "$HOME/.cache/velora-shell/current_wallpaper"
+    printf '%s|%s|%s\n' "$kind" "$path" "$preview" > "$state_file.$$"
+    mv -f "$state_file.$$" "$state_file"
+    if [ "$first_run" -eq 1 ]; then
+      rm -f -- "$first_wallpaper_marker"
+    fi
     ;;
 esac

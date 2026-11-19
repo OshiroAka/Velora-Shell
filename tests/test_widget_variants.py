@@ -11,6 +11,30 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class WidgetVariantTests(unittest.TestCase):
+    def test_live_motion_and_details_follow_widget_lifecycle(self):
+        executable = shutil.which("qs")
+        if not executable:
+            self.skipTest("Quickshell unavailable")
+        with tempfile.TemporaryDirectory(prefix="velora-widget-motion-") as temporary:
+            base = Path(temporary)
+            for name in ("core", "features", "components", "services", "platform", "assets", "config", "shaders"):
+                (base / name).symlink_to(ROOT / name, target_is_directory=True)
+            (base / "shell.qml").write_text((ROOT / "tests/fixtures/widget-motion.qml").read_text().replace('"../../', '"./'))
+            (base / "runtime").mkdir(mode=0o700)
+            env = dict(os.environ, HOME=str(base), XDG_RUNTIME_DIR=str(base / "runtime"),
+                       XDG_CONFIG_HOME=str(base / "user-config"), XDG_CACHE_HOME=str(base / "cache"),
+                       XDG_DATA_HOME=str(base / "data"), XDG_STATE_HOME=str(base / "state"),
+                       QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software", VELORA_VALIDATE="1")
+            env.pop("WAYLAND_DISPLAY", None)
+            result = subprocess.run([executable, "-p", str(base)], env=env, text=True, capture_output=True, timeout=12)
+            output = result.stdout + result.stderr
+            if log := os.environ.get("VELORA_WIDGET_MOTION_TEST_LOG"):
+                Path(log).write_text(output)
+            self.assertEqual(result.returncode, 0, output)
+            self.assertIn("WIDGET_MOTION_OK", output)
+            for error in ("WIDGET_MOTION_FAILED", "TypeError:", "ReferenceError:", "Cannot assign", "Binding loop"):
+                self.assertNotIn(error, output)
+
     def test_legacy_layout_selection_scene_and_restart(self):
         executable = shutil.which("qs")
         if not executable:
@@ -29,6 +53,7 @@ class WidgetVariantTests(unittest.TestCase):
             items = original["lockPreview"]["sharedWidgets"]["items"]
             original["lockPreview"]["sharedWidgets"]["items"] = items[:6]
             items[0]["desktop"].update(x=120, y=112)
+            next(item for item in items if item["kind"] == "media")["desktopEnabled"] = True
             original["lockPreview"]["scene"]["layers"] = []
             (config_dir / "config.json").write_text(json.dumps(original))
             env = dict(os.environ, HOME=str(base), XDG_RUNTIME_DIR=str(base / "runtime"),

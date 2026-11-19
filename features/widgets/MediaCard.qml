@@ -14,6 +14,10 @@ WidgetSurface {
         id: cover; x: root.poster ? (root.width - width) / 2 : 16; y: root.poster ? 16 : (parent.height - height) / 2
         width: root.coverSize; height: width; radius: root.vinyl ? width/2 : 14
         source: root.media.hasPlayer ? root.media.artUrl : ""
+        NumberAnimation on rotation {
+            running: root.animateContent && root.vinyl && root.media.hasPlayer && root.media.playing
+            from: 0; to: 360; duration: 14000; loops: Animation.Infinite
+        }
     }
     Rectangle {
         x: cover.x; y: cover.y; width: cover.width; height: cover.height; radius: cover.radius
@@ -75,6 +79,12 @@ WidgetSurface {
         x: info.x; y: root.poster ? parent.height - 14 : parent.height - 10
         width: parent.width - x - 20; height: 2; radius: 1
         visible: root.media.hasPlayer; color: root.quietColor
-        Rectangle { width: parent.width * Math.max(0, Math.min(1, Number(root.media.progress || 0))); height: 2; radius: 1; color: root.contentColor }
+        Rectangle {
+            width: parent.width * Math.max(0, Math.min(1, Number(root.media.progress || 0)))
+            height: 2; radius: 1; color: root.contentColor
+            Behavior on width {
+                NumberAnimation { duration: root.motionDuration; easing.type: Easing.OutCubic }
+            }
+        }
     }
 }

@@ -80,7 +80,9 @@ class WallpaperDropTests(unittest.TestCase):
                               env=self.env, text=True, capture_output=True, timeout=3)
         self.assertEqual(scan.returncode, 0, scan.stderr)
         rows = [json.loads(line) for line in scan.stdout.splitlines() if line.startswith("{")]
-        self.assertEqual({row["key"] for row in rows}, {entry["key"] for entry in result["entries"] + reused["entries"]})
+        expected = {entry["key"] for entry in result["entries"] + reused["entries"]}
+        expected.add(f"static:{ROOT / 'assets/wallpapers/velora.png'}")
+        self.assertEqual({row["key"] for row in rows}, expected)
 
     def test_invalid_missing_unfinished_and_nonregular_files_do_not_enter_library(self):
         partial = self.download("download.jpg.crdownload")

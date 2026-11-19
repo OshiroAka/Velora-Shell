@@ -43,7 +43,7 @@ ShellRoot {
     Timer {
         interval: 20; repeat: true; running: true
         onTriggered: {
-            if (test.completed !== 3 || library.importing || library.entries.length !== 2 || library.running) return
+            if (test.completed !== 3 || library.importing || library.entries.length !== 3 || library.running) return
             if (test.failure || test.applied || picker.entries[picker.selectedIndex].key !== test.lastKey)
                 console.error("WALLPAPER_IMPORT_FAILED", test.failure, test.applied, picker.selectedIndex)
             else console.info("WALLPAPER_IMPORT_SERVICE_OK")

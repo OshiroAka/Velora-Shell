@@ -604,8 +604,9 @@ Scope {
             defaultsData, "lockPreview.sharedWidgets.items", [])
         const configuredWidgets = Array.isArray(explicitWidgets)
             ? explicitWidgets : defaultWidgets
+        const freshConfiguration = Object.keys(userData).length === 0
         const documentVersion = Number(userData.schemaVersion
-            || (Object.keys(userData).length === 0 ? supportedSchemaVersion : 1))
+            || (freshConfiguration ? supportedSchemaVersion : 1))
         desktopLayoutSeed = String(valueAt(userData,
             "lockPreview.sharedWidgets.layoutSeed",
             Object.keys(userData).length === 0
@@ -619,16 +620,21 @@ Scope {
             requestedTemplate, templateForSeed(desktopLayoutSeed))
         const hasLogicalWidgets = Array.isArray(explicitWidgets)
             && logicalWidgetSetComplete(explicitWidgets)
-        if (hasLogicalWidgets && documentVersion >= 4) {
+        const usesDefaultWidgets = !Array.isArray(explicitWidgets)
+            && (freshConfiguration || (documentVersion >= 4 && !Array.isArray(explicitScene)))
+        let nextWidgets
+        if (usesDefaultWidgets || (hasLogicalWidgets && documentVersion >= 4)) {
             // Stored coordinates are authoritative. Older releases rebuilt a
             // named template here and could move every card after a restart.
-            sharedWidgets = normalizedSharedWidgets(explicitWidgets)
+            nextWidgets = normalizedSharedWidgets(configuredWidgets)
             desktopLayoutTemplate = "custom"
         } else {
-            sharedWidgets = migratedSharedWidgets(
+            nextWidgets = migratedSharedWidgets(
                 configuredWidgets, configuredScene, defaultWidgets,
                 desktopLayoutTemplate, desktopLayoutSeed)
         }
+        if (JSON.stringify(sharedWidgets) !== JSON.stringify(nextWidgets))
+            sharedWidgets = nextWidgets
 
         const resolvedDock = valueAt(resolved, "lockPreview.dock", [])
         dockEntries = Array.isArray(resolvedDock) ? clone(resolvedDock.slice(0, 12)) : []
@@ -951,6 +957,9 @@ Scope {
                     break
                 }
             }
+            // A missing battery in an existing layout was always opt-in.
+            if (kind === "battery" && !byKind[kind] && fallback)
+                fallback = Object.assign({}, fallback, { desktopEnabled: false })
             result.push(normalizedSharedWidget(byKind[kind] || fallback || {
                 id: "shared-" + kind, kind: kind
             }, index))
@@ -990,6 +999,8 @@ Scope {
                 }
             }
             const layer = layerForSharedKind(layers, widget.kind)
+            if (widget.kind === "battery" && !legacyWidget)
+                widget.desktopEnabled = false
             if (legacyWidget) {
                 widget.lock = normalizedWidgetTransform(
                     legacyWidget.lock, widget.lock)

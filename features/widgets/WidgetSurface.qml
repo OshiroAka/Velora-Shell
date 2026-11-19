@@ -5,6 +5,8 @@ GlassPanel {
     required property var theme
     property var itemStyle: ({})
     property string variantId: "editorial"
+    property int motionDuration: 0
+    readonly property bool animateContent: motionDuration > 0 && visible
     readonly property string contentFont: customFont.name.length ? customFont.name
         : String(itemStyle.fontFamily || theme.bodyFont)
     readonly property real fontScale: Number(itemStyle.fontScale || 1)

@@ -8,6 +8,8 @@ for option in "$@"; do
 done
 
 cache_root="$HOME/.cache/velora-shell"
+scanner_path="$(readlink -f -- "${BASH_SOURCE[0]}")"
+bundled_wallpaper="$(dirname -- "$(dirname -- "$scanner_path")")/assets/wallpapers/velora.png"
 cache_live="$cache_root/live-previews"
 cache_engine="$cache_root/engine-previews"
 cache_metadata="$cache_root/wallpaper-metadata-v2"
@@ -51,7 +53,7 @@ find "$cache_ram" -type f -mmin +720 -delete >/dev/null 2>&1 || true
 # Validate cached listings against local library contents, not only their age.
 # Include relative paths, sizes and nanosecond mtimes so additions, removals and
 # replaced files invalidate both output formats without rebuilding thumbnails.
-library_signature="$(python3 - "$HOME/Pictures/Wallpapers" <<'PYTHON'
+library_signature="$(python3 - "$HOME/Pictures/Wallpapers" "$bundled_wallpaper" <<'PYTHON'
 import hashlib, os, sys
 root = sys.argv[1]
 rows = []
@@ -66,7 +68,12 @@ for directory, folders, files in os.walk(root):
         except OSError:
             continue
         rows.append((os.path.relpath(path, root), info.st_size, info.st_mtime_ns))
-print(hashlib.sha256(repr(('recursive-library-v1', rows)).encode()).hexdigest())
+try:
+    info = os.stat(sys.argv[2])
+    rows.append((sys.argv[2], info.st_size, info.st_mtime_ns))
+except OSError:
+    pass
+print(hashlib.sha256(repr(('recursive-library-v2', rows)).encode()).hexdigest())
 PYTHON
 )"
 
@@ -425,6 +432,9 @@ trap 'rm -f "$tmp_list"' EXIT
 
 {
   printf 'BEGIN\n'
+  if [ -f "$bundled_wallpaper" ]; then
+    emit_wallpaper static "$bundled_wallpaper" "$(cache_preview_ram "$bundled_wallpaper")" Velora img
+  fi
   emit_static_dir "$HOME/Pictures/Wallpapers"
   emit_live_dir "$HOME/Pictures/Wallpapers"
   emit_engine_root "$HOME/.steam/steam/steamapps/workshop/content/431960"

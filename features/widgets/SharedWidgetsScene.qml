@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Effects
 import "../../core" as Core
+import "../../components" as Components
 import "../../core/SurfaceGeometry.js" as Geometry
 import "../../core/WidgetCatalog.js" as WidgetCatalog
 
@@ -44,6 +45,16 @@ Item {
     readonly property real designOriginX: (width - 1600 * designScale) / 2
     readonly property real designOriginY: (height - 900 * designScale) / 2
     readonly property bool interactionEnabled: !transition.running && !editing
+    readonly property bool detailsEnabled: interactionEnabled && !lockPresented && visible
+    readonly property int contentMotionDuration: detailsEnabled && !motion.reduced
+        ? Math.round(340 * motion.pace) : 0
+    readonly property string detailsContext: camera ? String(camera.workspace ?? "") : ""
+    property Item expandedWidget: null
+    property bool detailsOpen: false
+    readonly property Item detailsHitItem: detailsOpen && detailPanel.visible ? detailPanel : null
+    onDetailsEnabledChanged: if (!detailsEnabled) detailsOpen = false
+    onDetailsContextChanged: detailsOpen = false
+    onInfiniteDesktopEnabledChanged: detailsOpen = false
     readonly property bool layoutMorphing: editor.layoutTransitioning
     readonly property int layoutMorphDuration: motion.reduced ? 0 : 680
     readonly property bool moduleCaustics: lockPresented
@@ -59,6 +70,17 @@ Item {
 
     function widget(kind) {
         return config.sharedWidgetByKind(kind)
+    }
+
+    function toggleDetails(item) {
+        if (!detailsEnabled || !item.visible)
+            return
+        if (detailsOpen && expandedWidget === item) {
+            detailsOpen = false
+        } else {
+            expandedWidget = item
+            detailsOpen = true
+        }
     }
 
     function dynamicBlurItem(index) {
@@ -136,6 +158,9 @@ Item {
     component SharedWidget: Item {
         id: widgetItem
         required property string kind
+        readonly property bool hasDetails: ["clock", "weather", "system", "battery"].includes(kind)
+        readonly property bool detailsSelected: root.detailsOpen && root.expandedWidget === widgetItem
+        onVisibleChanged: if (!visible && detailsSelected) root.detailsOpen = false
         readonly property var widgetData: root.widget(kind)
         readonly property int stagger: widgetData
             ? Number(widgetData.stagger) : 0
@@ -264,6 +289,42 @@ Item {
             property string itemVariant: widgetItem.currentVariant
             sourceComponent: root.componentForKind(widgetItem.kind)
         }
+
+        Item {
+            id: detailsButton
+            objectName: "widgetDetailsButton." + widgetItem.kind
+            anchors.right: parent.right; anchors.rightMargin: 8
+            y: widgetItem.kind === "weather" ? parent.height - height - 7 : 7
+            width: 32; height: 32
+            visible: widgetItem.hasDetails && root.detailsEnabled
+            enabled: visible
+            activeFocusOnTab: enabled
+            Accessible.role: Accessible.Button
+            Accessible.name: (widgetItem.detailsSelected ? "Fechar detalhes · " : "Abrir detalhes · ")
+                + (({clock: "Relógio", weather: "Clima", system: "Sistema", battery: "Bateria"})[widgetItem.kind] || "")
+            Accessible.onPressAction: root.toggleDetails(widgetItem)
+            Keys.onSpacePressed: root.toggleDetails(widgetItem)
+            Keys.onReturnPressed: root.toggleDetails(widgetItem)
+            Keys.onEscapePressed: root.detailsOpen = false
+            Components.VeloraMaterialIcon {
+                anchors.centerIn: parent; width: 18; height: 18
+                iconName: "expand_more"
+                iconColor: root.theme.moduleInk
+                opacity: widgetItem.detailsSelected || detailsButton.activeFocus ? .95 : .5
+                rotation: widgetItem.detailsSelected ? 180 : 0
+                Behavior on rotation {
+                    NumberAnimation { duration: root.contentMotionDuration; easing.type: Easing.OutCubic }
+                }
+            }
+        }
+        MouseArea {
+            // The system panel's volume control keeps its own click area.
+            anchors.fill: widgetItem.kind === "system" && widgetItem.currentVariant !== "metrics"
+                && widgetItem.currentVariant !== "minimal" ? detailsButton : parent
+            enabled: detailsButton.enabled
+            cursorShape: Qt.PointingHandCursor
+            onClicked: root.toggleDetails(widgetItem)
+        }
     }
 
     function componentForKind(kind) {
@@ -282,6 +343,7 @@ Item {
             anchors.fill: parent
             theme: root.theme
             clock: root.clock
+            motionDuration: root.contentMotionDuration
             itemStyle: parent.itemStyle
             variantId: parent.itemVariant
             nativeOptics: true
@@ -302,6 +364,7 @@ Item {
             anchors.fill: parent
             theme: root.theme
             motion: root.motion
+            motionDuration: root.contentMotionDuration
             clock: root.clock
             weather: root.weather
             itemStyle: parent.itemStyle
@@ -323,6 +386,7 @@ Item {
             media: root.media
             theme: root.theme
             motion: root.motion
+            motionDuration: root.contentMotionDuration
             fallbackArt: root.config.avatarPath
             itemStyle: parent.itemStyle
             variantId: parent.itemVariant
@@ -359,6 +423,7 @@ Item {
             status: root.status
             theme: root.theme
             motion: root.motion
+            motionDuration: root.contentMotionDuration
             itemStyle: parent.itemStyle
             variantId: parent.itemVariant
             nativeOptics: true
@@ -376,6 +441,7 @@ Item {
         BatteryCard {
             anchors.fill: parent
             status: root.status
+            motionDuration: root.contentMotionDuration
             theme: root.theme
             itemStyle: parent.itemStyle
             variantId: parent.itemVariant
@@ -431,4 +497,49 @@ Item {
     SharedWidget { id: sharedGallery; kind: "gallery" }
     SharedWidget { id: sharedSystem; kind: "system" }
     SharedWidget { id: sharedBattery; kind: "battery" }
+
+    Loader {
+        id: detailPanel
+        z: 30
+        objectName: "widgetDetailsPanel"
+        property real reveal: root.detailsOpen ? 1 : 0
+        readonly property real inset: 12
+        readonly property real leftEdge: root.config.topbarEnabled && !root.barOnRight ? 64 + inset : inset
+        readonly property real rightEdge: root.width - inset - (root.config.topbarEnabled && root.barOnRight ? 64 : 0)
+        readonly property real topEdge: root.config.topbarEnabled ? 40 + inset : inset
+        readonly property rect anchorBox: {
+            const anchor = root.expandedWidget
+            if (!anchor || !Number.isFinite(anchor.x + anchor.y + anchor.scale + anchor.rotation))
+                return Qt.rect(0, 0, 0, 0)
+            return anchor.mapToItem(root, Qt.rect(0, 0, anchor.width, anchor.height))
+        }
+        readonly property bool nearBottom: anchorBox.y + anchorBox.height / 2 > root.height * .60
+        readonly property real anchorRight: anchorBox.x + anchorBox.width
+        readonly property real anchorBottom: anchorBox.y + anchorBox.height
+        readonly property bool openBeside: nearBottom && anchorRight + 8 + width <= rightEdge
+        readonly property real anchorX: openBeside ? anchorRight + 8
+            : anchorBox.x > root.width / 2 ? anchorRight - width : anchorBox.x
+        readonly property real anchorY: openBeside ? anchorBottom - height
+            : nearBottom ? anchorBox.y - height - 8 : anchorBottom + 8
+        width: Math.max(0, Math.min(306, rightEdge - leftEdge))
+        height: item ? item.implicitHeight : 0
+        x: Math.max(leftEdge, Math.min(rightEdge - width, anchorX))
+        y: Math.max(topEdge, Math.min(root.height - inset - height, anchorY)) + 6 * (1 - reveal)
+        opacity: reveal
+        visible: reveal > 0
+        active: root.detailsOpen || visible
+        enabled: root.detailsOpen && root.detailsEnabled
+        Behavior on reveal {
+            NumberAnimation { duration: Math.round(root.contentMotionDuration * .65); easing.type: Easing.OutCubic }
+        }
+        sourceComponent: WidgetDetails {
+            kind: root.expandedWidget ? root.expandedWidget.kind : ""
+            theme: root.theme
+            clock: root.clock
+            weather: root.weather
+            status: root.status
+            onCloseRequested: root.detailsOpen = false
+        }
+        Keys.onEscapePressed: root.detailsOpen = false
+    }
 }

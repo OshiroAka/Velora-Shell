@@ -1,0 +1,42 @@
+{
+  "checksum": "e78613b4bca4295966001453862da1b8",
+  "alpha": "100",
+  "special": {
+    "background": "#131d26",
+    "foreground": "#f6f4f1",
+    "cursor": "#626868"
+  },
+  "colors": {
+    "color0": "#131d26",
+    "color1": "#626868",
+    "color2": "#696866",
+    "color3": "#7a746e",
+    "color4": "#937b73",
+    "color5": "#9a8c81",
+    "color6": "#a09186",
+    "color7": "#f6f4f1",
+    "color8": "#bbbcbc",
+    "color9": "#636c6e",
+    "color10": "#82817e",
+    "color11": "#a39b93",
+    "color12": "#c5a49a",
+    "color13": "#cebbad",
+    "color14": "#d6c2b3",
+    "color15": "#f6f4f1"
+  },
+  "tone": "dark",
+  "velora": {
+    "primary": "#626868",
+    "secondary": "#696866",
+    "soft": "#838786",
+    "exactSurface": true,
+    "muted": "#bbbcbc",
+    "surfaces": [
+      "#3f5158",
+      "#131d26",
+      "#20303b",
+      "#61696b",
+      "#000000"
+    ]
+  }
+}
